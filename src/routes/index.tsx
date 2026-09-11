@@ -1,24 +1,185 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
+import { useEffect, useState } from "react";
+import {
+  Ruler,
+  Users,
+  Scissors,
+  Wallet,
+  CalendarDays,
+  ReceiptText,
+  ShieldCheck,
+  Smartphone,
+  ArrowRight,
+} from "lucide-react";
 
-// No head() here: the home route inherits title/description/og/twitter from
-// __root.tsx, and ships no og:image so serve-time hosting can inject the
-// project's social preview (explicit og:image or latest screenshot).
+import { Button } from "@/components/ui/button";
+import heroImage from "@/assets/hero-atelier.jpg";
+import { supabase } from "@/integrations/supabase/client";
+
 export const Route = createFileRoute("/")({
-  component: Index,
+  head: () => ({
+    meta: [
+      { title: "CouturPro — Le logiciel des couturiers du Burkina Faso" },
+      {
+        name: "description",
+        content:
+          "Clients, carnet de mesures, commandes, paiements et rendez-vous : gérez tout votre atelier de couture depuis votre téléphone. Montants en FCFA.",
+      },
+      { property: "og:title", content: "CouturPro — Gestion d'atelier de couture" },
+      {
+        property: "og:description",
+        content:
+          "Ne perdez plus une mesure ni une échéance. CouturPro centralise clients, mesures, commandes, paiements et rendez-vous.",
+      },
+    ],
+  }),
+  component: Landing,
 });
 
-// IMPORTANT: Replace this placeholder. See ./README.md for routing conventions.
-function Index() {
+const features = [
+  {
+    icon: Users,
+    title: "Fiches clients",
+    text: "Nom, téléphone, WhatsApp, quartier, photo et notes personnelles de chaque client.",
+  },
+  {
+    icon: Ruler,
+    title: "Carnet de mesures",
+    text: "Modèles Homme, Femme, Enfant. Chaque relevé est daté et l'historique est conservé.",
+  },
+  {
+    icon: Scissors,
+    title: "Commandes suivies",
+    text: "De « Nouvelle » à « Livrée », avec photo du modèle, du tissu et alerte de retard.",
+  },
+  {
+    icon: Wallet,
+    title: "Paiements en FCFA",
+    text: "Espèces, Orange Money, Moov Money, Wave. Avance, reste à payer, tout est clair.",
+  },
+  {
+    icon: CalendarDays,
+    title: "Rendez-vous",
+    text: "Prise de mesures, essayage, retouche, livraison : votre agenda du jour et de la semaine.",
+  },
+  {
+    icon: ReceiptText,
+    title: "Reçus imprimables",
+    text: "Un bon de commande propre au nom de votre atelier, en un clic.",
+  },
+];
+
+function Landing() {
+  const [signedIn, setSignedIn] = useState(false);
+
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data }) => setSignedIn(!!data.session));
+  }, []);
+
   return (
-    <div
-      className="flex min-h-screen items-center justify-center"
-      style={{ backgroundColor: "#fcfbf8" }}
-    >
-      <img
-        data-lovable-blank-page-placeholder="REMOVE_THIS"
-        src="https://cdn.gpteng.co/blank-app-v1.svg"
-        alt="Your app will live here!"
-      />
+    <div className="min-h-screen bg-background">
+      <div className="faso-stripes h-2 w-full" />
+      <header className="mx-auto flex max-w-6xl items-center justify-between px-5 py-4">
+        <span className="flex items-center gap-2 font-display text-lg font-bold">
+          <span className="flex size-9 items-center justify-center rounded-xl bg-primary text-primary-foreground">
+            <Scissors className="size-5" />
+          </span>
+          CouturPro
+        </span>
+        <Button asChild variant="secondary" size="sm">
+          <Link to={signedIn ? "/dashboard" : "/auth"}>
+            {signedIn ? "Mon atelier" : "Se connecter"}
+          </Link>
+        </Button>
+      </header>
+
+      <main>
+        <section className="mx-auto grid max-w-6xl items-center gap-10 px-5 pb-16 pt-8 lg:grid-cols-2 lg:pt-16">
+          <div>
+            <span className="chip-new">Pensé pour le Burkina Faso 🇧🇫</span>
+            <h1 className="mt-4 text-4xl font-bold leading-tight sm:text-5xl">
+              Votre atelier de couture, enfin bien organisé
+            </h1>
+            <p className="mt-5 max-w-xl text-base text-muted-foreground sm:text-lg">
+              Fini les carnets perdus et les mesures introuvables. Enregistrez vos clients, leurs
+              mesures, vos commandes et vos paiements — depuis votre téléphone, en quelques
+              secondes.
+            </p>
+            <div className="mt-7 flex flex-wrap gap-3">
+              <Button asChild size="lg">
+                <Link to={signedIn ? "/dashboard" : "/auth"}>
+                  Ouvrir mon atelier <ArrowRight className="ml-1 size-4" />
+                </Link>
+              </Button>
+              <Button asChild size="lg" variant="outline">
+                <a href="#fonctions">Voir les fonctions</a>
+              </Button>
+            </div>
+            <div className="mt-8 flex flex-wrap gap-5 text-sm text-muted-foreground">
+              <span className="flex items-center gap-2">
+                <Smartphone className="size-4 text-primary" /> Sur téléphone d'abord
+              </span>
+              <span className="flex items-center gap-2">
+                <ShieldCheck className="size-4 text-primary" /> Vos données restent privées
+              </span>
+              <span className="flex items-center gap-2">
+                <Wallet className="size-4 text-primary" /> Montants en FCFA
+              </span>
+            </div>
+          </div>
+          <div className="relative">
+            <div className="overflow-hidden rounded-3xl border border-border shadow-[var(--shadow-raised)]">
+              <img
+                src={heroImage}
+                alt="Couturier burkinabè travaillant sur un tissu Faso Dan Fani dans son atelier"
+                width={1600}
+                height={1104}
+                className="h-full w-full object-cover"
+              />
+            </div>
+          </div>
+        </section>
+
+        <section id="fonctions" className="bg-surface py-16">
+          <div className="mx-auto max-w-6xl px-5">
+            <h2 className="text-2xl font-bold sm:text-3xl">Tout ce qu'il faut, rien de compliqué</h2>
+            <p className="mt-3 max-w-2xl text-muted-foreground">
+              Trois questions résolues : où sont les mesures de mon client, quelles commandes livrer
+              et pour quand, combien reste-t-il à encaisser.
+            </p>
+            <div className="mt-10 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+              {features.map((f) => (
+                <div key={f.title} className="card-soft p-5">
+                  <span className="flex size-10 items-center justify-center rounded-xl bg-primary/10 text-primary">
+                    <f.icon className="size-5" />
+                  </span>
+                  <h3 className="mt-4 text-base font-semibold">{f.title}</h3>
+                  <p className="mt-1.5 text-sm text-muted-foreground">{f.text}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        </section>
+
+        <section className="mx-auto max-w-6xl px-5 py-16">
+          <div className="card-soft flex flex-col items-start gap-6 p-8 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <h2 className="text-2xl font-bold">Créez votre atelier en 1 minute</h2>
+              <p className="mt-2 text-muted-foreground">
+                Un compte, votre nom d'atelier, et vous pouvez déjà enregistrer votre premier
+                client.
+              </p>
+            </div>
+            <Button asChild size="lg">
+              <Link to="/auth">Commencer</Link>
+            </Button>
+          </div>
+        </section>
+      </main>
+
+      <footer className="border-t border-border py-8 text-center text-sm text-muted-foreground">
+        CouturPro — gestion d'atelier de couture. Ouagadougou, Burkina Faso.
+      </footer>
     </div>
   );
 }
