@@ -25,16 +25,14 @@ export function StatCard({
   label,
   value,
   hint,
-  to,
   icon: Icon,
 }: {
   label: string;
   value: ReactNode;
-  hint?: string;
-  to?: string;
-  icon?: React.ComponentType<{ className?: string }>;
+  hint?: string | undefined;
+  icon?: React.ComponentType<{ className?: string }> | undefined;
 }) {
-  const body = (
+  return (
     <div className="card-soft h-full p-4">
       <div className="flex items-center justify-between gap-2">
         <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{label}</p>
@@ -44,13 +42,6 @@ export function StatCard({
       {hint && <p className="mt-1.5 text-xs text-muted-foreground">{hint}</p>}
     </div>
   );
-  return to ? (
-    <Link to={to} className="block transition-transform active:scale-[0.99]">
-      {body}
-    </Link>
-  ) : (
-    body
-  );
 }
 
 export function EmptyState({
@@ -59,7 +50,7 @@ export function EmptyState({
   action,
 }: {
   title: string;
-  text?: string;
+  text?: string | undefined;
   action?: ReactNode;
 }) {
   return (
@@ -85,13 +76,13 @@ export function ContactButtons({
   whatsapp,
   message,
 }: {
-  phone?: string | null;
-  whatsapp?: string | null;
-  message?: string;
+  phone?: string | null | undefined;
+  whatsapp?: string | null | undefined;
+  message?: string | undefined;
 }) {
   const wa = waLink(whatsapp || phone, message);
   return (
-    <div className="flex gap-2">
+    <div className="flex flex-wrap gap-2">
       {phone && (
         <a
           href={`tel:${phone.replace(/\s/g, "")}`}
@@ -124,9 +115,10 @@ export function StoredImage({
   className?: string;
 }) {
   const { data, isLoading } = useSignedUrl(path);
+  const cls = className ?? "size-16 rounded-lg object-cover";
   if (!path) return null;
-  if (isLoading || !data) return <Skeleton className={className ?? "size-16 rounded-lg"} />;
-  return <img src={data} alt={alt} loading="lazy" className={className ?? "size-16 rounded-lg object-cover"} />;
+  if (isLoading || !data) return <Skeleton className={cls} />;
+  return <img src={data} alt={alt} loading="lazy" className={cls} />;
 }
 
 export function OrderCard({ order }: { order: OrderRow }) {
