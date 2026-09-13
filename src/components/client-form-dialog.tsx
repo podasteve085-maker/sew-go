@@ -40,15 +40,15 @@ export function ClientFormDialog({
     mutationFn: async (values: Record<string, string>) => {
       const payload = {
         business_id: businessId,
-        first_name: values.first_name,
-        last_name: values.last_name ?? "",
-        phone: values.phone || null,
-        whatsapp: values.whatsapp || null,
-        gender: values.gender || null,
-        birth_date: values.birth_date || null,
-        address: values.address || null,
-        city: values.city || null,
-        notes: values.notes || null,
+        first_name: values["first_name"] ?? "",
+        last_name: values["last_name"] ?? "",
+        phone: values["phone"] || null,
+        whatsapp: values["whatsapp"] || null,
+        gender: values["gender"] || null,
+        birth_date: values["birth_date"] || null,
+        address: values["address"] || null,
+        city: values["city"] || null,
+        notes: values["notes"] || null,
         photo_url: photoPath,
       };
       if (client) {
