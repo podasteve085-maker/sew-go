@@ -19,13 +19,14 @@ import { fullName } from "@/lib/format";
 import { ORDER_STATUS, type OrderStatus } from "@/lib/domain";
 import { Button } from "@/components/ui/button";
 import {
-  CommandDialog,
+  Command,
   CommandEmpty,
   CommandGroup,
   CommandInput,
   CommandItem,
   CommandList,
 } from "@/components/ui/command";
+import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 
 const NAV = [
   { to: "/dashboard", label: "Accueil", icon: Home },
@@ -221,7 +222,10 @@ function GlobalSearch({
   }
 
   return (
-    <CommandDialog open={open} onOpenChange={onOpenChange} shouldFilter={false}>
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="overflow-hidden p-0">
+        <DialogTitle className="sr-only">Recherche</DialogTitle>
+        <Command shouldFilter={false}>
       <CommandInput
         placeholder="Nom du client, téléphone, n° de commande…"
         value={term}
@@ -276,6 +280,8 @@ function GlobalSearch({
           </CommandGroup>
         )}
       </CommandList>
-    </CommandDialog>
+    </Command>
+      </DialogContent>
+    </Dialog>
   );
 }
