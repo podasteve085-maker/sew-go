@@ -15,6 +15,8 @@ import { Route as AuthRouteImport } from './routes/auth'
 import { Route as AuthenticatedDashboardRouteImport } from './routes/_authenticated/dashboard'
 import { Route as AuthenticatedClientsIndexRouteImport } from './routes/_authenticated/clients.index'
 import { Route as AuthenticatedClientsClientIdRouteImport } from './routes/_authenticated/clients.$clientId'
+import { Route as AuthenticatedCommandesIndexRouteImport } from './routes/_authenticated/commandes.index'
+import { Route as AuthenticatedCommandesNouvelleRouteImport } from './routes/_authenticated/commandes.nouvelle'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -47,20 +49,36 @@ const AuthenticatedClientsClientIdRoute =
     path: '/clients/$clientId',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
+const AuthenticatedCommandesIndexRoute =
+  AuthenticatedCommandesIndexRouteImport.update({
+    id: '/commandes/',
+    path: '/commandes/',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
+const AuthenticatedCommandesNouvelleRoute =
+  AuthenticatedCommandesNouvelleRouteImport.update({
+    id: '/commandes/nouvelle',
+    path: '/commandes/nouvelle',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/auth': typeof AuthRoute
   '/dashboard': typeof AuthenticatedDashboardRoute
   '/clients/$clientId': typeof AuthenticatedClientsClientIdRoute
+  '/commandes/nouvelle': typeof AuthenticatedCommandesNouvelleRoute
   '/clients/': typeof AuthenticatedClientsIndexRoute
+  '/commandes/': typeof AuthenticatedCommandesIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/auth': typeof AuthRoute
   '/dashboard': typeof AuthenticatedDashboardRoute
   '/clients/$clientId': typeof AuthenticatedClientsClientIdRoute
+  '/commandes/nouvelle': typeof AuthenticatedCommandesNouvelleRoute
   '/clients': typeof AuthenticatedClientsIndexRoute
+  '/commandes': typeof AuthenticatedCommandesIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -69,13 +87,29 @@ export interface FileRoutesById {
   '/auth': typeof AuthRoute
   '/_authenticated/dashboard': typeof AuthenticatedDashboardRoute
   '/_authenticated/clients/$clientId': typeof AuthenticatedClientsClientIdRoute
+  '/_authenticated/commandes/nouvelle': typeof AuthenticatedCommandesNouvelleRoute
   '/_authenticated/clients/': typeof AuthenticatedClientsIndexRoute
+  '/_authenticated/commandes/': typeof AuthenticatedCommandesIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/auth' | '/dashboard' | '/clients/$clientId' | '/clients/'
+  fullPaths:
+    | '/'
+    | '/auth'
+    | '/dashboard'
+    | '/clients/$clientId'
+    | '/commandes/nouvelle'
+    | '/clients/'
+    | '/commandes/'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/auth' | '/dashboard' | '/clients/$clientId' | '/clients'
+  to:
+    | '/'
+    | '/auth'
+    | '/dashboard'
+    | '/clients/$clientId'
+    | '/commandes/nouvelle'
+    | '/clients'
+    | '/commandes'
   id:
     | '__root__'
     | '/'
@@ -83,7 +117,9 @@ export interface FileRouteTypes {
     | '/auth'
     | '/_authenticated/dashboard'
     | '/_authenticated/clients/$clientId'
+    | '/_authenticated/commandes/nouvelle'
     | '/_authenticated/clients/'
+    | '/_authenticated/commandes/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -136,19 +172,37 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedClientsClientIdRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/_authenticated/commandes/': {
+      id: '/_authenticated/commandes/'
+      path: '/commandes'
+      fullPath: '/commandes/'
+      preLoaderRoute: typeof AuthenticatedCommandesIndexRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/commandes/nouvelle': {
+      id: '/_authenticated/commandes/nouvelle'
+      path: '/commandes/nouvelle'
+      fullPath: '/commandes/nouvelle'
+      preLoaderRoute: typeof AuthenticatedCommandesNouvelleRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
   }
 }
 
 interface AuthenticatedRouteRouteChildren {
   AuthenticatedDashboardRoute: typeof AuthenticatedDashboardRoute
   AuthenticatedClientsClientIdRoute: typeof AuthenticatedClientsClientIdRoute
+  AuthenticatedCommandesNouvelleRoute: typeof AuthenticatedCommandesNouvelleRoute
   AuthenticatedClientsIndexRoute: typeof AuthenticatedClientsIndexRoute
+  AuthenticatedCommandesIndexRoute: typeof AuthenticatedCommandesIndexRoute
 }
 
 const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedDashboardRoute: AuthenticatedDashboardRoute,
   AuthenticatedClientsClientIdRoute: AuthenticatedClientsClientIdRoute,
+  AuthenticatedCommandesNouvelleRoute: AuthenticatedCommandesNouvelleRoute,
   AuthenticatedClientsIndexRoute: AuthenticatedClientsIndexRoute,
+  AuthenticatedCommandesIndexRoute: AuthenticatedCommandesIndexRoute,
 }
 
 const AuthenticatedRouteRouteWithChildren =
