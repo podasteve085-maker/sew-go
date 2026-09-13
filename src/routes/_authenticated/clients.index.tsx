@@ -24,7 +24,7 @@ export const Route = createFileRoute("/_authenticated/clients/")({
       { property: "og:description", content: "Le carnet d'adresses de votre atelier de couture." },
     ],
   }),
-  component: ClientsPage;
+  component: ClientsPage,
 });
 
 function ClientsPage() {
