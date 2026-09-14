@@ -13,6 +13,7 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as AuthenticatedRouteRouteImport } from './routes/_authenticated/route'
 import { Route as AuthRouteImport } from './routes/auth'
 import { Route as AuthenticatedDashboardRouteImport } from './routes/_authenticated/dashboard'
+import { Route as AuthenticatedRendezVousRouteImport } from './routes/_authenticated/rendez-vous'
 import { Route as AuthenticatedClientsIndexRouteImport } from './routes/_authenticated/clients.index'
 import { Route as AuthenticatedClientsClientIdRouteImport } from './routes/_authenticated/clients.$clientId'
 import { Route as AuthenticatedCommandesIndexRouteImport } from './routes/_authenticated/commandes.index'
@@ -35,6 +36,11 @@ const AuthRoute = AuthRouteImport.update({
 const AuthenticatedDashboardRoute = AuthenticatedDashboardRouteImport.update({
   id: '/dashboard',
   path: '/dashboard',
+  getParentRoute: () => AuthenticatedRouteRoute,
+} as any)
+const AuthenticatedRendezVousRoute = AuthenticatedRendezVousRouteImport.update({
+  id: '/rendez-vous',
+  path: '/rendez-vous',
   getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
 const AuthenticatedClientsIndexRoute =
@@ -66,6 +72,7 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/auth': typeof AuthRoute
   '/dashboard': typeof AuthenticatedDashboardRoute
+  '/rendez-vous': typeof AuthenticatedRendezVousRoute
   '/clients/$clientId': typeof AuthenticatedClientsClientIdRoute
   '/commandes/nouvelle': typeof AuthenticatedCommandesNouvelleRoute
   '/clients/': typeof AuthenticatedClientsIndexRoute
@@ -75,6 +82,7 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/auth': typeof AuthRoute
   '/dashboard': typeof AuthenticatedDashboardRoute
+  '/rendez-vous': typeof AuthenticatedRendezVousRoute
   '/clients/$clientId': typeof AuthenticatedClientsClientIdRoute
   '/commandes/nouvelle': typeof AuthenticatedCommandesNouvelleRoute
   '/clients': typeof AuthenticatedClientsIndexRoute
@@ -86,6 +94,7 @@ export interface FileRoutesById {
   '/_authenticated': typeof AuthenticatedRouteRouteWithChildren
   '/auth': typeof AuthRoute
   '/_authenticated/dashboard': typeof AuthenticatedDashboardRoute
+  '/_authenticated/rendez-vous': typeof AuthenticatedRendezVousRoute
   '/_authenticated/clients/$clientId': typeof AuthenticatedClientsClientIdRoute
   '/_authenticated/commandes/nouvelle': typeof AuthenticatedCommandesNouvelleRoute
   '/_authenticated/clients/': typeof AuthenticatedClientsIndexRoute
@@ -97,6 +106,7 @@ export interface FileRouteTypes {
     | '/'
     | '/auth'
     | '/dashboard'
+    | '/rendez-vous'
     | '/clients/$clientId'
     | '/commandes/nouvelle'
     | '/clients/'
@@ -106,6 +116,7 @@ export interface FileRouteTypes {
     | '/'
     | '/auth'
     | '/dashboard'
+    | '/rendez-vous'
     | '/clients/$clientId'
     | '/commandes/nouvelle'
     | '/clients'
@@ -116,6 +127,7 @@ export interface FileRouteTypes {
     | '/_authenticated'
     | '/auth'
     | '/_authenticated/dashboard'
+    | '/_authenticated/rendez-vous'
     | '/_authenticated/clients/$clientId'
     | '/_authenticated/commandes/nouvelle'
     | '/_authenticated/clients/'
@@ -158,6 +170,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedDashboardRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/_authenticated/rendez-vous': {
+      id: '/_authenticated/rendez-vous'
+      path: '/rendez-vous'
+      fullPath: '/rendez-vous'
+      preLoaderRoute: typeof AuthenticatedRendezVousRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
     '/_authenticated/clients/': {
       id: '/_authenticated/clients/'
       path: '/clients'
@@ -191,6 +210,7 @@ declare module '@tanstack/react-router' {
 
 interface AuthenticatedRouteRouteChildren {
   AuthenticatedDashboardRoute: typeof AuthenticatedDashboardRoute
+  AuthenticatedRendezVousRoute: typeof AuthenticatedRendezVousRoute
   AuthenticatedClientsClientIdRoute: typeof AuthenticatedClientsClientIdRoute
   AuthenticatedCommandesNouvelleRoute: typeof AuthenticatedCommandesNouvelleRoute
   AuthenticatedClientsIndexRoute: typeof AuthenticatedClientsIndexRoute
@@ -199,6 +219,7 @@ interface AuthenticatedRouteRouteChildren {
 
 const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedDashboardRoute: AuthenticatedDashboardRoute,
+  AuthenticatedRendezVousRoute: AuthenticatedRendezVousRoute,
   AuthenticatedClientsClientIdRoute: AuthenticatedClientsClientIdRoute,
   AuthenticatedCommandesNouvelleRoute: AuthenticatedCommandesNouvelleRoute,
   AuthenticatedClientsIndexRoute: AuthenticatedClientsIndexRoute,

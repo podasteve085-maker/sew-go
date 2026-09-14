@@ -8,7 +8,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useBusiness } from "@/hooks/use-business";
 import { fetchAppointments, fetchClients } from "@/lib/queries";
 import { APPOINTMENT_TYPES, appointmentLabel } from "@/lib/domain";
-import { dateLongFr, fullName, today, waLink } from "@/lib/format";
+import { dateLongFr, fullName, today } from "@/lib/format";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -309,4 +309,3 @@ function AppointmentDialog({
   );
 }
 
-export { waLink };
