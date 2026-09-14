@@ -81,8 +81,12 @@ function AuthPage() {
     if (error) {
       const lower = error.message.toLowerCase();
       let description = "Email ou mot de passe incorrect.";
-      if (lower.includes("email not confirmed")) {
-        description = "Votre email n'est pas encore confirmé. Confirmez-le ou désactivez la confirmation d'email dans votre console Supabase.";
+      if (lower.includes("invalid login credentials") || lower.includes("invalid credentials")) {
+        description = "Email ou mot de passe incorrect. Vérifiez votre saisie ou utilisez le lien « Mot de passe oublié ? » ci-dessous.";
+      } else if (lower.includes("email not confirmed")) {
+        description = "Votre email n'est pas encore confirmé. Utilisez le lien reçu par email ou contactez l'assistance.";
+      } else if (lower.includes("too many requests") || lower.includes("rate limit")) {
+        description = "Trop de tentatives consécutives. Veuillez patienter 2 minutes avant de réessayer.";
       } else if (error.message) {
         description = error.message;
       }
