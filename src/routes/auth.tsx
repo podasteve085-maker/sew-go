@@ -123,21 +123,33 @@ function AuthPage() {
       return;
     }
 
-    // Si pas de session immédiate retournée par signUp, on auto-connecte instantanément
-    if (!data.session) {
-      const { error: signInErr } = await supabase.auth.signInWithPassword({
-        email: emailVal,
-        password: passwordVal,
-      });
+    // Si Supabase retourne directement la session (auto-confirm actif)
+    if (data.session) {
       setLoading(false);
-      if (signInErr) {
-        toast.info("Atelier créé !", {
-          description: "Connectez-vous avec votre mot de passe.",
+      toast.success("Atelier créé avec succès !", { description: "Bienvenue sur CouturPro !" });
+      navigate({ to: "/dashboard", replace: true });
+      return;
+    }
+
+    // Si pas de session directe, tentative immédiate de connexion
+    const { error: signInErr } = await supabase.auth.signInWithPassword({
+      email: emailVal,
+      password: passwordVal,
+    });
+    setLoading(false);
+
+    if (signInErr) {
+      if (signInErr.message.toLowerCase().includes("email not confirmed")) {
+        toast.error("Vérification d'email requise", {
+          description:
+            "Un lien de confirmation a été envoyé à votre adresse email. Cliquez dessus pour activer votre compte.",
         });
-        return;
+      } else {
+        toast.info("Atelier créé !", {
+          description: "Connectez-vous avec vos identifiants.",
+        });
       }
-    } else {
-      setLoading(false);
+      return;
     }
 
     toast.success("Atelier créé avec succès !", { description: "Bienvenue sur CouturPro !" });
