@@ -132,23 +132,31 @@ function ClientsPage() {
                   </span>
                 )}
                 <div className="min-w-0 flex-1">
-                  <div className="flex items-center justify-between gap-1">
-                    <p className="truncate font-display text-sm font-semibold text-foreground hover:text-primary">
+                  <div className="flex items-center justify-between gap-1.5">
+                    <p className="truncate font-display text-sm font-bold text-foreground hover:text-primary">
                       {fullName(c)}
                     </p>
                     {c.gender && (
-                      <span className="rounded bg-muted px-1.5 py-0.5 text-[0.65rem] text-muted-foreground uppercase">
+                      <span
+                        className={`rounded-full px-2 py-0.5 text-[0.65rem] font-bold uppercase ${
+                          c.gender === "homme"
+                            ? "bg-blue-500/10 text-blue-700 dark:text-blue-400"
+                            : c.gender === "femme"
+                            ? "bg-purple-500/10 text-purple-700 dark:text-purple-400"
+                            : "bg-amber-500/10 text-amber-700 dark:text-amber-400"
+                        }`}
+                      >
                         {c.gender}
                       </span>
                     )}
                   </div>
-                  <p className="truncate text-xs text-muted-foreground">
+                  <p className="truncate text-xs font-medium text-muted-foreground">
                     {c.phone ?? "Sans téléphone"}
                   </p>
                   <p className="mt-0.5 flex items-center gap-1 truncate text-xs text-muted-foreground">
                     {c.city ? (
                       <>
-                        <MapPin className="size-3" /> {c.city}
+                        <MapPin className="size-3 text-muted-foreground/70" /> {c.city}
                       </>
                     ) : (
                       <>Client depuis le {dateFr(c.created_at)}</>
@@ -157,15 +165,15 @@ function ClientsPage() {
                 </div>
               </Link>
 
-              {/* Boutons d'action rapide WhatsApp / Appel */}
-              <div className="mt-3 flex items-center justify-end gap-2 border-t border-border pt-2.5">
+              {/* Boutons d'action tactile WhatsApp / Appel */}
+              <div className="mt-3.5 flex flex-wrap items-center justify-end gap-1.5 border-t border-border/80 pt-2.5">
                 {c.phone && (
                   <a
                     href={`tel:${cleanPhone(c.phone)}`}
-                    className="inline-flex h-7 items-center gap-1 rounded border border-border px-2 text-xs font-medium text-muted-foreground hover:bg-accent hover:text-foreground"
-                    title="Appeler"
+                    className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-border px-2.5 text-xs font-semibold text-muted-foreground transition-all hover:bg-accent hover:text-foreground active:scale-95"
+                    title={`Appeler ${c.first_name}`}
                   >
-                    <Phone className="size-3" /> Appeler
+                    <Phone className="size-3.5 text-primary" /> Appeler
                   </a>
                 )}
                 {(c.whatsapp || c.phone) && (
@@ -175,13 +183,13 @@ function ClientsPage() {
                     )}`}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="inline-flex h-7 items-center gap-1 rounded border border-success/30 bg-success/5 px-2 text-xs font-medium text-success hover:bg-success/15"
-                    title="WhatsApp"
+                    className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-success/30 bg-success/10 px-2.5 text-xs font-semibold text-success transition-all hover:bg-success/20 active:scale-95"
+                    title={`WhatsApp ${c.first_name}`}
                   >
-                    <MessageCircle className="size-3" /> WhatsApp
+                    <MessageCircle className="size-3.5" /> WhatsApp
                   </a>
                 )}
-                <Button size="sm" variant="ghost" className="h-7 text-xs" asChild>
+                <Button size="sm" variant="ghost" className="h-8 text-xs font-semibold" asChild>
                   <Link to="/clients/$clientId" params={{ clientId: c.id }}>
                     Fiche →
                   </Link>

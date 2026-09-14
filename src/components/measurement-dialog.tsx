@@ -201,63 +201,90 @@ export function MeasurementDialog({
             </div>
           )}
 
-          <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-1.5">
-              <Label htmlFor="template">Modèle de mesures</Label>
-              <select
-                id="template"
-                value={templateName}
-                onChange={(e) => pickTemplate(e.target.value)}
-                className="h-9 w-full rounded-md border border-input bg-card px-3 text-sm"
-              >
-                <option value="">Mesures personnalisées…</option>
-                {(templates.data ?? []).map((t) => (
-                  <option key={t.id} value={t.name}>
-                    {t.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="recorded_at">Date du relevé</Label>
-              <Input
-                id="recorded_at"
-                name="recorded_at"
-                type="date"
-                value={recordedAt}
-                onChange={(e) => setRecordedAt(e.target.value)}
-              />
+          {/* Sélecteur visuel de gabarits avec icônes */}
+          <div className="space-y-1.5">
+            <Label className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
+              Modèle de coupe :
+            </Label>
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+              {[
+                { name: "Homme", icon: "👔" },
+                { name: "Femme", icon: "👗" },
+                { name: "Enfant", icon: "🧒" },
+                { name: "", label: "Sur mesure", icon: "📐" },
+              ].map((tpl) => {
+                const isSelected = templateName === tpl.name;
+                return (
+                  <button
+                    key={tpl.name || "custom"}
+                    type="button"
+                    onClick={() => pickTemplate(tpl.name)}
+                    className={`flex flex-col items-center justify-center rounded-xl border p-2.5 text-center transition-all active:scale-95 ${
+                      isSelected
+                        ? "border-primary bg-primary/10 font-bold text-primary ring-2 ring-primary/40 shadow-xs"
+                        : "border-border bg-card text-foreground hover:bg-muted"
+                    }`}
+                  >
+                    <span className="text-xl">{tpl.icon}</span>
+                    <span className="mt-1 text-xs font-semibold">{tpl.label || tpl.name}</span>
+                  </button>
+                );
+              })}
             </div>
           </div>
 
-          <div className="space-y-2">
-            <Label>Mesures (en cm)</Label>
-            {fields.map((f, i) => (
-              <div key={`${f.name}-${i}`} className="flex items-center gap-2">
-                <span className="flex-1 text-sm font-medium">{f.name}</span>
-                <Input
-                  inputMode="decimal"
-                  value={f.value}
-                  onChange={(e) =>
-                    setFields((prev) =>
-                      prev.map((item, idx) =>
-                        idx === i ? { ...item, value: e.target.value } : item,
-                      ),
-                    )
-                  }
-                  className="w-24 font-semibold"
-                  placeholder="ex: 96"
-                />
-                <button
-                  type="button"
-                  onClick={() => setFields((prev) => prev.filter((_, idx) => idx !== i))}
-                  className="text-muted-foreground hover:text-destructive"
-                  aria-label={`Retirer ${f.name}`}
+          <div className="space-y-1.5">
+            <Label htmlFor="recorded_at">Date du relevé</Label>
+            <Input
+              id="recorded_at"
+              name="recorded_at"
+              type="date"
+              value={recordedAt}
+              onChange={(e) => setRecordedAt(e.target.value)}
+              className="h-10 text-base sm:text-sm"
+            />
+          </div>
+
+          <div className="space-y-2.5">
+            <Label className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
+              Mensurations (en centimètres)
+            </Label>
+            <div className="space-y-2 max-h-[45vh] overflow-y-auto pr-1">
+              {fields.map((f, i) => (
+                <div
+                  key={`${f.name}-${i}`}
+                  className="flex items-center gap-2 rounded-lg border border-border/60 bg-surface/50 p-2"
                 >
-                  <Trash2 className="size-4" />
-                </button>
-              </div>
-            ))}
+                  <span className="flex-1 text-sm font-semibold truncate" title={f.name}>
+                    {f.name}
+                  </span>
+                  <div className="flex items-center gap-1">
+                    <Input
+                      inputMode="decimal"
+                      value={f.value}
+                      onChange={(e) =>
+                        setFields((prev) =>
+                          prev.map((item, idx) =>
+                            idx === i ? { ...item, value: e.target.value } : item,
+                          ),
+                        )
+                      }
+                      className="h-10 w-24 text-center text-base font-bold sm:text-sm"
+                      placeholder="0"
+                    />
+                    <span className="text-xs font-bold text-muted-foreground">cm</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setFields((prev) => prev.filter((_, idx) => idx !== i))}
+                    className="flex size-9 items-center justify-center rounded-lg text-muted-foreground hover:bg-destructive/10 hover:text-destructive active:scale-90"
+                    aria-label={`Retirer ${f.name}`}
+                  >
+                    <Trash2 className="size-4" />
+                  </button>
+                </div>
+              ))}
+            </div>
 
             <div className="flex items-center gap-2 pt-2">
               <Input

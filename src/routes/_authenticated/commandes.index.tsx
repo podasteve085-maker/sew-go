@@ -36,7 +36,7 @@ export const Route = createFileRoute("/_authenticated/commandes/")({
 });
 
 function OrdersPage() {
-  const [filter, setFilter] = useState<(typeof FILTERS)[number]["value"]>("actives");
+  const [filter, setFilter] = useState<string>("actives");
   const [term, setTerm] = useState("");
   const orders = useQuery({ queryKey: ["orders"], queryFn: () => fetchOrders() });
 
@@ -47,7 +47,8 @@ function OrdersPage() {
       if (filter === "retard") return isLate(o);
       if (filter === "prete") return o.status === "prete";
       if (filter === "livree") return o.status === "livree";
-      return true;
+      if (filter === "toutes") return true;
+      return o.status === filter;
     });
     const q = term.trim().toLowerCase();
     if (!q) return byFilter;
@@ -70,9 +71,9 @@ function OrdersPage() {
     <div className="space-y-6">
       <SectionTitle
         action={
-          <Button asChild>
+          <Button asChild className="h-10 text-sm font-bold shadow-xs">
             <Link to="/commandes/nouvelle">
-              <Plus className="size-4" /> Nouvelle commande
+              <Plus className="mr-1 size-4.5" /> Nouvelle commande
             </Link>
           </Button>
         }
@@ -87,7 +88,7 @@ function OrdersPage() {
             value={term}
             onChange={(e) => setTerm(e.target.value)}
             placeholder="Référence, client ou vêtement…"
-            className="pl-9"
+            className="pl-9 h-10 text-base sm:text-sm"
           />
         </div>
         <div className="flex gap-2 overflow-x-auto pb-1">
@@ -96,10 +97,10 @@ function OrdersPage() {
               key={f.value}
               type="button"
               onClick={() => setFilter(f.value)}
-              className={`shrink-0 rounded-full border px-3.5 py-1.5 text-sm transition-colors ${
+              className={`shrink-0 rounded-full border px-3.5 py-1.5 text-xs sm:text-sm font-semibold transition-all active:scale-95 ${
                 filter === f.value
-                  ? "border-transparent bg-primary text-primary-foreground"
-                  : "border-border bg-card text-muted-foreground hover:text-foreground"
+                  ? "border-transparent bg-primary text-primary-foreground shadow-xs"
+                  : "border-border bg-card text-muted-foreground hover:text-foreground hover:bg-muted"
               }`}
             >
               {f.label}
@@ -108,12 +109,30 @@ function OrdersPage() {
         </div>
       </div>
 
-      <div className="flex flex-wrap gap-2 text-xs">
-        {(Object.keys(ORDER_STATUS) as OrderStatus[]).map((s) => (
-          <span key={s} className="rounded-full bg-surface px-2.5 py-1 text-muted-foreground">
-            {ORDER_STATUS[s].label} · {counts[s] ?? 0}
-          </span>
-        ))}
+      {/* Puces de filtres par statut interactives */}
+      <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
+        {(Object.keys(ORDER_STATUS) as OrderStatus[]).map((s) => {
+          const isSelected = filter === s;
+          const count = counts[s] ?? 0;
+          return (
+            <button
+              key={s}
+              type="button"
+              onClick={() => setFilter(isSelected ? "toutes" : s)}
+              className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold transition-all active:scale-95 ${
+                isSelected
+                  ? "bg-primary text-primary-foreground shadow-xs"
+                  : "bg-surface text-muted-foreground hover:bg-muted hover:text-foreground"
+              }`}
+            >
+              <span className={`size-2 rounded-full ${isSelected ? "bg-primary-foreground" : ORDER_STATUS[s].dot}`} />
+              <span>{ORDER_STATUS[s].label}</span>
+              <span className={`rounded-full px-1.5 py-0.2 text-[0.68rem] ${isSelected ? "bg-primary-foreground/25" : "bg-muted"}`}>
+                {count}
+              </span>
+            </button>
+          );
+        })}
       </div>
 
       {orders.isLoading ? (

@@ -165,11 +165,39 @@
     border-color: var(--color-border);
   }
 
+  html {
+    touch-action: manipulation;
+    -webkit-text-size-adjust: 100%;
+    scroll-behavior: smooth;
+  }
+
   body {
     background-color: var(--color-background);
     color: var(--color-foreground);
     font-family: var(--font-sans);
     -webkit-tap-highlight-color: transparent;
+    min-height: 100dvh;
+    overflow-x: hidden;
+  }
+
+  /* Évite le zoom automatique perturbateur d'iOS Safari lors du focus */
+  input,
+  select,
+  textarea {
+    font-size: 16px;
+  }
+  @media (min-width: 640px) {
+    input,
+    select,
+    textarea {
+      font-size: 0.875rem;
+    }
+  }
+
+  button,
+  a {
+    user-select: none;
+    -webkit-user-select: none;
   }
 
   h1,

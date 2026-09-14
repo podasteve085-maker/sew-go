@@ -9,6 +9,8 @@ import {
   Ruler,
   Plus,
   CheckCircle2,
+  Coins,
+  Sparkles,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -17,7 +19,7 @@ import { useBusiness } from "@/hooks/use-business";
 import { uploadImage } from "@/hooks/use-signed-url";
 import { fetchClients, fetchGarmentTypes, fetchMeasurementSets } from "@/lib/queries";
 import { IMAGE_KINDS, PAYMENT_METHODS } from "@/lib/domain";
-import { addDays, fullName, today, dateFr } from "@/lib/format";
+import { addDays, fullName, today, dateFr, fcfa } from "@/lib/format";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -68,14 +70,25 @@ function NewOrder() {
 
   const [garmentType, setGarmentType] = useState("");
   const [price, setPrice] = useState("");
+  const [deposit, setDeposit] = useState("");
   const [images, setImages] = useState<{ path: string; kind: string }[]>([]);
   const [uploading, setUploading] = useState(false);
   const [imageKind, setImageKind] = useState<string>("modele");
 
+  const PRESET_GARMENTS = [
+    { name: "Boubou", icon: "👔" },
+    { name: "Faso Dan Fani", icon: "🧵" },
+    { name: "Robe", icon: "👗" },
+    { name: "Chemise", icon: "👕" },
+    { name: "Pantalon", icon: "👖" },
+    { name: "Costume", icon: "🧥" },
+    { name: "Ensemble", icon: "✨" },
+  ];
+
   function onGarmentChange(val: string) {
     setGarmentType(val);
     const found = garments.data?.find((g) => g.name.toLowerCase() === val.toLowerCase());
-    if (found?.default_price && !price) {
+    if (found?.default_price) {
       setPrice(String(found.default_price));
     }
   }
@@ -255,6 +268,28 @@ function NewOrder() {
           </div>
         )}
 
+        {/* Raccourcis visuels rapides vêtements */}
+        <div className="space-y-1.5">
+          <Label className="text-xs text-muted-foreground">Modèles fréquents (1-clic pour choisir) :</Label>
+          <div className="flex flex-wrap gap-1.5">
+            {PRESET_GARMENTS.map((g) => (
+              <button
+                key={g.name}
+                type="button"
+                onClick={() => onGarmentChange(g.name)}
+                className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-semibold transition-all active:scale-95 ${
+                  garmentType.toLowerCase() === g.name.toLowerCase()
+                    ? "border-primary bg-primary text-primary-foreground shadow-xs"
+                    : "border-border bg-card text-foreground hover:bg-muted"
+                }`}
+              >
+                <span>{g.icon}</span>
+                <span>{g.name}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+
         <div className="grid gap-3 sm:grid-cols-2">
           <div className="space-y-1.5">
             <Label htmlFor="garment_type">Vêtement *</Label>
@@ -265,7 +300,7 @@ function NewOrder() {
               value={garmentType}
               onChange={(e) => onGarmentChange(e.target.value)}
               list="garment-list"
-              className="h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm"
+              className="h-10 w-full rounded-md border border-input bg-transparent px-3 text-base sm:text-sm"
               placeholder="Boubou, Faso Dan Fani, Robe…"
             />
             <datalist id="garment-list">
@@ -278,11 +313,11 @@ function NewOrder() {
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="fabric">Tissu</Label>
-            <Input id="fabric" name="fabric" placeholder="Faso Dan Fani, Bazin, Wax…" />
+            <Input id="fabric" name="fabric" placeholder="Faso Dan Fani, Bazin, Wax…" className="h-10 text-base sm:text-sm" />
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="quantity">Quantité</Label>
-            <Input id="quantity" name="quantity" type="number" min={1} defaultValue={1} />
+            <Input id="quantity" name="quantity" type="number" min={1} defaultValue={1} className="h-10 text-base sm:text-sm" />
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="price">Prix total (FCFA) *</Label>
@@ -296,15 +331,16 @@ function NewOrder() {
               value={price}
               onChange={(e) => setPrice(e.target.value)}
               placeholder="ex: 35000"
+              className="h-10 text-base font-bold sm:text-sm"
             />
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="ordered_at">Date de commande</Label>
-            <Input id="ordered_at" name="ordered_at" type="date" defaultValue={today()} />
+            <Input id="ordered_at" name="ordered_at" type="date" defaultValue={today()} className="h-10 text-base sm:text-sm" />
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="due_date">Date de livraison prévue</Label>
-            <Input id="due_date" name="due_date" type="date" defaultValue={addDays(7)} />
+            <Input id="due_date" name="due_date" type="date" defaultValue={addDays(7)} className="h-10 text-base sm:text-sm" />
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="deposit">Acompte versé (FCFA)</Label>
@@ -314,7 +350,10 @@ function NewOrder() {
               type="number"
               min={0}
               inputMode="numeric"
+              value={deposit}
+              onChange={(e) => setDeposit(e.target.value)}
               placeholder="ex: 15000"
+              className="h-10 text-base font-bold sm:text-sm"
             />
           </div>
           <div className="space-y-1.5">
@@ -322,7 +361,7 @@ function NewOrder() {
             <select
               id="deposit_method"
               name="deposit_method"
-              className="h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm"
+              className="h-10 w-full rounded-md border border-input bg-card px-3 text-base sm:text-sm"
             >
               {PAYMENT_METHODS.map((m) => (
                 <option key={m.value} value={m.value}>
@@ -331,6 +370,51 @@ function NewOrder() {
               ))}
             </select>
           </div>
+        </div>
+
+        {/* Calculateur financier visuel en direct */}
+        <div className="rounded-xl border border-border bg-surface p-3.5 sm:p-4">
+          <div className="flex items-center justify-between text-xs font-bold uppercase tracking-wide text-muted-foreground">
+            <span>Synthèse financière</span>
+            <Coins className="size-4 text-primary" />
+          </div>
+          <div className="mt-2.5 grid grid-cols-3 gap-2 text-center">
+            <div className="rounded-lg bg-card p-2 border border-border/60">
+              <p className="text-[0.65rem] uppercase font-semibold text-muted-foreground">Prix total</p>
+              <p className="mt-0.5 font-display text-sm sm:text-base font-bold text-foreground">
+                {fcfa(Number(price || 0))}
+              </p>
+            </div>
+            <div className="rounded-lg bg-card p-2 border border-border/60">
+              <p className="text-[0.65rem] uppercase font-semibold text-muted-foreground">Acompte</p>
+              <p className="mt-0.5 font-display text-sm sm:text-base font-bold text-primary">
+                {fcfa(Number(deposit || 0))}
+              </p>
+            </div>
+            <div
+              className={`rounded-lg p-2 border ${
+                Number(deposit || 0) > Number(price || 0)
+                  ? "border-destructive/40 bg-destructive/15 text-destructive"
+                  : Number(price || 0) > 0 && Number(price || 0) <= Number(deposit || 0)
+                  ? "border-success/40 bg-success/15 text-success"
+                  : "border-border/60 bg-card text-foreground"
+              }`}
+            >
+              <p className="text-[0.65rem] uppercase font-semibold">
+                {Number(deposit || 0) > Number(price || 0) ? "Alerte !" : "Reste à payer"}
+              </p>
+              <p className="mt-0.5 font-display text-sm sm:text-base font-bold">
+                {Number(deposit || 0) > Number(price || 0)
+                  ? "Dépassement"
+                  : fcfa(Math.max(0, Number(price || 0) - Number(deposit || 0)))}
+              </p>
+            </div>
+          </div>
+          {Number(deposit || 0) > Number(price || 0) && (
+            <p className="mt-2 text-center text-xs font-bold text-destructive">
+              ⚠️ Attention : l'acompte saisi ({fcfa(Number(deposit))}) est supérieur au prix total ({fcfa(Number(price))}).
+            </p>
+          )}
         </div>
 
         <div className="space-y-1.5">

@@ -16,14 +16,17 @@ export const ORDER_FLOW: OrderStatus[] = [
   "livree",
 ];
 
-export const ORDER_STATUS: Record<OrderStatus, { label: string; dot: string; chip: string }> = {
-  nouvelle: { label: "Nouvelle", dot: "bg-status-new", chip: "chip-new" },
-  preparation: { label: "En préparation", dot: "bg-status-prep", chip: "chip-prep" },
-  confection: { label: "En confection", dot: "bg-status-sewing", chip: "chip-sewing" },
-  finition: { label: "Finition", dot: "bg-status-finish", chip: "chip-finish" },
-  prete: { label: "Prête", dot: "bg-status-ready", chip: "chip-ready" },
-  livree: { label: "Livrée", dot: "bg-status-done", chip: "chip-done" },
-  annulee: { label: "Annulée", dot: "bg-status-cancel", chip: "chip-cancel" },
+export const ORDER_STATUS: Record<
+  OrderStatus,
+  { label: string; dot: string; chip: string; iconName: string }
+> = {
+  nouvelle: { label: "Nouvelle", dot: "bg-status-new", chip: "chip-new", iconName: "Sparkles" },
+  preparation: { label: "En préparation", dot: "bg-status-prep", chip: "chip-prep", iconName: "Scissors" },
+  confection: { label: "En confection", dot: "bg-status-sewing", chip: "chip-sewing", iconName: "Shirt" },
+  finition: { label: "Finition", dot: "bg-status-finish", chip: "chip-finish", iconName: "Sparkles" },
+  prete: { label: "Prête", dot: "bg-status-ready", chip: "chip-ready", iconName: "CheckCircle2" },
+  livree: { label: "Livrée", dot: "bg-status-done", chip: "chip-done", iconName: "PackageCheck" },
+  annulee: { label: "Annulée", dot: "bg-status-cancel", chip: "chip-cancel", iconName: "XCircle" },
 };
 
 export const PAYMENT_METHODS = [

@@ -10,6 +10,7 @@ import {
   UserPlus,
   CalendarPlus,
   Ruler,
+  Shirt,
   MessageCircle,
 } from "lucide-react";
 
@@ -93,37 +94,52 @@ function Dashboard() {
         </p>
       </header>
 
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
-        <Link to="/clients">
+      <div className="grid grid-cols-2 gap-2.5 sm:gap-3 sm:grid-cols-3 lg:grid-cols-6">
+        <Link to="/clients" className="block transition-transform active:scale-98">
           <StatCard
             label="Clients"
             icon={Users}
+            iconColor="text-blue-600"
+            iconBg="bg-blue-500/15"
             value={clientsCount.isLoading ? "…" : clientsCount.data}
           />
         </Link>
-        <Link to="/commandes">
+        <Link to="/commandes" className="block transition-transform active:scale-98">
           <StatCard
             label="En cours"
             icon={Scissors}
+            iconColor="text-orange-600"
+            iconBg="bg-orange-500/15"
             value={orders.isLoading ? "…" : active.length}
-            hint={late.length ? `${late.length} en retard` : undefined}
+            hint={late.length ? `⚠️ ${late.length} en retard` : undefined}
           />
         </Link>
-        <Link to="/commandes">
+        <Link to="/commandes" className="block transition-transform active:scale-98">
           <StatCard
             label="À confectionner"
-            icon={Ruler}
+            icon={Shirt}
+            iconColor="text-purple-600"
+            iconBg="bg-purple-500/15"
             value={orders.isLoading ? "…" : inMaking.length}
-            hint="en atelier"
+            hint="coupe & montage"
           />
         </Link>
-        <Link to="/commandes">
-          <StatCard label="À livrer" icon={PackageCheck} value={toDeliver.length} hint="7 jours" />
+        <Link to="/commandes" className="block transition-transform active:scale-98">
+          <StatCard
+            label="À livrer"
+            icon={PackageCheck}
+            iconColor="text-emerald-600"
+            iconBg="bg-emerald-500/15"
+            value={toDeliver.length}
+            hint="sous 7 jours"
+          />
         </Link>
-        <Link to="/rendez-vous">
+        <Link to="/rendez-vous" className="block transition-transform active:scale-98">
           <StatCard
             label="Rendez-vous"
             icon={CalendarDays}
+            iconColor="text-indigo-600"
+            iconBg="bg-indigo-500/15"
             value={todayAppts.length}
             hint="aujourd'hui"
           />
@@ -132,25 +148,27 @@ function Dashboard() {
           <StatCard
             label="Reste à encaisser"
             icon={Wallet}
-            value={<span className="text-xl">{fcfa(outstanding, business?.currency)}</span>}
+            iconColor="text-amber-600"
+            iconBg="bg-amber-500/15"
+            value={<span className="text-lg font-extrabold sm:text-xl">{fcfa(outstanding, business?.currency)}</span>}
           />
         </div>
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-3">
-        <Button asChild size="lg" className="justify-start">
+      <div className="grid gap-2.5 sm:grid-cols-3">
+        <Button asChild size="lg" className="min-h-[3rem] justify-start text-sm font-bold shadow-sm">
           <Link to="/commandes/nouvelle">
-            <Plus className="size-4" /> Nouvelle commande
+            <Plus className="mr-1.5 size-5" /> Nouvelle commande
           </Link>
         </Button>
-        <Button asChild size="lg" variant="secondary" className="justify-start">
+        <Button asChild size="lg" variant="secondary" className="min-h-[3rem] justify-start text-sm font-bold">
           <Link to="/clients" search={{ nouveau: true }}>
-            <UserPlus className="size-4" /> Nouveau client
+            <UserPlus className="mr-1.5 size-5 text-blue-600" /> Nouveau client
           </Link>
         </Button>
-        <Button asChild size="lg" variant="outline" className="justify-start">
+        <Button asChild size="lg" variant="outline" className="min-h-[3rem] justify-start text-sm font-bold">
           <Link to="/rendez-vous" search={{ nouveau: true }}>
-            <CalendarPlus className="size-4" /> Nouveau rendez-vous
+            <CalendarPlus className="mr-1.5 size-5 text-indigo-600" /> Nouveau rendez-vous
           </Link>
         </Button>
       </div>

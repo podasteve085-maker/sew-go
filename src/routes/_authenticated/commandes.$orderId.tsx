@@ -18,10 +18,14 @@ import {
   Truck,
   User,
   XCircle,
-  AlertCircle,
   ChevronRight,
   Upload,
   MessageCircle,
+  Scissors,
+  Shirt,
+  Sparkles,
+  PackageCheck,
+  AlertCircle,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -248,7 +252,12 @@ function OrderDetailPage() {
       delivered_to?: string | null;
       delivery_note?: string | null;
     }) => {
-      const payload: Record<string, unknown> = { status };
+      const payload: {
+        status: OrderStatus;
+        delivered_at?: string | null;
+        delivered_to?: string | null;
+        delivery_note?: string | null;
+      } = { status };
       if (status === "livree") {
         payload.delivered_at = delivered_at || today();
         payload.delivered_to = delivered_to || null;
@@ -489,10 +498,23 @@ function OrderDetailPage() {
             )}
           </div>
 
-          <div className="mt-4 flex items-center justify-between gap-1 overflow-x-auto pb-2">
+          <div className="mt-4 flex items-center justify-between gap-1.5 overflow-x-auto pb-2">
             {ORDER_FLOW.map((flowStatus, idx) => {
               const isPast = currentIndex > idx;
               const isCurrent = currentIndex === idx;
+              const StepIcon =
+                flowStatus === "nouvelle"
+                  ? Sparkles
+                  : flowStatus === "preparation"
+                  ? Scissors
+                  : flowStatus === "confection"
+                  ? Shirt
+                  : flowStatus === "finition"
+                  ? Sparkles
+                  : flowStatus === "prete"
+                  ? CheckCircle2
+                  : PackageCheck;
+
               return (
                 <button
                   key={flowStatus}
@@ -504,26 +526,26 @@ function OrderDetailPage() {
                       updateStatusMutation.mutate({ status: flowStatus });
                     }
                   }}
-                  className={`flex flex-1 min-w-[5.5rem] flex-col items-center rounded-xl p-2 text-center transition-all ${
+                  className={`flex flex-1 min-w-[5.25rem] flex-col items-center rounded-xl p-2.5 text-center transition-all active:scale-95 ${
                     isCurrent
-                      ? "bg-primary/15 font-bold text-primary ring-1 ring-primary/40"
+                      ? "bg-primary/15 font-bold text-primary ring-2 ring-primary/40 shadow-xs"
                       : isPast
                       ? "text-foreground hover:bg-muted"
                       : "text-muted-foreground opacity-50 hover:opacity-80"
                   }`}
                 >
                   <div
-                    className={`flex size-6 items-center justify-center rounded-full text-xs ${
+                    className={`flex size-8 items-center justify-center rounded-full transition-transform ${
                       isPast
                         ? "bg-primary text-primary-foreground"
                         : isCurrent
-                        ? "bg-primary text-primary-foreground font-bold"
-                        : "border border-border bg-background"
+                        ? "bg-primary text-primary-foreground font-bold shadow-xs scale-105"
+                        : "border border-border bg-card text-muted-foreground"
                     }`}
                   >
-                    {isPast ? "✓" : idx + 1}
+                    <StepIcon className="size-4" />
                   </div>
-                  <span className="mt-1 text-[0.7rem] leading-tight">
+                  <span className="mt-1.5 text-[0.72rem] leading-tight font-semibold">
                     {ORDER_STATUS[flowStatus].label}
                   </span>
                 </button>
@@ -858,8 +880,12 @@ function OrderDetailPage() {
                 toast.error("Veuillez saisir un montant valide");
                 return;
               }
+              if (!business?.id) {
+                toast.error("Atelier non initialisé");
+                return;
+              }
               const { error } = await supabase.from("payments").insert({
-                business_id: business?.id,
+                business_id: business.id,
                 order_id: orderId,
                 amount,
                 method: String(fd.get("method") || "especes"),
