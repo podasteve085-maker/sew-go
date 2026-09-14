@@ -1,0 +1,89 @@
+/**
+ * CouturPro — Service Worker
+ * Stratégie : Network-First avec fallback sur cache.
+ * Conçu pour les connexions intermittentes (Afrique de l'Ouest, 2G/3G).
+ */
+
+const CACHE_NAME = "couturpro-v1";
+const OFFLINE_FALLBACK = "/offline.html";
+
+/** Ressources pré-mises en cache à l'installation (shell statique) */
+const PRECACHE_ASSETS = [
+  "/",
+  "/dashboard",
+  "/manifest.webmanifest",
+  "/favicon.svg",
+  "/favicon.ico",
+  "/icon-192.png",
+  "/icon-512.png",
+  "/apple-touch-icon.png",
+];
+
+/* ─── Installation ─────────────────────────────────────────────── */
+self.addEventListener("install", (event) => {
+  event.waitUntil(
+    caches
+      .open(CACHE_NAME)
+      .then((cache) => cache.addAll(PRECACHE_ASSETS))
+      .then(() => self.skipWaiting())
+  );
+});
+
+/* ─── Activation / Nettoyage des anciens caches ─────────────────── */
+self.addEventListener("activate", (event) => {
+  event.waitUntil(
+    caches
+      .keys()
+      .then((keys) =>
+        Promise.all(
+          keys
+            .filter((key) => key !== CACHE_NAME)
+            .map((key) => caches.delete(key))
+        )
+      )
+      .then(() => self.clients.claim())
+  );
+});
+
+/* ─── Fetch : Network-First avec fallback cache ─────────────────── */
+self.addEventListener("fetch", (event) => {
+  const { request } = event;
+  const url = new URL(request.url);
+
+  // Ne pas intercepter les requêtes vers Supabase (API, Auth, Storage)
+  if (url.hostname.includes("supabase.co")) return;
+  // Ne pas intercepter les requêtes cross-origin (analytics, fonts CDN ok côté browser)
+  if (url.origin !== self.location.origin && !url.hostname.includes("fonts.g")) return;
+  // Ne pas intercepter les requêtes non-GET
+  if (request.method !== "GET") return;
+
+  event.respondWith(
+    fetch(request)
+      .then((networkResponse) => {
+        // Mettre à jour le cache en arrière-plan si la réponse est valide
+        if (networkResponse && networkResponse.status === 200) {
+          const cloned = networkResponse.clone();
+          caches.open(CACHE_NAME).then((cache) => cache.put(request, cloned));
+        }
+        return networkResponse;
+      })
+      .catch(async () => {
+        // Réseau absent : essayer le cache
+        const cached = await caches.match(request);
+        if (cached) return cached;
+
+        // Pour les navigations (HTML), afficher la page de fallback hors-ligne
+        if (request.mode === "navigate") {
+          const offlinePage = await caches.match(OFFLINE_FALLBACK);
+          if (offlinePage) return offlinePage;
+        }
+
+        // Sinon réponse vide avec statut 503
+        return new Response("Hors ligne — ressource non disponible.", {
+          status: 503,
+          statusText: "Service Unavailable",
+          headers: { "Content-Type": "text/plain; charset=utf-8" },
+        });
+      })
+  );
+});

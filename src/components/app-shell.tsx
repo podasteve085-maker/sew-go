@@ -1,5 +1,6 @@
 import { Link, useNavigate, useRouterState } from "@tanstack/react-router";
 import { useEffect, useState, type ReactNode } from "react";
+import { PwaInstallButton } from "@/components/pwa-install-banner";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Home,
@@ -97,7 +98,8 @@ export function AppShell({ children }: { children: ReactNode }) {
             );
           })}
         </nav>
-        <div className="p-3">
+        <div className="space-y-2 p-3">
+          <PwaInstallButton />
           <SignOutButton />
         </div>
       </aside>

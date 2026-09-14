@@ -1,0 +1,67 @@
+{
+  "name": "CouturPro — Gestion d'Atelier de Couture",
+  "short_name": "CouturPro",
+  "description": "Application professionnelle de gestion pour couturiers : clients, carnet de mesures, commandes, paiements et rendez-vous.",
+  "start_url": "/dashboard",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#fbf9f5",
+  "theme_color": "#b0592c",
+  "categories": ["business", "productivity", "utilities"],
+  "icons": [
+    {
+      "src": "/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icon-192-maskable.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "/icon-512-maskable.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Nouvelle commande",
+      "short_name": "Commande",
+      "description": "Enregistrer une nouvelle commande client",
+      "url": "/commandes/nouvelle",
+      "icons": [{ "src": "/icon-192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "Nouveau client",
+      "short_name": "Client",
+      "description": "Ajouter un client au carnet d'adresses",
+      "url": "/clients?nouveau=true",
+      "icons": [{ "src": "/icon-192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "Carnet de mesures",
+      "short_name": "Mesures",
+      "description": "Consulter les mensurations des clients",
+      "url": "/mesures",
+      "icons": [{ "src": "/icon-192.png", "sizes": "192x192" }]
+    }
+  ]
+}

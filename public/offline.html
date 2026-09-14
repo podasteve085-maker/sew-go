@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#b0592c" />
+    <title>CouturPro — Hors ligne</title>
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <style>
+      *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+      body {
+        font-family: system-ui, sans-serif;
+        background: #fbf9f5;
+        color: #1c1108;
+        min-height: 100dvh;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        padding: 2rem;
+        text-align: center;
+      }
+      .icon {
+        width: 72px;
+        height: 72px;
+        border-radius: 18px;
+        background: #b0592c;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        margin: 0 auto 1.5rem;
+      }
+      h1 { font-size: 1.375rem; font-weight: 700; margin-bottom: 0.5rem; }
+      p { font-size: 0.9rem; color: #6b6058; line-height: 1.6; max-width: 28rem; }
+      .retry {
+        margin-top: 1.75rem;
+        background: #b0592c;
+        color: #fff;
+        border: none;
+        border-radius: 10px;
+        padding: 0.75rem 1.5rem;
+        font-size: 0.9rem;
+        font-weight: 600;
+        cursor: pointer;
+      }
+      .retry:hover { opacity: 0.9; }
+    </style>
+  </head>
+  <body>
+    <div class="icon">
+      <svg xmlns="http://www.w3.org/2000/svg" width="38" height="38" viewBox="0 0 64 64" fill="none"
+        stroke="#fff" stroke-width="5" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="17" cy="47" r="8"/>
+        <circle cx="35" cy="47" r="8"/>
+        <line x1="22" y1="40" x2="38" y2="15"/>
+        <line x1="30" y1="40" x2="14" y2="15"/>
+        <circle cx="26" cy="31" r="2" fill="#fff"/>
+      </svg>
+    </div>
+    <h1>Vous êtes hors ligne</h1>
+    <p>
+      CouturPro ne peut pas se charger pour le moment. Vérifiez votre connexion
+      réseau, puis réessayez. Vos données enregistrées restent protégées.
+    </p>
+    <button class="retry" onclick="window.location.reload()">
+      🔄 Réessayer
+    </button>
+  </body>
+</html>
