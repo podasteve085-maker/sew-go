@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Loader2, Plus, Trash2, Image as ImageIcon } from "lucide-react";
+import { Loader2, Plus, Trash2, Image as ImageIcon, KeyRound } from "lucide-react";
 import { toast } from "sonner";
 
 import { supabase } from "@/integrations/supabase/client";
@@ -180,6 +180,7 @@ function WorkshopPage() {
 
       <GarmentTypes businessId={business.id} />
       <Templates businessId={business.id} />
+      <PasswordChangeSection />
     </div>
   );
 }
@@ -352,3 +353,80 @@ function Templates({ businessId }: { businessId: string }) {
     </section>
   );
 }
+
+function PasswordChangeSection() {
+  const [password, setPassword] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!password) {
+      toast.error("Veuillez saisir un mot de passe.");
+      return;
+    }
+    if (password.length < 6) {
+      toast.error("Le mot de passe doit contenir au moins 6 caractères.");
+      return;
+    }
+    if (password !== confirm) {
+      toast.error("Les deux mots de passe ne sont pas identiques.");
+      return;
+    }
+
+    setSaving(true);
+    const { error } = await supabase.auth.updateUser({ password });
+    setSaving(false);
+
+    if (error) {
+      toast.error("Modification impossible", { description: error.message });
+      return;
+    }
+
+    toast.success("Mot de passe modifié avec succès !");
+    setPassword("");
+    setConfirm("");
+  }
+
+  return (
+    <section className="card-soft space-y-4 p-5">
+      <div className="flex items-center gap-2">
+        <KeyRound className="size-4 text-primary" />
+        <h2 className="font-display text-sm font-bold">Sécurité & Mot de passe</h2>
+      </div>
+      <p className="text-xs text-muted-foreground">
+        Changez le mot de passe de connexion à votre espace atelier CouturPro.
+      </p>
+      <form onSubmit={handleSubmit} className="space-y-3 max-w-md">
+        <div className="space-y-1.5">
+          <Label htmlFor="chg-pass">Nouveau mot de passe</Label>
+          <Input
+            id="chg-pass"
+            type="password"
+            minLength={6}
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            placeholder="Minimum 6 caractères"
+            autoComplete="new-password"
+          />
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="chg-confirm">Confirmer le mot de passe</Label>
+          <Input
+            id="chg-confirm"
+            type="password"
+            minLength={6}
+            value={confirm}
+            onChange={(e) => setConfirm(e.target.value)}
+            placeholder="Retapez le mot de passe"
+            autoComplete="new-password"
+          />
+        </div>
+        <Button type="submit" disabled={saving || !password}>
+          {saving && <Loader2 className="mr-2 size-4 animate-spin" />} Enregistrer le mot de passe
+        </Button>
+      </form>
+    </section>
+  );
+}
+
