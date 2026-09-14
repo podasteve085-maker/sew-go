@@ -79,7 +79,14 @@ function AuthPage() {
     });
     setLoading(false);
     if (error) {
-      toast.error("Connexion impossible", { description: "Email ou mot de passe incorrect." });
+      const lower = error.message.toLowerCase();
+      let description = "Email ou mot de passe incorrect.";
+      if (lower.includes("email not confirmed")) {
+        description = "Votre email n'est pas encore confirmé. Confirmez-le ou désactivez la confirmation d'email dans votre console Supabase.";
+      } else if (error.message) {
+        description = error.message;
+      }
+      toast.error("Connexion impossible", { description });
       return;
     }
     navigate({ to: "/dashboard", replace: true });
@@ -89,7 +96,7 @@ function AuthPage() {
     e.preventDefault();
     const form = new FormData(e.currentTarget);
     setLoading(true);
-    const { error } = await supabase.auth.signUp({
+    const { data, error } = await supabase.auth.signUp({
       email: String(form.get("email")).trim(),
       password: String(form.get("password")),
       options: {
@@ -107,7 +114,15 @@ function AuthPage() {
         description:
           error.message.includes("already") || error.message.includes("registered")
             ? "Cet email a déjà un compte. Connectez-vous."
-            : "Vérifiez vos informations (mot de passe de 6 caractères minimum).",
+            : error.message || "Vérifiez vos informations (mot de passe de 6 caractères minimum).",
+      });
+      return;
+    }
+    if (!data.session) {
+      toast.info("Atelier créé !", {
+        description:
+          "Vérifiez votre boîte mail pour confirmer votre compte, ou connectez-vous.",
+        duration: 8000,
       });
       return;
     }
