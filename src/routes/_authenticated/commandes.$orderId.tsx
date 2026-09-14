@@ -1206,22 +1206,31 @@ function OrderDetailPage() {
           <div className="rounded-xl border border-border bg-white p-6 text-black shadow-sm" id="printable-receipt">
             {/* Atelier Header */}
             <div className="flex items-start justify-between border-b pb-4">
-              <div>
-                <h2 className="font-display text-xl font-bold uppercase tracking-tight text-neutral-900">
-                  {business?.name || "Atelier de Couture"}
-                </h2>
-                {business?.owner_name && (
-                  <p className="text-xs text-neutral-600">Dirigé par {business.owner_name}</p>
+              <div className="flex items-start gap-3">
+                {business?.logo_url && (
+                  <StoredImage
+                    path={business.logo_url}
+                    alt="Logo atelier"
+                    className="size-14 rounded-lg object-cover shrink-0 border border-neutral-200"
+                  />
                 )}
-                {business?.phone && (
-                  <p className="text-xs text-neutral-600">📞 Tél : {business.phone}</p>
-                )}
-                {business?.city && (
-                  <p className="text-xs text-neutral-600">
-                    📍 {business.address ? `${business.address}, ` : ""}
-                    {business.city}
-                  </p>
-                )}
+                <div>
+                  <h2 className="font-display text-xl font-bold uppercase tracking-tight text-neutral-900">
+                    {business?.name || "Atelier de Couture"}
+                  </h2>
+                  {business?.owner_name && (
+                    <p className="text-xs text-neutral-600">Dirigé par {business.owner_name}</p>
+                  )}
+                  {business?.phone && (
+                    <p className="text-xs text-neutral-600">📞 Tél : {business.phone}</p>
+                  )}
+                  {business?.city && (
+                    <p className="text-xs text-neutral-600">
+                      📍 {business.address ? `${business.address}, ` : ""}
+                      {business.city}
+                    </p>
+                  )}
+                </div>
               </div>
               <div className="text-right">
                 <span className="inline-block rounded-md bg-neutral-100 px-2 py-1 font-mono text-xs font-bold text-neutral-800">

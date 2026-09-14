@@ -21,6 +21,7 @@ import { useBusiness } from "@/hooks/use-business";
 import { fullName } from "@/lib/format";
 import { ORDER_STATUS, type OrderStatus } from "@/lib/domain";
 import { Button } from "@/components/ui/button";
+import { StoredImage } from "@/components/bits";
 import {
   Command,
   CommandEmpty,
@@ -71,9 +72,16 @@ export function AppShell({ children }: { children: ReactNode }) {
       {/* Barre latérale — ordinateur / tablette */}
       <aside className="fixed inset-y-0 left-0 z-30 hidden w-64 flex-col bg-sidebar text-sidebar-foreground lg:flex">
         <div className="flex items-center gap-2 px-5 py-5">
-          <span className="flex size-9 items-center justify-center rounded-xl bg-sidebar-primary text-sidebar-primary-foreground">
-            <Scissors className="size-5" />
-          </span>
+          <StoredImage
+            path={business?.logo_url}
+            alt="Logo atelier"
+            className="size-9 rounded-xl object-cover shrink-0"
+            fallback={
+              <span className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-sidebar-primary text-sidebar-primary-foreground">
+                <Scissors className="size-5" />
+              </span>
+            }
+          />
           <div className="min-w-0">
             <p className="truncate font-display text-sm font-semibold">
               {business?.name ?? "Mon atelier"}
@@ -111,9 +119,16 @@ export function AppShell({ children }: { children: ReactNode }) {
         <header className="no-print sticky top-0 z-20 border-b border-border/80 bg-background/95 backdrop-blur-md">
           <div className="flex items-center gap-2 px-3 py-2 sm:px-4 sm:py-2.5 lg:px-8">
             <Link to="/dashboard" className="flex items-center gap-2 lg:hidden shrink-0">
-              <span className="flex size-7.5 items-center justify-center rounded-lg bg-primary text-primary-foreground shadow-xs">
-                <Scissors className="size-3.5" />
-              </span>
+              <StoredImage
+                path={business?.logo_url}
+                alt="Logo atelier"
+                className="size-7.5 rounded-lg object-cover shrink-0"
+                fallback={
+                  <span className="flex size-7.5 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground shadow-xs">
+                    <Scissors className="size-3.5" />
+                  </span>
+                }
+              />
               <span className="max-w-[7rem] xs:max-w-[8.5rem] truncate font-display text-xs font-bold sm:text-sm">
                 {business?.name ?? "Mon atelier"}
               </span>

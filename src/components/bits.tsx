@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { Link } from "@tanstack/react-router";
 import {
   AlertTriangle,
@@ -167,11 +167,14 @@ export function StoredImage({
   path,
   alt,
   className,
+  fallback,
 }: {
   path: string | null | undefined;
   alt: string;
   className?: string;
+  fallback?: ReactNode;
 }) {
+  const [loadError, setLoadError] = useState(false);
   const isDirect = Boolean(
     path &&
       (path.startsWith("http://") ||
@@ -179,14 +182,38 @@ export function StoredImage({
         path.startsWith("data:") ||
         path.startsWith("/")),
   );
-  const { data, isLoading } = useSignedUrl(isDirect ? null : path);
+  const { data, isLoading, isError } = useSignedUrl(isDirect ? null : path);
   const cls = className ?? "size-16 rounded-lg object-cover";
-  if (!path) return null;
+
+  if (!path) return fallback ? <>{fallback}</> : null;
+
   if (isDirect) {
-    return <img src={path} alt={alt} loading="lazy" className={cls} />;
+    if (loadError) return fallback ? <>{fallback}</> : null;
+    return (
+      <img
+        src={path}
+        alt={alt}
+        loading="lazy"
+        onError={() => setLoadError(true)}
+        className={cls}
+      />
+    );
   }
-  if (isLoading || !data) return <Skeleton className={cls} />;
-  return <img src={data} alt={alt} loading="lazy" className={cls} />;
+
+  if (isLoading) return <Skeleton className={cls} />;
+  if (isError || !data || loadError) {
+    return fallback ? <>{fallback}</> : null;
+  }
+
+  return (
+    <img
+      src={data}
+      alt={alt}
+      loading="lazy"
+      onError={() => setLoadError(true)}
+      className={cls}
+    />
+  );
 }
 
 export function OrderCard({ order }: { order: OrderRow }) {
