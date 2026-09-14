@@ -26,11 +26,13 @@ export function ClientFormDialog({
   onOpenChange,
   businessId,
   client,
+  onCreated,
 }: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
   businessId: string;
   client?: ClientRow | null;
+  onCreated?: (clientId: string) => void;
 }) {
   const queryClient = useQueryClient();
   const [photoPath, setPhotoPath] = useState<string | null>(client?.photo_url ?? null);
@@ -54,17 +56,22 @@ export function ClientFormDialog({
       if (client) {
         const { error } = await supabase.from("clients").update(payload).eq("id", client.id);
         if (error) throw error;
+        return client.id;
       } else {
-        const { error } = await supabase.from("clients").insert(payload);
+        const { data, error } = await supabase.from("clients").insert(payload).select("id").single();
         if (error) throw error;
+        return (data as { id: string }).id;
       }
     },
-    onSuccess: () => {
+    onSuccess: (newId) => {
       queryClient.invalidateQueries({ queryKey: ["clients"] });
       queryClient.invalidateQueries({ queryKey: ["client", client?.id] });
       queryClient.invalidateQueries({ queryKey: ["clients-count"] });
       toast.success(client ? "Client modifié" : "Client enregistré");
       onOpenChange(false);
+      if (!client && newId) {
+        onCreated?.(newId);
+      }
     },
     onError: () => toast.error("Enregistrement impossible"),
   });

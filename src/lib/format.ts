@@ -52,3 +52,16 @@ export function waLink(phone: string | null | undefined, message?: string) {
   const text = message ? `?text=${encodeURIComponent(message)}` : "";
   return `https://wa.me/${digits}${text}`;
 }
+
+/**
+ * Retourne uniquement les chiffres avec indicatif (+226 pour les numéros locaux à 8 chiffres).
+ * Utilisé pour construire manuellement des URLs wa.me et des liens tel:.
+ */
+export function cleanPhone(phone: string | null | undefined): string {
+  if (!phone) return "";
+  let digits = phone.replace(/[^\d+]/g, "");
+  if (digits.startsWith("+")) digits = digits.slice(1);
+  if (digits.startsWith("00")) digits = digits.slice(2);
+  if (digits.length === 8) digits = `226${digits}`;
+  return digits;
+}

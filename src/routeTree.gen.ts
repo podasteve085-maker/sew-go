@@ -14,6 +14,7 @@ import { Route as AuthenticatedRouteRouteImport } from './routes/_authenticated/
 import { Route as AuthRouteImport } from './routes/auth'
 import { Route as AuthenticatedAtelierRouteImport } from './routes/_authenticated/atelier'
 import { Route as AuthenticatedDashboardRouteImport } from './routes/_authenticated/dashboard'
+import { Route as AuthenticatedMesuresRouteImport } from './routes/_authenticated/mesures'
 import { Route as AuthenticatedRendezVousRouteImport } from './routes/_authenticated/rendez-vous'
 import { Route as AuthenticatedStatistiquesRouteImport } from './routes/_authenticated/statistiques'
 import { Route as AuthenticatedClientsIndexRouteImport } from './routes/_authenticated/clients.index'
@@ -44,6 +45,11 @@ const AuthenticatedAtelierRoute = AuthenticatedAtelierRouteImport.update({
 const AuthenticatedDashboardRoute = AuthenticatedDashboardRouteImport.update({
   id: '/dashboard',
   path: '/dashboard',
+  getParentRoute: () => AuthenticatedRouteRoute,
+} as any)
+const AuthenticatedMesuresRoute = AuthenticatedMesuresRouteImport.update({
+  id: '/mesures',
+  path: '/mesures',
   getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
 const AuthenticatedRendezVousRoute = AuthenticatedRendezVousRouteImport.update({
@@ -93,6 +99,7 @@ export interface FileRoutesByFullPath {
   '/auth': typeof AuthRoute
   '/atelier': typeof AuthenticatedAtelierRoute
   '/dashboard': typeof AuthenticatedDashboardRoute
+  '/mesures': typeof AuthenticatedMesuresRoute
   '/rendez-vous': typeof AuthenticatedRendezVousRoute
   '/statistiques': typeof AuthenticatedStatistiquesRoute
   '/clients/$clientId': typeof AuthenticatedClientsClientIdRoute
@@ -106,6 +113,7 @@ export interface FileRoutesByTo {
   '/auth': typeof AuthRoute
   '/atelier': typeof AuthenticatedAtelierRoute
   '/dashboard': typeof AuthenticatedDashboardRoute
+  '/mesures': typeof AuthenticatedMesuresRoute
   '/rendez-vous': typeof AuthenticatedRendezVousRoute
   '/statistiques': typeof AuthenticatedStatistiquesRoute
   '/clients/$clientId': typeof AuthenticatedClientsClientIdRoute
@@ -121,6 +129,7 @@ export interface FileRoutesById {
   '/auth': typeof AuthRoute
   '/_authenticated/atelier': typeof AuthenticatedAtelierRoute
   '/_authenticated/dashboard': typeof AuthenticatedDashboardRoute
+  '/_authenticated/mesures': typeof AuthenticatedMesuresRoute
   '/_authenticated/rendez-vous': typeof AuthenticatedRendezVousRoute
   '/_authenticated/statistiques': typeof AuthenticatedStatistiquesRoute
   '/_authenticated/clients/$clientId': typeof AuthenticatedClientsClientIdRoute
@@ -136,6 +145,7 @@ export interface FileRouteTypes {
     | '/auth'
     | '/atelier'
     | '/dashboard'
+    | '/mesures'
     | '/rendez-vous'
     | '/statistiques'
     | '/clients/$clientId'
@@ -149,6 +159,7 @@ export interface FileRouteTypes {
     | '/auth'
     | '/atelier'
     | '/dashboard'
+    | '/mesures'
     | '/rendez-vous'
     | '/statistiques'
     | '/clients/$clientId'
@@ -163,6 +174,7 @@ export interface FileRouteTypes {
     | '/auth'
     | '/_authenticated/atelier'
     | '/_authenticated/dashboard'
+    | '/_authenticated/mesures'
     | '/_authenticated/rendez-vous'
     | '/_authenticated/statistiques'
     | '/_authenticated/clients/$clientId'
@@ -213,6 +225,13 @@ declare module '@tanstack/react-router' {
       path: '/dashboard'
       fullPath: '/dashboard'
       preLoaderRoute: typeof AuthenticatedDashboardRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/mesures': {
+      id: '/_authenticated/mesures'
+      path: '/mesures'
+      fullPath: '/mesures'
+      preLoaderRoute: typeof AuthenticatedMesuresRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
     '/_authenticated/rendez-vous': {
@@ -270,6 +289,7 @@ declare module '@tanstack/react-router' {
 interface AuthenticatedRouteRouteChildren {
   AuthenticatedAtelierRoute: typeof AuthenticatedAtelierRoute
   AuthenticatedDashboardRoute: typeof AuthenticatedDashboardRoute
+  AuthenticatedMesuresRoute: typeof AuthenticatedMesuresRoute
   AuthenticatedRendezVousRoute: typeof AuthenticatedRendezVousRoute
   AuthenticatedStatistiquesRoute: typeof AuthenticatedStatistiquesRoute
   AuthenticatedClientsClientIdRoute: typeof AuthenticatedClientsClientIdRoute
@@ -282,6 +302,7 @@ interface AuthenticatedRouteRouteChildren {
 const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedAtelierRoute: AuthenticatedAtelierRoute,
   AuthenticatedDashboardRoute: AuthenticatedDashboardRoute,
+  AuthenticatedMesuresRoute: AuthenticatedMesuresRoute,
   AuthenticatedRendezVousRoute: AuthenticatedRendezVousRoute,
   AuthenticatedStatistiquesRoute: AuthenticatedStatistiquesRoute,
   AuthenticatedClientsClientIdRoute: AuthenticatedClientsClientIdRoute,

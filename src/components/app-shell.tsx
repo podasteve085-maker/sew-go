@@ -4,6 +4,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Home,
   Users,
+  Ruler,
   Scissors,
   CalendarDays,
   BarChart3,
@@ -31,13 +32,20 @@ import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 const NAV = [
   { to: "/dashboard", label: "Accueil", icon: Home },
   { to: "/clients", label: "Clients", icon: Users },
+  { to: "/mesures", label: "Mesures", icon: Ruler },
   { to: "/commandes", label: "Commandes", icon: Scissors },
   { to: "/rendez-vous", label: "Rendez-vous", icon: CalendarDays },
   { to: "/statistiques", label: "Statistiques", icon: BarChart3 },
   { to: "/atelier", label: "Mon atelier", icon: Settings },
 ] as const;
 
-const MOBILE_NAV = NAV.slice(0, 4);
+const MOBILE_NAV = [
+  { to: "/dashboard", label: "Accueil", icon: Home },
+  { to: "/clients", label: "Clients", icon: Users },
+  { to: "/mesures", label: "Mesures", icon: Ruler },
+  { to: "/commandes", label: "Commandes", icon: Scissors },
+  { to: "/rendez-vous", label: "RDV", icon: CalendarDays },
+] as const;
 
 export function AppShell({ children }: { children: ReactNode }) {
   const { data: business } = useBusiness();

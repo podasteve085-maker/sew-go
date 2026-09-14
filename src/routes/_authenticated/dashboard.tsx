@@ -9,13 +9,15 @@ import {
   Plus,
   UserPlus,
   CalendarPlus,
+  Ruler,
+  MessageCircle,
 } from "lucide-react";
 
 import { supabase } from "@/integrations/supabase/client";
 import { useBusiness } from "@/hooks/use-business";
 import { fetchOrders, fetchAppointments, balance } from "@/lib/queries";
 import { isActive, isLate, appointmentLabel } from "@/lib/domain";
-import { fcfa, dateFr, dateLongFr, today, addDays, fullName } from "@/lib/format";
+import { fcfa, dateFr, dateLongFr, today, addDays, fullName, cleanPhone } from "@/lib/format";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { StatCard, EmptyState, SectionTitle, OrderCard, LateBadge } from "@/components/bits";
@@ -58,6 +60,9 @@ function Dashboard() {
 
   const all = orders.data ?? [];
   const active = all.filter((o) => isActive(o.status));
+  const inMaking = active.filter(
+    (o) => o.status === "preparation" || o.status === "confection" || o.status === "finition",
+  );
   const toDeliver = active.filter(
     (o) => o.status === "prete" || (o.due_date && o.due_date <= addDays(7)),
   );
@@ -76,7 +81,8 @@ function Dashboard() {
     .sort((a, b) => (a.due_date ?? "").localeCompare(b.due_date ?? ""))
     .slice(0, 5);
 
-  const firstName = (business?.owner_name ?? "").split(" ")[0];
+  const rawName = (business?.owner_name ?? "").split(" ")[0];
+  const firstName = rawName ? rawName.charAt(0).toUpperCase() + rawName.slice(1) : "";
 
   return (
     <div className="mx-auto max-w-5xl space-y-8">
@@ -87,7 +93,7 @@ function Dashboard() {
         </p>
       </header>
 
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
         <Link to="/clients">
           <StatCard
             label="Clients"
@@ -101,6 +107,14 @@ function Dashboard() {
             icon={Scissors}
             value={orders.isLoading ? "…" : active.length}
             hint={late.length ? `${late.length} en retard` : undefined}
+          />
+        </Link>
+        <Link to="/commandes">
+          <StatCard
+            label="À confectionner"
+            icon={Ruler}
+            value={orders.isLoading ? "…" : inMaking.length}
+            hint="en atelier"
           />
         </Link>
         <Link to="/commandes">
@@ -219,14 +233,30 @@ function Dashboard() {
           ) : (
             <div className="space-y-3">
               {todayAppts.map((a) => (
-                <div key={a.id} className="card-soft flex items-center gap-3 p-4">
-                  <span className="rounded-lg bg-primary/10 px-2.5 py-1.5 font-display text-sm font-bold text-primary">
-                    {a.scheduled_time?.slice(0, 5) ?? "--:--"}
-                  </span>
-                  <div className="min-w-0">
-                    <p className="truncate text-sm font-semibold">{fullName(a.clients)}</p>
-                    <p className="text-xs text-muted-foreground">{appointmentLabel(a.type)}</p>
+                <div key={a.id} className="card-soft flex items-center justify-between gap-3 p-4">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <span className="rounded-lg bg-primary/10 px-2.5 py-1.5 font-display text-sm font-bold text-primary">
+                      {a.scheduled_time?.slice(0, 5) ?? "--:--"}
+                    </span>
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-semibold">{fullName(a.clients)}</p>
+                      <p className="text-xs text-muted-foreground">{appointmentLabel(a.type)}</p>
+                    </div>
                   </div>
+
+                  {a.clients?.phone && (
+                    <a
+                      href={`https://wa.me/${cleanPhone(a.clients.whatsapp || a.clients.phone)}?text=${encodeURIComponent(
+                        `Bonjour ${a.clients.first_name}, nous vous rappelons votre rendez-vous de ${appointmentLabel(a.type)} prévu aujourd'hui à ${a.scheduled_time?.slice(0, 5) ?? ""} chez ${business?.name ?? "votre atelier"}.`,
+                      )}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex h-8 items-center gap-1 rounded-md border border-border px-2.5 text-xs font-medium text-success hover:bg-success/10 shrink-0"
+                      title="Rappeler par WhatsApp"
+                    >
+                      <MessageCircle className="size-3.5" /> WhatsApp
+                    </a>
+                  )}
                 </div>
               ))}
             </div>
@@ -250,6 +280,19 @@ function Dashboard() {
                 </div>
                 <div className="flex shrink-0 items-center gap-2">
                   <LateBadge />
+                  {o.clients?.phone && (
+                    <a
+                      href={`https://wa.me/${cleanPhone(o.clients.whatsapp || o.clients.phone)}?text=${encodeURIComponent(
+                        `Bonjour ${o.clients.first_name}, votre commande ${o.reference} (${o.garment_type}) est en cours de finition chez ${business?.name ?? "votre atelier"}. Nous vous contacterons dès qu'elle sera prête.`,
+                      )}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex h-8 items-center gap-1 rounded-md border border-border px-2 text-xs font-medium text-success hover:bg-success/10"
+                      title="Contacter par WhatsApp"
+                    >
+                      <MessageCircle className="size-3.5" />
+                    </a>
+                  )}
                   <Link
                     to="/commandes/$orderId"
                     params={{ orderId: o.id }}

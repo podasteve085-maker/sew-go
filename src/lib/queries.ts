@@ -133,6 +133,28 @@ export async function fetchClient(id: string) {
   return (data ?? null) as unknown as ClientRow | null;
 }
 
+export type FullMeasurementSetRow = MeasurementSetRow & {
+  clients?: {
+    id: string;
+    first_name: string;
+    last_name: string | null;
+    phone: string | null;
+    whatsapp: string | null;
+    gender: string | null;
+  } | null;
+};
+
+export async function fetchAllMeasurementSets() {
+  const { data, error } = await supabase
+    .from("measurement_sets")
+    .select(
+      "*, clients(id, first_name, last_name, phone, whatsapp, gender), measurement_values(id, name, value, unit, position)",
+    )
+    .order("recorded_at", { ascending: false });
+  if (error) throw error;
+  return (data ?? []) as unknown as FullMeasurementSetRow[];
+}
+
 export async function fetchMeasurementSets(clientId: string) {
   const { data, error } = await supabase
     .from("measurement_sets")

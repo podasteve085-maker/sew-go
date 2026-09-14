@@ -21,6 +21,7 @@ import {
   AlertCircle,
   ChevronRight,
   Upload,
+  MessageCircle,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -51,12 +52,14 @@ import {
   fullName,
   today,
   initials,
+  cleanPhone,
 } from "@/lib/format";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Skeleton } from "@/components/ui/skeleton";
+import { MeasurementDialog } from "@/components/measurement-dialog";
 import {
   Dialog,
   DialogContent,
@@ -113,6 +116,8 @@ function OrderDetailPage() {
   const [openDeleteModal, setOpenDeleteModal] = useState(false);
   const [openReceiptModal, setOpenReceiptModal] = useState(false);
   const [openMeasureModal, setOpenMeasureModal] = useState(false);
+  const [deletingPaymentId, setDeletingPaymentId] = useState<string | null>(null);
+  const [cancelOrderOpen, setCancelOrderOpen] = useState(false);
   const [uploadingImage, setUploadingImage] = useState(false);
   const [imageKind, setImageKind] = useState("modele");
 
@@ -152,6 +157,83 @@ function OrderDetailPage() {
   const totalPaid = payments.reduce((sum, p) => sum + Number(p.amount), 0);
   const totalPrice = Number(order?.price ?? 0);
   const balanceDue = totalPrice - totalPaid;
+  const client = clientQuery.data;
+
+  // WhatsApp Helpers
+  function shareReceiptViaWhatsApp() {
+    if (!order || !client) return;
+    const phone = cleanPhone(client.whatsapp || client.phone || "");
+    const atelier = business?.name ?? "votre atelier";
+    const msg =
+      `🧾 *REÇU DE COMMANDE — ${atelier.toUpperCase()}*\n\n` +
+      `Commande : *${order.reference}*\n` +
+      `Client : *${fullName(client)}*\n` +
+      `Vêtement : *${order.garment_type}*${order.quantity > 1 ? ` (×${order.quantity})` : ""}\n` +
+      (order.fabric ? `Tissu : ${order.fabric}\n` : "") +
+      `Prix total : *${fcfa(totalPrice, business?.currency)}*\n` +
+      `Total versé : ${fcfa(totalPaid, business?.currency)}\n` +
+      `Solde restant : *${fcfa(balanceDue, business?.currency)}*\n` +
+      `Livraison prévue : *${dateFr(order.due_date)}*\n\n` +
+      (business?.receipt_note ? `_${business.receipt_note}_\n\n` : "") +
+      `Merci pour votre confiance ! ✂️`;
+
+    const url = phone
+      ? `https://wa.me/${phone}?text=${encodeURIComponent(msg)}`
+      : `https://wa.me/?text=${encodeURIComponent(msg)}`;
+    window.open(url, "_blank");
+  }
+
+  function notifyReadyViaWhatsApp() {
+    if (!order || !client) return;
+    const phone = cleanPhone(client.whatsapp || client.phone || "");
+    const atelier = business?.name ?? "votre atelier";
+    const msg =
+      `Bonjour *${client.first_name}*,\n\n` +
+      `Votre vêtement (*${order.garment_type}* - ${order.reference}) est *prêt* chez *${atelier}* ! 🎉\n\n` +
+      (balanceDue > 0
+        ? `Solde restant à régler : *${fcfa(balanceDue, business?.currency)}*\n\n`
+        : "Commande entièrement réglée ✅\n\n") +
+      `Vous pouvez passer à l'atelier pour l'essayage ou la récupération.\nÀ très bientôt ! ✂️`;
+
+    const url = phone
+      ? `https://wa.me/${phone}?text=${encodeURIComponent(msg)}`
+      : `https://wa.me/?text=${encodeURIComponent(msg)}`;
+    window.open(url, "_blank");
+  }
+
+  // Delete Payment Mutation
+  const deletePaymentMutation = useMutation({
+    mutationFn: async (pId: string) => {
+      const { error } = await supabase.from("payments").delete().eq("id", pId);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["payments", orderId] });
+      queryClient.invalidateQueries({ queryKey: ["order", orderId] });
+      queryClient.invalidateQueries({ queryKey: ["orders"] });
+      toast.success("Paiement supprimé");
+      setDeletingPaymentId(null);
+    },
+    onError: () => toast.error("Impossible de supprimer le paiement"),
+  });
+
+  // Cancel Order Mutation
+  const cancelOrderMutation = useMutation({
+    mutationFn: async () => {
+      const { error } = await supabase
+        .from("orders")
+        .update({ status: "annulee" })
+        .eq("id", orderId);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["order", orderId] });
+      queryClient.invalidateQueries({ queryKey: ["orders"] });
+      toast.success("Commande marquée comme annulée");
+      setCancelOrderOpen(false);
+    },
+    onError: () => toast.error("Impossible d'annuler la commande"),
+  });
 
   // Status updates
   const updateStatusMutation = useMutation({
@@ -266,7 +348,6 @@ function OrderDetailPage() {
     );
   }
 
-  const client = clientQuery.data;
   const isOrderLate = isLate(order);
   const currentIndex = ORDER_FLOW.indexOf(order.status as OrderStatus);
   const nextStatus = currentIndex >= 0 && currentIndex < ORDER_FLOW.length - 1 ? ORDER_FLOW[currentIndex + 1] : null;
@@ -296,6 +377,17 @@ function OrderDetailPage() {
           >
             <Edit className="size-4" /> Modifier
           </Button>
+          {order.status !== "annulee" && order.status !== "livree" && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+              onClick={() => setCancelOrderOpen(true)}
+              title="Annuler la commande"
+            >
+              <XCircle className="size-4 mr-1" /> Annuler
+            </Button>
+          )}
           <Button
             variant="ghost"
             size="sm"
@@ -306,6 +398,32 @@ function OrderDetailPage() {
           </Button>
         </div>
       </div>
+
+      {/* Bannière alerte quand le vêtement est prêt */}
+      {order.status === "prete" && (
+        <div className="no-print flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-success/40 bg-success/10 p-4">
+          <div className="flex items-center gap-3">
+            <span className="flex size-10 items-center justify-center rounded-xl bg-success text-success-foreground font-bold">
+              <CheckCircle2 className="size-5" />
+            </span>
+            <div>
+              <p className="font-display text-sm font-bold text-foreground">
+                Ce vêtement est prêt pour l'essayage ou le retrait !
+              </p>
+              <p className="text-xs text-muted-foreground">
+                Avertissez votre client par message WhatsApp pour convenir d'un rendez-vous.
+              </p>
+            </div>
+          </div>
+          <Button
+            size="sm"
+            className="bg-success text-success-foreground hover:bg-success/90"
+            onClick={notifyReadyViaWhatsApp}
+          >
+            <MessageCircle className="mr-1.5 size-4" /> Alerter le client par WhatsApp
+          </Button>
+        </div>
+      )}
 
       {/* Hero Header Card */}
       <header className="no-print card-soft p-5 sm:p-6">
@@ -630,15 +748,7 @@ function OrderDetailPage() {
                   variant="ghost"
                   size="sm"
                   className="h-8 w-8 p-0 text-muted-foreground hover:text-destructive"
-                  onClick={async () => {
-                    if (confirm("Supprimer cet enregistrement de paiement ?")) {
-                      await supabase.from("payments").delete().eq("id", p.id);
-                      queryClient.invalidateQueries({ queryKey: ["payments", orderId] });
-                      queryClient.invalidateQueries({ queryKey: ["order", orderId] });
-                      queryClient.invalidateQueries({ queryKey: ["orders"] });
-                      toast.success("Paiement supprimé");
-                    }
-                  }}
+                  onClick={() => setDeletingPaymentId(p.id)}
                   aria-label="Supprimer le versement"
                 >
                   <Trash2 className="size-3.5" />
@@ -934,6 +1044,55 @@ function OrderDetailPage() {
         </AlertDialogContent>
       </AlertDialog>
 
+      {/* Confirmation suppression paiement */}
+      <AlertDialog
+        open={Boolean(deletingPaymentId)}
+        onOpenChange={(v) => !v && setDeletingPaymentId(null)}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Supprimer ce versement ?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Ce paiement sera supprimé des enregistrements de la commande et le reste à payer sera
+              recalculé.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Annuler</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={() => {
+                if (deletingPaymentId) deletePaymentMutation.mutate(deletingPaymentId);
+              }}
+            >
+              Supprimer
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Confirmation annulation commande */}
+      <AlertDialog open={cancelOrderOpen} onOpenChange={setCancelOrderOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Annuler cette commande ?</AlertDialogTitle>
+            <AlertDialogDescription>
+              La commande {order.reference} passera au statut « Annulée ». Vous pourrez toujours
+              consulter ses informations et son historique.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Retour</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={() => cancelOrderMutation.mutate()}
+            >
+              Annuler la commande
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
       {/* ========================================================================= */}
       {/* MODAL 5: Mesures du client (Quick View)                                  */}
       {/* ========================================================================= */}
@@ -1123,9 +1282,19 @@ function OrderDetailPage() {
             </div>
           </div>
 
-          <DialogFooter className="mt-4">
+          <DialogFooter className="mt-4 flex-col gap-2 sm:flex-row">
             <Button variant="outline" onClick={() => setOpenReceiptModal(false)}>
               Fermer
+            </Button>
+            <Button
+              variant="outline"
+              className="border-success/40 text-success hover:bg-success/10"
+              onClick={() => {
+                setOpenReceiptModal(false);
+                shareReceiptViaWhatsApp();
+              }}
+            >
+              <MessageCircle className="mr-2 size-4" /> Envoyer par WhatsApp
             </Button>
             <Button
               onClick={() => {
