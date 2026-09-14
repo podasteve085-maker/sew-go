@@ -17,9 +17,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { StoredImage } from "@/components/bits";
 
 export const Route = createFileRoute("/_authenticated/commandes/nouvelle")({
-  validateSearch: (search: Record<string, unknown>) => ({
-    client: typeof search["client"] === "string" ? (search["client"] as string) : undefined,
-  }),
+  validateSearch: (search: Record<string, unknown>): { client?: string } =>
+    typeof search["client"] === "string" ? { client: search["client"] } : {},
   head: () => ({
     meta: [
       { title: "Nouvelle commande — CouturPro" },

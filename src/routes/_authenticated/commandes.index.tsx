@@ -134,7 +134,7 @@ function OrdersPage() {
       ) : (
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
           {list.map((o) => (
-            <OrderCard key={o.id} order={o} showClient />
+            <OrderCard key={o.id} order={o} />
           ))}
         </div>
       )}
