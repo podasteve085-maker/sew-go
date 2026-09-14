@@ -95,10 +95,13 @@ function AuthPage() {
   async function signUp(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const form = new FormData(e.currentTarget);
+    const emailVal = String(form.get("email")).trim();
+    const passwordVal = String(form.get("password"));
+
     setLoading(true);
     const { data, error } = await supabase.auth.signUp({
-      email: String(form.get("email")).trim(),
-      password: String(form.get("password")),
+      email: emailVal,
+      password: passwordVal,
       options: {
         emailRedirectTo: `${window.location.origin}/dashboard`,
         data: {
@@ -108,8 +111,9 @@ function AuthPage() {
         },
       },
     });
-    setLoading(false);
+
     if (error) {
+      setLoading(false);
       toast.error("Inscription impossible", {
         description:
           error.message.includes("already") || error.message.includes("registered")
@@ -118,31 +122,26 @@ function AuthPage() {
       });
       return;
     }
-    if (!data.session) {
-      toast.info("Atelier créé !", {
-        description:
-          "Vérifiez votre boîte mail pour confirmer votre compte, ou connectez-vous.",
-        duration: 8000,
-      });
-      return;
-    }
-    toast.success("Atelier créé", { description: "Bienvenue sur CouturPro !" });
-    navigate({ to: "/dashboard", replace: true });
-  }
 
-  async function google() {
-    setLoading(true);
-    const { error } = await supabase.auth.signInWithOAuth({
-      provider: "google",
-      options: {
-        redirectTo: `${window.location.origin}/dashboard`,
-      },
-    });
-    if (error) {
+    // Si pas de session immédiate retournée par signUp, on auto-connecte instantanément
+    if (!data.session) {
+      const { error: signInErr } = await supabase.auth.signInWithPassword({
+        email: emailVal,
+        password: passwordVal,
+      });
       setLoading(false);
-      toast.error("Connexion Google impossible", { description: error.message });
+      if (signInErr) {
+        toast.info("Atelier créé !", {
+          description: "Connectez-vous avec votre mot de passe.",
+        });
+        return;
+      }
+    } else {
+      setLoading(false);
     }
-    // Si pas d'erreur, Supabase redirige automatiquement vers Google
+
+    toast.success("Atelier créé avec succès !", { description: "Bienvenue sur CouturPro !" });
+    navigate({ to: "/dashboard", replace: true });
   }
 
   return (
@@ -234,13 +233,6 @@ function AuthPage() {
               </form>
             </TabsContent>
           </Tabs>
-
-          <div className="my-5 flex items-center gap-3 text-xs text-muted-foreground">
-            <span className="h-px flex-1 bg-border" /> ou <span className="h-px flex-1 bg-border" />
-          </div>
-          <Button variant="outline" className="w-full" onClick={google} disabled={loading}>
-            Continuer avec Google
-          </Button>
         </div>
 
         <p className="mt-6 text-center text-xs text-muted-foreground">
