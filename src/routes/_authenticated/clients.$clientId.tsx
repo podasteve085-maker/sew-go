@@ -1,7 +1,7 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Pencil, Plus, Ruler, Trash2, Loader2 } from "lucide-react";
+import { ArrowLeft, Pencil, Plus, Ruler, Trash2, Loader2, Copy } from "lucide-react";
 import { toast } from "sonner";
 
 import { supabase } from "@/integrations/supabase/client";
@@ -14,6 +14,7 @@ import {
   fetchTemplates,
   balance,
   paidTotal,
+  type MeasurementSetRow,
 } from "@/lib/queries";
 import { appointmentLabel } from "@/lib/domain";
 import { fcfa, dateFr, fullName, initials, today } from "@/lib/format";
@@ -31,6 +32,16 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import {
   EmptyState,
   ContactButtons,
@@ -63,6 +74,10 @@ function ClientDetail() {
   const { data: business } = useBusiness();
   const [edit, setEdit] = useState(false);
   const [newMeasure, setNewMeasure] = useState(false);
+  const [deleteClientOpen, setDeleteClientOpen] = useState(false);
+  const [selectedMeasureSet, setSelectedMeasureSet] = useState<MeasurementSetRow | null>(null);
+  const [measureMode, setMeasureMode] = useState<"create" | "edit" | "copy">("create");
+  const [deleteMeasureSetId, setDeleteMeasureSetId] = useState<string | null>(null);
 
   const client = useQuery({ queryKey: ["client", clientId], queryFn: () => fetchClient(clientId) });
   const sets = useQuery({
@@ -87,6 +102,19 @@ function ClientDetail() {
       queryClient.invalidateQueries({ queryKey: ["clients"] });
       toast.success("Client supprimé");
       navigate({ to: "/clients" });
+    },
+    onError: () => toast.error("Suppression impossible"),
+  });
+
+  const deleteMeasureSet = useMutation({
+    mutationFn: async (setId: string) => {
+      const { error } = await supabase.from("measurement_sets").delete().eq("id", setId);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["measurements", clientId] });
+      toast.success("Relevé de mesures supprimé");
+      setDeleteMeasureSetId(null);
     },
     onError: () => toast.error("Suppression impossible"),
   });
@@ -161,7 +189,14 @@ function ClientDetail() {
         <TabsContent value="mesures" className="mt-5 space-y-4">
           <SectionTitle
             action={
-              <Button size="sm" onClick={() => setNewMeasure(true)}>
+              <Button
+                size="sm"
+                onClick={() => {
+                  setSelectedMeasureSet(null);
+                  setMeasureMode("create");
+                  setNewMeasure(true);
+                }}
+              >
                 <Plus className="size-4" /> Nouveau relevé
               </Button>
             }
@@ -174,13 +209,23 @@ function ClientDetail() {
             <EmptyState
               title="Aucune mesure enregistrée"
               text="Choisissez un modèle (Homme, Femme, Enfant) et saisissez les mesures. Chaque relevé est daté et conservé."
-              action={<Button onClick={() => setNewMeasure(true)}>Prendre les mesures</Button>}
+              action={
+                <Button
+                  onClick={() => {
+                    setSelectedMeasureSet(null);
+                    setMeasureMode("create");
+                    setNewMeasure(true);
+                  }}
+                >
+                  Prendre les mesures
+                </Button>
+              }
             />
           ) : (
             <div className="space-y-4">
               {(sets.data ?? []).map((set) => (
                 <div key={set.id} className="card-soft p-4">
-                  <div className="flex items-center justify-between gap-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
                     <div>
                       <p className="font-display text-sm font-semibold">
                         Mesures du {dateFr(set.recorded_at)}
@@ -189,7 +234,44 @@ function ClientDetail() {
                         {set.label || set.template_name || "Relevé"}
                       </p>
                     </div>
-                    <Ruler className="size-4 text-primary" />
+                    <div className="flex items-center gap-1">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-8 px-2 text-xs text-muted-foreground hover:text-foreground"
+                        title="Reprendre ce relevé comme base pour de nouvelles mesures"
+                        onClick={() => {
+                          setSelectedMeasureSet(set);
+                          setMeasureMode("copy");
+                          setNewMeasure(true);
+                        }}
+                      >
+                        <Copy className="mr-1 size-3.5" /> Reprendre
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-8 w-8 p-0 text-muted-foreground hover:text-foreground"
+                        title="Modifier ce relevé"
+                        onClick={() => {
+                          setSelectedMeasureSet(set);
+                          setMeasureMode("edit");
+                          setNewMeasure(true);
+                        }}
+                      >
+                        <Pencil className="size-3.5" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-8 w-8 p-0 text-muted-foreground hover:text-destructive"
+                        title="Supprimer ce relevé"
+                        onClick={() => setDeleteMeasureSetId(set.id)}
+                      >
+                        <Trash2 className="size-3.5" />
+                      </Button>
+                      <Ruler className="ml-1 size-4 text-primary" />
+                    </div>
                   </div>
                   <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-2 sm:grid-cols-3">
                     {[...(set.measurement_values ?? [])]
@@ -283,15 +365,61 @@ function ClientDetail() {
           </div>
           <Button
             variant="ghost"
-            className="text-destructive"
-            onClick={() => {
-              if (confirm("Supprimer ce client et tout son historique ?")) remove.mutate();
-            }}
+            className="text-destructive hover:bg-destructive/10"
+            onClick={() => setDeleteClientOpen(true)}
           >
             <Trash2 className="size-4" /> Supprimer le client
           </Button>
         </TabsContent>
       </Tabs>
+
+      {/* Confirmation suppression client */}
+      <AlertDialog open={deleteClientOpen} onOpenChange={setDeleteClientOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Supprimer ce client ?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Cette action supprimera définitivement {fullName(c)} ainsi que l'ensemble de son
+              historique de mesures, commandes et rendez-vous.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Annuler</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={() => remove.mutate()}
+            >
+              Supprimer
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Confirmation suppression relevé de mesures */}
+      <AlertDialog
+        open={Boolean(deleteMeasureSetId)}
+        onOpenChange={(v) => !v && setDeleteMeasureSetId(null)}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Supprimer ce relevé de mesures ?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Ce relevé sera définitivement retiré du carnet de mesures de ce client.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Annuler</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={() => {
+                if (deleteMeasureSetId) deleteMeasureSet.mutate(deleteMeasureSetId);
+              }}
+            >
+              Supprimer
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {business && (
         <>
@@ -306,6 +434,8 @@ function ClientDetail() {
             onOpenChange={setNewMeasure}
             businessId={business.id}
             clientId={clientId}
+            initialSet={selectedMeasureSet}
+            mode={measureMode}
           />
         </>
       )}
@@ -327,17 +457,45 @@ function MeasurementDialog({
   onOpenChange,
   businessId,
   clientId,
+  initialSet,
+  mode = "create",
 }: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
   businessId: string;
   clientId: string;
+  initialSet?: MeasurementSetRow | null;
+  mode?: "create" | "edit" | "copy";
 }) {
   const queryClient = useQueryClient();
   const templates = useQuery({ queryKey: ["templates"], queryFn: fetchTemplates, enabled: open });
   const [templateName, setTemplateName] = useState("");
   const [fields, setFields] = useState<{ name: string; value: string }[]>([]);
   const [extraName, setExtraName] = useState("");
+  const [notes, setNotes] = useState("");
+  const [recordedAt, setRecordedAt] = useState(today());
+
+  // Synchronise les valeurs lorsque la modale s'ouvre ou change de mode
+  useEffect(() => {
+    if (!open) return;
+    if (initialSet && (mode === "edit" || mode === "copy")) {
+      setTemplateName(initialSet.template_name ?? "");
+      setRecordedAt(mode === "edit" ? initialSet.recorded_at : today());
+      setNotes(initialSet.notes ?? "");
+      const existing = (initialSet.measurement_values ?? [])
+        .sort((a, b) => a.position - b.position)
+        .map((v) => ({
+          name: v.name,
+          value: v.value !== null ? String(v.value) : "",
+        }));
+      setFields(existing);
+    } else {
+      setTemplateName("");
+      setFields([]);
+      setNotes("");
+      setRecordedAt(today());
+    }
+  }, [open, initialSet, mode]);
 
   function pickTemplate(name: string) {
     setTemplateName(name);
@@ -346,26 +504,48 @@ function MeasurementDialog({
   }
 
   const save = useMutation({
-    mutationFn: async (payload: { recorded_at: string; notes: string }) => {
-      const { data, error } = await supabase
-        .from("measurement_sets")
-        .insert({
-          business_id: businessId,
-          client_id: clientId,
-          template_name: templateName || null,
-          label: templateName || "Relevé",
-          notes: payload.notes || null,
-          recorded_at: payload.recorded_at,
-        })
-        .select("id")
-        .single();
-      if (error) throw error;
+    mutationFn: async () => {
+      let targetSetId = initialSet?.id;
+
+      if (mode === "edit" && targetSetId) {
+        const { error: setErr } = await supabase
+          .from("measurement_sets")
+          .update({
+            template_name: templateName || null,
+            label: templateName || "Relevé",
+            notes: notes || null,
+            recorded_at: recordedAt,
+          })
+          .eq("id", targetSetId);
+        if (setErr) throw setErr;
+
+        const { error: delErr } = await supabase
+          .from("measurement_values")
+          .delete()
+          .eq("set_id", targetSetId);
+        if (delErr) throw delErr;
+      } else {
+        const { data, error } = await supabase
+          .from("measurement_sets")
+          .insert({
+            business_id: businessId,
+            client_id: clientId,
+            template_name: templateName || null,
+            label: templateName || "Relevé",
+            notes: notes || null,
+            recorded_at: recordedAt,
+          })
+          .select("id")
+          .single();
+        if (error) throw error;
+        targetSetId = (data as { id: string }).id;
+      }
 
       const values = fields
         .filter((f) => f.name.trim())
         .map((f, i) => ({
           business_id: businessId,
-          set_id: (data as { id: string }).id,
+          set_id: targetSetId!,
           name: f.name.trim(),
           value: f.value === "" ? null : Number(f.value.replace(",", ".")),
           unit: "cm",
@@ -378,7 +558,7 @@ function MeasurementDialog({
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["measurements", clientId] });
-      toast.success("Mesures enregistrées");
+      toast.success(mode === "edit" ? "Mesures modifiées" : "Mesures enregistrées");
       onOpenChange(false);
       setFields([]);
       setTemplateName("");
@@ -390,20 +570,26 @@ function MeasurementDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-lg">
         <DialogHeader>
-          <DialogTitle>Nouveau relevé de mesures</DialogTitle>
+          <DialogTitle>
+            {mode === "edit"
+              ? "Modifier le relevé de mesures"
+              : mode === "copy"
+              ? "Reprendre et actualiser les mesures"
+              : "Nouveau relevé de mesures"}
+          </DialogTitle>
           <DialogDescription>
-            Les anciennes mesures sont conservées : ce relevé s'ajoute à l'historique.
+            {mode === "edit"
+              ? "Corrigez les valeurs de ce relevé."
+              : mode === "copy"
+              ? "Crée un nouveau relevé daté avec les valeurs pré-remplies de l'ancien relevé."
+              : "Les anciennes mesures sont conservées : ce relevé s'ajoute à l'historique."}
           </DialogDescription>
         </DialogHeader>
 
         <form
           onSubmit={(e) => {
             e.preventDefault();
-            const fd = new FormData(e.currentTarget);
-            save.mutate({
-              recorded_at: String(fd.get("recorded_at") || today()),
-              notes: String(fd.get("notes") ?? ""),
-            });
+            save.mutate();
           }}
           className="space-y-4"
         >
@@ -414,7 +600,7 @@ function MeasurementDialog({
                 id="template"
                 value={templateName}
                 onChange={(e) => pickTemplate(e.target.value)}
-                className="h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm"
+                className="h-9 w-full rounded-md border border-input bg-card px-3 text-sm"
               >
                 <option value="">Choisir…</option>
                 {(templates.data ?? []).map((t) => (
@@ -426,7 +612,13 @@ function MeasurementDialog({
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="recorded_at">Date du relevé</Label>
-              <Input id="recorded_at" name="recorded_at" type="date" defaultValue={today()} />
+              <Input
+                id="recorded_at"
+                name="recorded_at"
+                type="date"
+                value={recordedAt}
+                onChange={(e) => setRecordedAt(e.target.value)}
+              />
             </div>
           </div>
 
@@ -480,7 +672,14 @@ function MeasurementDialog({
 
           <div className="space-y-1.5">
             <Label htmlFor="measure-notes">Remarques</Label>
-            <Textarea id="measure-notes" name="notes" rows={2} />
+            <Textarea
+              id="measure-notes"
+              name="notes"
+              rows={2}
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              placeholder="Remarques spécifiques à ce relevé..."
+            />
           </div>
 
           <DialogFooter>
@@ -488,7 +687,7 @@ function MeasurementDialog({
               Annuler
             </Button>
             <Button type="submit" disabled={save.isPending || fields.length === 0}>
-              {save.isPending && <Loader2 className="size-4 animate-spin" />} Enregistrer
+              {save.isPending && <Loader2 className="mr-2 size-4 animate-spin" />} Enregistrer
             </Button>
           </DialogFooter>
         </form>

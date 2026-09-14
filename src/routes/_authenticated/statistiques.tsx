@@ -1,6 +1,16 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import {
+  ResponsiveContainer,
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  Tooltip,
+  CartesianGrid,
+  Legend,
+} from "recharts";
 
 import { useBusiness } from "@/hooks/use-business";
 import { fetchClients, fetchOrders, paidTotal, balance, type OrderRow } from "@/lib/queries";
@@ -38,8 +48,8 @@ function monthLabel(key: string) {
 export function StatsPage() {
   const { data: business } = useBusiness();
   const currency = business?.currency ?? "FCFA";
-  const orders = useQuery({ queryKey: ["orders", {}], queryFn: () => fetchOrders() });
-  const clients = useQuery({ queryKey: ["clients", ""], queryFn: () => fetchClients() });
+  const orders = useQuery({ queryKey: ["orders"], queryFn: () => fetchOrders() });
+  const clients = useQuery({ queryKey: ["clients"], queryFn: () => fetchClients() });
   const [month, setMonth] = useState(() => new Date().toISOString().slice(0, 7));
 
   const months = useMemo(() => {
@@ -88,6 +98,26 @@ export function StatsPage() {
     };
   }, [orders.data, month]);
 
+  // Évolution mensuelle (derniers 6 mois)
+  const monthlyEvolution = useMemo(() => {
+    const all = orders.data ?? [];
+    const sortedChronological = [...months].sort().slice(-6);
+    return sortedChronological.map((m) => {
+      const inM = all.filter((o) => monthKey(o.ordered_at) === m);
+      const rev = inM.reduce((s, o) => s + Number(o.price), 0);
+      const col = inM.reduce((s, o) => s + paidTotal(o), 0);
+      const [y, mm] = m.split("-");
+      const d = new Date(Number(y), Number(mm) - 1, 1);
+      const shortName = d.toLocaleDateString("fr-FR", { month: "short" });
+      return {
+        mois: shortName,
+        nomComplet: monthLabel(m),
+        "Chiffre d'affaires": rev,
+        Encaissé: col,
+      };
+    });
+  }, [orders.data, months]);
+
   if (orders.isLoading) {
     return <Skeleton className="h-64 w-full rounded-xl" />;
   }
@@ -115,6 +145,7 @@ export function StatsPage() {
         Statistiques
       </SectionTitle>
 
+      {/* KPI Cards */}
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <StatCard label="Commandes du mois" value={String(stats.count)} />
         <StatCard label="Chiffre d'affaires du mois" value={fcfa(stats.revenue, currency)} />
@@ -125,6 +156,39 @@ export function StatsPage() {
         <StatCard label="En retard" value={String(stats.late)} />
         <StatCard label="Panier moyen" value={fcfa(stats.average, currency)} />
       </div>
+
+      {/* Graphique d'évolution mensuelle */}
+      <section className="card-soft p-5">
+        <h2 className="font-display text-sm font-bold">
+          Évolution du chiffre d'affaires et des encaissements
+        </h2>
+        <p className="text-xs text-muted-foreground">Historique des 6 derniers mois d'activité.</p>
+
+        <div className="mt-4 h-64 w-full">
+          <ResponsiveContainer width="100%" height="100%">
+            <BarChart data={monthlyEvolution} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" opacity={0.2} />
+              <XAxis dataKey="mois" fontSize={12} />
+              <YAxis
+                fontSize={11}
+                tickFormatter={(val) => `${Math.round(val / 1000)}k`}
+              />
+              <Tooltip
+                formatter={(val) => [fcfa(Number(val ?? 0), currency), ""]}
+                contentStyle={{
+                  backgroundColor: "var(--card)",
+                  borderColor: "var(--border)",
+                  borderRadius: "0.75rem",
+                  fontSize: "0.75rem",
+                }}
+              />
+              <Legend wrapperStyle={{ fontSize: "0.75rem", paddingTop: "0.5rem" }} />
+              <Bar dataKey="Chiffre d'affaires" fill="var(--primary)" radius={[4, 4, 0, 0]} />
+              <Bar dataKey="Encaissé" fill="var(--success)" radius={[4, 4, 0, 0]} />
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      </section>
 
       <div className="grid gap-4 lg:grid-cols-2">
         <section className="card-soft p-5">

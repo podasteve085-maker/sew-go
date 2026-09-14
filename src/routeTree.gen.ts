@@ -19,6 +19,7 @@ import { Route as AuthenticatedStatistiquesRouteImport } from './routes/_authent
 import { Route as AuthenticatedClientsIndexRouteImport } from './routes/_authenticated/clients.index'
 import { Route as AuthenticatedClientsClientIdRouteImport } from './routes/_authenticated/clients.$clientId'
 import { Route as AuthenticatedCommandesIndexRouteImport } from './routes/_authenticated/commandes.index'
+import { Route as AuthenticatedCommandesOrderIdRouteImport } from './routes/_authenticated/commandes.$orderId'
 import { Route as AuthenticatedCommandesNouvelleRouteImport } from './routes/_authenticated/commandes.nouvelle'
 
 const IndexRoute = IndexRouteImport.update({
@@ -74,6 +75,12 @@ const AuthenticatedCommandesIndexRoute =
     path: '/commandes/',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
+const AuthenticatedCommandesOrderIdRoute =
+  AuthenticatedCommandesOrderIdRouteImport.update({
+    id: '/commandes/$orderId',
+    path: '/commandes/$orderId',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
 const AuthenticatedCommandesNouvelleRoute =
   AuthenticatedCommandesNouvelleRouteImport.update({
     id: '/commandes/nouvelle',
@@ -89,6 +96,7 @@ export interface FileRoutesByFullPath {
   '/rendez-vous': typeof AuthenticatedRendezVousRoute
   '/statistiques': typeof AuthenticatedStatistiquesRoute
   '/clients/$clientId': typeof AuthenticatedClientsClientIdRoute
+  '/commandes/$orderId': typeof AuthenticatedCommandesOrderIdRoute
   '/commandes/nouvelle': typeof AuthenticatedCommandesNouvelleRoute
   '/clients/': typeof AuthenticatedClientsIndexRoute
   '/commandes/': typeof AuthenticatedCommandesIndexRoute
@@ -101,6 +109,7 @@ export interface FileRoutesByTo {
   '/rendez-vous': typeof AuthenticatedRendezVousRoute
   '/statistiques': typeof AuthenticatedStatistiquesRoute
   '/clients/$clientId': typeof AuthenticatedClientsClientIdRoute
+  '/commandes/$orderId': typeof AuthenticatedCommandesOrderIdRoute
   '/commandes/nouvelle': typeof AuthenticatedCommandesNouvelleRoute
   '/clients': typeof AuthenticatedClientsIndexRoute
   '/commandes': typeof AuthenticatedCommandesIndexRoute
@@ -115,6 +124,7 @@ export interface FileRoutesById {
   '/_authenticated/rendez-vous': typeof AuthenticatedRendezVousRoute
   '/_authenticated/statistiques': typeof AuthenticatedStatistiquesRoute
   '/_authenticated/clients/$clientId': typeof AuthenticatedClientsClientIdRoute
+  '/_authenticated/commandes/$orderId': typeof AuthenticatedCommandesOrderIdRoute
   '/_authenticated/commandes/nouvelle': typeof AuthenticatedCommandesNouvelleRoute
   '/_authenticated/clients/': typeof AuthenticatedClientsIndexRoute
   '/_authenticated/commandes/': typeof AuthenticatedCommandesIndexRoute
@@ -129,6 +139,7 @@ export interface FileRouteTypes {
     | '/rendez-vous'
     | '/statistiques'
     | '/clients/$clientId'
+    | '/commandes/$orderId'
     | '/commandes/nouvelle'
     | '/clients/'
     | '/commandes/'
@@ -141,6 +152,7 @@ export interface FileRouteTypes {
     | '/rendez-vous'
     | '/statistiques'
     | '/clients/$clientId'
+    | '/commandes/$orderId'
     | '/commandes/nouvelle'
     | '/clients'
     | '/commandes'
@@ -154,6 +166,7 @@ export interface FileRouteTypes {
     | '/_authenticated/rendez-vous'
     | '/_authenticated/statistiques'
     | '/_authenticated/clients/$clientId'
+    | '/_authenticated/commandes/$orderId'
     | '/_authenticated/commandes/nouvelle'
     | '/_authenticated/clients/'
     | '/_authenticated/commandes/'
@@ -237,6 +250,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedCommandesIndexRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/_authenticated/commandes/$orderId': {
+      id: '/_authenticated/commandes/$orderId'
+      path: '/commandes/$orderId'
+      fullPath: '/commandes/$orderId'
+      preLoaderRoute: typeof AuthenticatedCommandesOrderIdRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
     '/_authenticated/commandes/nouvelle': {
       id: '/_authenticated/commandes/nouvelle'
       path: '/commandes/nouvelle'
@@ -253,6 +273,7 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedRendezVousRoute: typeof AuthenticatedRendezVousRoute
   AuthenticatedStatistiquesRoute: typeof AuthenticatedStatistiquesRoute
   AuthenticatedClientsClientIdRoute: typeof AuthenticatedClientsClientIdRoute
+  AuthenticatedCommandesOrderIdRoute: typeof AuthenticatedCommandesOrderIdRoute
   AuthenticatedCommandesNouvelleRoute: typeof AuthenticatedCommandesNouvelleRoute
   AuthenticatedClientsIndexRoute: typeof AuthenticatedClientsIndexRoute
   AuthenticatedCommandesIndexRoute: typeof AuthenticatedCommandesIndexRoute
@@ -264,6 +285,7 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedRendezVousRoute: AuthenticatedRendezVousRoute,
   AuthenticatedStatistiquesRoute: AuthenticatedStatistiquesRoute,
   AuthenticatedClientsClientIdRoute: AuthenticatedClientsClientIdRoute,
+  AuthenticatedCommandesOrderIdRoute: AuthenticatedCommandesOrderIdRoute,
   AuthenticatedCommandesNouvelleRoute: AuthenticatedCommandesNouvelleRoute,
   AuthenticatedClientsIndexRoute: AuthenticatedClientsIndexRoute,
   AuthenticatedCommandesIndexRoute: AuthenticatedCommandesIndexRoute,

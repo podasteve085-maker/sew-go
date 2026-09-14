@@ -59,6 +59,16 @@ export type AppointmentRow = {
   clients?: Pick<ClientRow, "first_name" | "last_name" | "phone" | "whatsapp"> | null;
 };
 
+export type OrderImageRow = {
+  id: string;
+  business_id: string;
+  order_id: string;
+  path: string;
+  kind: string;
+  caption: string | null;
+  created_at: string;
+};
+
 export type MeasurementSetRow = {
   id: string;
   client_id: string;
@@ -153,6 +163,16 @@ export async function fetchPayments(orderId: string) {
     .order("paid_at", { ascending: false });
   if (error) throw error;
   return (data ?? []) as unknown as PaymentRow[];
+}
+
+export async function fetchOrderImages(orderId: string) {
+  const { data, error } = await supabase
+    .from("order_images")
+    .select("*")
+    .eq("order_id", orderId)
+    .order("created_at", { ascending: true });
+  if (error) throw error;
+  return (data ?? []) as unknown as OrderImageRow[];
 }
 
 export async function fetchGarmentTypes() {

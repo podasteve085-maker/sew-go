@@ -38,7 +38,7 @@ export const Route = createFileRoute("/_authenticated/commandes/")({
 function OrdersPage() {
   const [filter, setFilter] = useState<(typeof FILTERS)[number]["value"]>("actives");
   const [term, setTerm] = useState("");
-  const orders = useQuery({ queryKey: ["orders", {}], queryFn: () => fetchOrders() });
+  const orders = useQuery({ queryKey: ["orders"], queryFn: () => fetchOrders() });
 
   const list = useMemo(() => {
     const all = orders.data ?? [];

@@ -9,6 +9,14 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 
 export const Route = createFileRoute("/auth")({
   ssr: false,
@@ -34,12 +42,33 @@ export const Route = createFileRoute("/auth")({
 function AuthPage() {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
+  const [resetOpen, setResetOpen] = useState(false);
+  const [resetEmail, setResetEmail] = useState("");
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
       if (data.session) navigate({ to: "/dashboard", replace: true });
     });
   }, [navigate]);
+
+  async function handleResetPassword(e: React.FormEvent) {
+    e.preventDefault();
+    if (!resetEmail.trim()) return;
+    setLoading(true);
+    const { error } = await supabase.auth.resetPasswordForEmail(resetEmail.trim(), {
+      redirectTo: `${window.location.origin}/auth`,
+    });
+    setLoading(false);
+    if (error) {
+      toast.error("Impossible d'envoyer l'email", { description: error.message });
+    } else {
+      toast.success("Email envoyé", {
+        description: "Consultez vos messages pour réinitialiser votre mot de passe.",
+      });
+      setResetOpen(false);
+      setResetEmail("");
+    }
+  }
 
   async function signIn(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -126,7 +155,16 @@ function AuthPage() {
                   <Input id="in-email" name="email" type="email" required autoComplete="email" />
                 </div>
                 <div className="space-y-1.5">
-                  <Label htmlFor="in-password">Mot de passe</Label>
+                  <div className="flex items-center justify-between">
+                    <Label htmlFor="in-password">Mot de passe</Label>
+                    <button
+                      type="button"
+                      onClick={() => setResetOpen(true)}
+                      className="text-xs text-primary hover:underline"
+                    >
+                      Mot de passe oublié ?
+                    </button>
+                  </div>
                   <Input
                     id="in-password"
                     name="password"
@@ -194,6 +232,39 @@ function AuthPage() {
           Vos clients, mesures et commandes restent privés : personne d'autre que votre atelier n'y a
           accès.
         </p>
+
+        {/* Modal Réinitialisation mot de passe */}
+        <Dialog open={resetOpen} onOpenChange={setResetOpen}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle>Mot de passe oublié ?</DialogTitle>
+              <DialogDescription>
+                Indiquez votre adresse email. Nous vous enverrons un lien sécurisé pour créer un nouveau mot de passe.
+              </DialogDescription>
+            </DialogHeader>
+            <form onSubmit={handleResetPassword} className="space-y-4">
+              <div className="space-y-1.5">
+                <Label htmlFor="reset-email">Votre adresse email</Label>
+                <Input
+                  id="reset-email"
+                  type="email"
+                  required
+                  value={resetEmail}
+                  onChange={(e) => setResetEmail(e.target.value)}
+                  placeholder="atelier@example.com"
+                />
+              </div>
+              <DialogFooter>
+                <Button type="button" variant="ghost" onClick={() => setResetOpen(false)}>
+                  Annuler
+                </Button>
+                <Button type="submit" disabled={loading || !resetEmail.trim()}>
+                  {loading && <Loader2 className="mr-2 size-4 animate-spin" />} Envoyer le lien
+                </Button>
+              </DialogFooter>
+            </form>
+          </DialogContent>
+        </Dialog>
       </div>
     </div>
   );
