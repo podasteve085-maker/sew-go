@@ -12,6 +12,7 @@ import {
   Ruler,
   Shirt,
   MessageCircle,
+  BookOpen,
 } from "lucide-react";
 
 import { supabase } from "@/integrations/supabase/client";
@@ -155,20 +156,25 @@ function Dashboard() {
         </div>
       </div>
 
-      <div className="grid gap-2.5 sm:grid-cols-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5">
         <Button asChild size="lg" className="min-h-[3rem] justify-start text-sm font-bold shadow-sm">
           <Link to="/commandes/nouvelle">
             <Plus className="mr-1.5 size-5" /> Nouvelle commande
           </Link>
         </Button>
         <Button asChild size="lg" variant="secondary" className="min-h-[3rem] justify-start text-sm font-bold">
+          <Link to="/catalogue">
+            <BookOpen className="mr-1.5 size-5 text-primary" /> Lookbook / Catalogue
+          </Link>
+        </Button>
+        <Button asChild size="lg" variant="outline" className="min-h-[3rem] justify-start text-sm font-bold">
           <Link to="/clients" search={{ nouveau: true }}>
             <UserPlus className="mr-1.5 size-5 text-blue-600" /> Nouveau client
           </Link>
         </Button>
         <Button asChild size="lg" variant="outline" className="min-h-[3rem] justify-start text-sm font-bold">
           <Link to="/rendez-vous" search={{ nouveau: true }}>
-            <CalendarPlus className="mr-1.5 size-5 text-indigo-600" /> Nouveau rendez-vous
+            <CalendarPlus className="mr-1.5 size-5 text-indigo-600" /> Nouveau RDV
           </Link>
         </Button>
       </div>

@@ -214,3 +214,57 @@ export async function fetchTemplates() {
   if (error) throw error;
   return (data ?? []) as unknown as { id: string; name: string; fields: string[] }[];
 }
+
+export type CatalogModelRow = {
+  id: string;
+  business_id: string;
+  name: string;
+  category: string;
+  description: string | null;
+  default_price: number | null;
+  fabric_needed: string | null;
+  photo_paths: string[];
+  tags: string[];
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
+export async function fetchCatalogModels(category?: string) {
+  try {
+    let query = supabase.from("catalog_models").select("*");
+    if (category && category !== "all") {
+      query = query.eq("category", category);
+    }
+    const { data, error } = await query
+      .eq("is_active", true)
+      .order("created_at", { ascending: false });
+    if (error) {
+      console.warn("fetchCatalogModels:", error.message);
+      return [] as CatalogModelRow[];
+    }
+    return (data ?? []) as unknown as CatalogModelRow[];
+  } catch (err) {
+    console.warn("fetchCatalogModels catch:", err);
+    return [] as CatalogModelRow[];
+  }
+}
+
+export async function fetchCatalogModel(id: string) {
+  const { data, error } = await supabase
+    .from("catalog_models")
+    .select("*")
+    .eq("id", id)
+    .maybeSingle();
+  if (error) throw error;
+  return (data ?? null) as unknown as CatalogModelRow | null;
+}
+
+export async function deleteCatalogModel(id: string) {
+  const { error } = await supabase
+    .from("catalog_models")
+    .update({ is_active: false })
+    .eq("id", id);
+  if (error) throw error;
+}
+

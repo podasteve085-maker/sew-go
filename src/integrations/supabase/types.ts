@@ -116,6 +116,59 @@ export type Database = {
         }
         Relationships: []
       }
+      catalog_models: {
+        Row: {
+          business_id: string
+          category: string
+          created_at: string
+          default_price: number | null
+          description: string | null
+          fabric_needed: string | null
+          id: string
+          is_active: boolean
+          name: string
+          photo_paths: string[]
+          tags: string[]
+          updated_at: string
+        }
+        Insert: {
+          business_id: string
+          category?: string
+          created_at?: string
+          default_price?: number | null
+          description?: string | null
+          fabric_needed?: string | null
+          id?: string
+          is_active?: boolean
+          name: string
+          photo_paths?: string[]
+          tags?: string[]
+          updated_at?: string
+        }
+        Update: {
+          business_id?: string
+          category?: string
+          created_at?: string
+          default_price?: number | null
+          description?: string | null
+          fabric_needed?: string | null
+          id?: string
+          is_active?: boolean
+          name?: string
+          photo_paths?: string[]
+          tags?: string[]
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "catalog_models_business_id_fkey"
+            columns: ["business_id"]
+            isOneToOne: false
+            referencedRelation: "businesses"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       clients: {
         Row: {
           address: string | null

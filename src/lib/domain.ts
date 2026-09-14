@@ -83,3 +83,21 @@ export function isLate(order: { due_date: string | null; status: string }) {
 export function isActive(status: string) {
   return status !== "livree" && status !== "annulee";
 }
+
+export const CATALOG_CATEGORIES = [
+  { value: "boubou", label: "Boubou & Bazin", icon: "👔" },
+  { value: "faso_dan_fani", label: "Faso Dan Fani & Koko Dunda", icon: "🧵" },
+  { value: "robe", label: "Robe & Cérémonie", icon: "👗" },
+  { value: "chemise", label: "Chemise & Tunique", icon: "👕" },
+  { value: "costume", label: "Costume & Veste", icon: "🧥" },
+  { value: "enfant", label: "Enfant", icon: "🧒" },
+  { value: "traditionnel", label: "Tenue Traditionnelle", icon: "✨" },
+  { value: "autre", label: "Autre création", icon: "✂️" },
+] as const;
+
+export type CatalogCategory = (typeof CATALOG_CATEGORIES)[number]["value"];
+
+export function catalogCategoryLabel(category: string) {
+  return CATALOG_CATEGORIES.find((c) => c.value === category)?.label ?? category;
+}
+

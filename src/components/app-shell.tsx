@@ -13,6 +13,7 @@ import {
   Search,
   LogOut,
   Plus,
+  BookOpen,
 } from "lucide-react";
 
 import { supabase } from "@/integrations/supabase/client";
@@ -35,6 +36,7 @@ const NAV = [
   { to: "/clients", label: "Clients", icon: Users },
   { to: "/mesures", label: "Mesures", icon: Ruler },
   { to: "/commandes", label: "Commandes", icon: Scissors },
+  { to: "/catalogue", label: "Lookbook", icon: BookOpen },
   { to: "/rendez-vous", label: "Rendez-vous", icon: CalendarDays },
   { to: "/statistiques", label: "Statistiques", icon: BarChart3 },
   { to: "/atelier", label: "Mon atelier", icon: Settings },
@@ -43,9 +45,9 @@ const NAV = [
 const MOBILE_NAV = [
   { to: "/dashboard", label: "Accueil", icon: Home },
   { to: "/clients", label: "Clients", icon: Users },
-  { to: "/mesures", label: "Mesures", icon: Ruler },
+  { to: "/catalogue", label: "Lookbook", icon: BookOpen },
   { to: "/commandes", label: "Commandes", icon: Scissors },
-  { to: "/rendez-vous", label: "RDV", icon: CalendarDays },
+  { to: "/mesures", label: "Mesures", icon: Ruler },
 ] as const;
 
 export function AppShell({ children }: { children: ReactNode }) {

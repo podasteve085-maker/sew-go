@@ -170,9 +170,19 @@ export function StoredImage({
   alt: string;
   className?: string;
 }) {
-  const { data, isLoading } = useSignedUrl(path);
+  const isDirect = Boolean(
+    path &&
+      (path.startsWith("http://") ||
+        path.startsWith("https://") ||
+        path.startsWith("data:") ||
+        path.startsWith("/")),
+  );
+  const { data, isLoading } = useSignedUrl(isDirect ? null : path);
   const cls = className ?? "size-16 rounded-lg object-cover";
   if (!path) return null;
+  if (isDirect) {
+    return <img src={path} alt={alt} loading="lazy" className={cls} />;
+  }
   if (isLoading || !data) return <Skeleton className={cls} />;
   return <img src={data} alt={alt} loading="lazy" className={cls} />;
 }

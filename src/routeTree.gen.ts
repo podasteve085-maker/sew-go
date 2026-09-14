@@ -13,6 +13,7 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as AuthenticatedRouteRouteImport } from './routes/_authenticated/route'
 import { Route as AuthRouteImport } from './routes/auth'
 import { Route as AuthenticatedAtelierRouteImport } from './routes/_authenticated/atelier'
+import { Route as AuthenticatedCatalogueRouteImport } from './routes/_authenticated/catalogue'
 import { Route as AuthenticatedDashboardRouteImport } from './routes/_authenticated/dashboard'
 import { Route as AuthenticatedMesuresRouteImport } from './routes/_authenticated/mesures'
 import { Route as AuthenticatedRendezVousRouteImport } from './routes/_authenticated/rendez-vous'
@@ -40,6 +41,11 @@ const AuthRoute = AuthRouteImport.update({
 const AuthenticatedAtelierRoute = AuthenticatedAtelierRouteImport.update({
   id: '/atelier',
   path: '/atelier',
+  getParentRoute: () => AuthenticatedRouteRoute,
+} as any)
+const AuthenticatedCatalogueRoute = AuthenticatedCatalogueRouteImport.update({
+  id: '/catalogue',
+  path: '/catalogue',
   getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
 const AuthenticatedDashboardRoute = AuthenticatedDashboardRouteImport.update({
@@ -98,6 +104,7 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/auth': typeof AuthRoute
   '/atelier': typeof AuthenticatedAtelierRoute
+  '/catalogue': typeof AuthenticatedCatalogueRoute
   '/dashboard': typeof AuthenticatedDashboardRoute
   '/mesures': typeof AuthenticatedMesuresRoute
   '/rendez-vous': typeof AuthenticatedRendezVousRoute
@@ -112,6 +119,7 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/auth': typeof AuthRoute
   '/atelier': typeof AuthenticatedAtelierRoute
+  '/catalogue': typeof AuthenticatedCatalogueRoute
   '/dashboard': typeof AuthenticatedDashboardRoute
   '/mesures': typeof AuthenticatedMesuresRoute
   '/rendez-vous': typeof AuthenticatedRendezVousRoute
@@ -128,6 +136,7 @@ export interface FileRoutesById {
   '/_authenticated': typeof AuthenticatedRouteRouteWithChildren
   '/auth': typeof AuthRoute
   '/_authenticated/atelier': typeof AuthenticatedAtelierRoute
+  '/_authenticated/catalogue': typeof AuthenticatedCatalogueRoute
   '/_authenticated/dashboard': typeof AuthenticatedDashboardRoute
   '/_authenticated/mesures': typeof AuthenticatedMesuresRoute
   '/_authenticated/rendez-vous': typeof AuthenticatedRendezVousRoute
@@ -144,6 +153,7 @@ export interface FileRouteTypes {
     | '/'
     | '/auth'
     | '/atelier'
+    | '/catalogue'
     | '/dashboard'
     | '/mesures'
     | '/rendez-vous'
@@ -158,6 +168,7 @@ export interface FileRouteTypes {
     | '/'
     | '/auth'
     | '/atelier'
+    | '/catalogue'
     | '/dashboard'
     | '/mesures'
     | '/rendez-vous'
@@ -173,6 +184,7 @@ export interface FileRouteTypes {
     | '/_authenticated'
     | '/auth'
     | '/_authenticated/atelier'
+    | '/_authenticated/catalogue'
     | '/_authenticated/dashboard'
     | '/_authenticated/mesures'
     | '/_authenticated/rendez-vous'
@@ -218,6 +230,13 @@ declare module '@tanstack/react-router' {
       path: '/atelier'
       fullPath: '/atelier'
       preLoaderRoute: typeof AuthenticatedAtelierRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/catalogue': {
+      id: '/_authenticated/catalogue'
+      path: '/catalogue'
+      fullPath: '/catalogue'
+      preLoaderRoute: typeof AuthenticatedCatalogueRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
     '/_authenticated/dashboard': {
@@ -288,6 +307,7 @@ declare module '@tanstack/react-router' {
 
 interface AuthenticatedRouteRouteChildren {
   AuthenticatedAtelierRoute: typeof AuthenticatedAtelierRoute
+  AuthenticatedCatalogueRoute: typeof AuthenticatedCatalogueRoute
   AuthenticatedDashboardRoute: typeof AuthenticatedDashboardRoute
   AuthenticatedMesuresRoute: typeof AuthenticatedMesuresRoute
   AuthenticatedRendezVousRoute: typeof AuthenticatedRendezVousRoute
@@ -301,6 +321,7 @@ interface AuthenticatedRouteRouteChildren {
 
 const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedAtelierRoute: AuthenticatedAtelierRoute,
+  AuthenticatedCatalogueRoute: AuthenticatedCatalogueRoute,
   AuthenticatedDashboardRoute: AuthenticatedDashboardRoute,
   AuthenticatedMesuresRoute: AuthenticatedMesuresRoute,
   AuthenticatedRendezVousRoute: AuthenticatedRendezVousRoute,

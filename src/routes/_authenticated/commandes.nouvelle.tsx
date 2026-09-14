@@ -29,8 +29,21 @@ import { ClientFormDialog } from "@/components/client-form-dialog";
 import { MeasurementDialog } from "@/components/measurement-dialog";
 
 export const Route = createFileRoute("/_authenticated/commandes/nouvelle")({
-  validateSearch: (search: Record<string, unknown>): { client?: string } =>
-    typeof search["client"] === "string" ? { client: search["client"] } : {},
+  validateSearch: (
+    search: Record<string, unknown>,
+  ): {
+    client?: string | undefined;
+    model?: string | undefined;
+    garment?: string | undefined;
+    price?: string | undefined;
+    fabric?: string | undefined;
+  } => ({
+    client: typeof search["client"] === "string" ? search["client"] : undefined,
+    model: typeof search["model"] === "string" ? search["model"] : undefined,
+    garment: typeof search["garment"] === "string" ? search["garment"] : undefined,
+    price: typeof search["price"] === "string" ? search["price"] : undefined,
+    fabric: typeof search["fabric"] === "string" ? search["fabric"] : undefined,
+  }),
   head: () => ({
     meta: [
       { title: "Nouvelle commande — CouturPro" },
@@ -47,12 +60,12 @@ export const Route = createFileRoute("/_authenticated/commandes/nouvelle")({
 });
 
 function NewOrder() {
-  const { client: clientParam } = Route.useSearch();
+  const search = Route.useSearch();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const { data: business } = useBusiness();
 
-  const [selectedClientId, setSelectedClientId] = useState<string>(clientParam ?? "");
+  const [selectedClientId, setSelectedClientId] = useState<string>(search.client ?? "");
   const [openNewClient, setOpenNewClient] = useState(false);
   const [openNewMeasure, setOpenNewMeasure] = useState(false);
 
@@ -68,8 +81,9 @@ function NewOrder() {
 
   const latestMeasure = clientMeasures.data?.[0];
 
-  const [garmentType, setGarmentType] = useState("");
-  const [price, setPrice] = useState("");
+  const [garmentType, setGarmentType] = useState(search.garment ?? "");
+  const [price, setPrice] = useState(search.price ?? "");
+  const [fabric, setFabric] = useState(search.fabric ?? "");
   const [deposit, setDeposit] = useState("");
   const [images, setImages] = useState<{ path: string; kind: string }[]>([]);
   const [uploading, setUploading] = useState(false);
@@ -201,6 +215,16 @@ function NewOrder() {
           create.mutate(values);
         }}
       >
+        {search.model && (
+          <div className="flex items-center justify-between rounded-lg border border-primary/20 bg-primary/10 px-3.5 py-2 text-xs font-semibold text-primary">
+            <span className="flex items-center gap-1.5">
+              <Sparkles className="size-4" /> Modèle Lookbook : <strong>{search.garment || "Sélectionné"}</strong>
+            </span>
+            <Link to="/catalogue" className="underline hover:opacity-80">
+              Changer
+            </Link>
+          </div>
+        )}
         {/* Client Selector with inline Create button */}
         <div className="space-y-1.5">
           <div className="flex items-center justify-between">
@@ -313,7 +337,14 @@ function NewOrder() {
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="fabric">Tissu</Label>
-            <Input id="fabric" name="fabric" placeholder="Faso Dan Fani, Bazin, Wax…" className="h-10 text-base sm:text-sm" />
+            <Input
+              id="fabric"
+              name="fabric"
+              placeholder="Faso Dan Fani, Bazin, Wax…"
+              value={fabric}
+              onChange={(e) => setFabric(e.target.value)}
+              className="h-10 text-base sm:text-sm"
+            />
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="quantity">Quantité</Label>
