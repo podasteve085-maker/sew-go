@@ -18,9 +18,11 @@ import {
   Database,
   Copy,
   Check,
+  Loader2,
 } from "lucide-react";
 import { toast } from "sonner";
 
+import { supabase } from "@/integrations/supabase/client";
 import { useBusiness } from "@/hooks/use-business";
 import {
   fetchCatalogModels,
@@ -105,6 +107,86 @@ export function CataloguePage() {
     },
     onError: (err: unknown) => {
       const msg = err instanceof Error ? err.message : "Erreur lors de la suppression";
+      toast.error(msg);
+    },
+  });
+
+  const seedMutation = useMutation({
+    mutationFn: async () => {
+      if (!business) throw new Error("Atelier non identifié");
+      const sampleModels = [
+        {
+          business_id: business.id,
+          name: "Grand Boubou 3 Pièces Bazin Riche",
+          category: "boubou",
+          description:
+            "Boubou traditionnel avec broderie fil d'or artisanale sur l'encolure et les poches, pantalon assorti et sous-vêtement.",
+          default_price: 45000,
+          fabric_needed: "5 mètres de Bazin Getzner ou riche",
+          photo_paths: [] as string[],
+          tags: ["Tabaski", "Cérémonie", "Vendredi", "Luxe", "Broderie"],
+          is_active: true,
+        },
+        {
+          business_id: business.id,
+          name: "Ensemble Veste & Pantalon Faso Dan Fani",
+          category: "faso_dan_fani",
+          description:
+            "Tenue moderne en pagne tissé traditionnel burkinabè, coupe cintrée, col mao et finitions soignées.",
+          default_price: 35000,
+          fabric_needed: "3 pagnes Faso Dan Fani tissés main",
+          photo_paths: [] as string[],
+          tags: ["Traditionnel", "Officiel", "Mariage", "Faso Dan Fani"],
+          is_active: true,
+        },
+        {
+          business_id: business.id,
+          name: "Robe Sirène Cérémonie en Koko Dunda",
+          category: "robe",
+          description:
+            "Robe longue élégante avec découpes féminines, volant aux chevilles et motifs éclatants teints à la main.",
+          default_price: 28000,
+          fabric_needed: "2.5 pagnes Koko Dunda ou Wax",
+          photo_paths: [] as string[],
+          tags: ["Mariage", "Soirée", "Élégance", "Koko Dunda"],
+          is_active: true,
+        },
+        {
+          business_id: business.id,
+          name: "Chemise Tunique Col Officier Brodé",
+          category: "chemise",
+          description:
+            "Chemise mi-longue pour homme avec boutonnage invisible et broderie ton sur ton sur la poitrine.",
+          default_price: 15000,
+          fabric_needed: "2.5 mètres de lin ou coton égyptien",
+          photo_paths: [] as string[],
+          tags: ["Vendredi", "Casual", "Chic", "Bureau"],
+          is_active: true,
+        },
+        {
+          business_id: business.id,
+          name: "Costume Homme 2 Pièces Coupe Italienne",
+          category: "costume",
+          description:
+            "Veste 2 boutons avec doublure satin respirante et pantalon coupe ajustée, tombé impeccable.",
+          default_price: 60000,
+          fabric_needed: "3.5 mètres de drap de laine froide",
+          photo_paths: [] as string[],
+          tags: ["Mariage", "Affaires", "Gala"],
+          is_active: true,
+        },
+      ];
+
+      const { error } = await supabase.from("catalog_models").insert(sampleModels);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["catalog-models"] });
+      toast.success("5 modèles d'inspiration créés dans votre catalogue !");
+    },
+    onError: (err: unknown) => {
+      const msg =
+        err instanceof Error ? err.message : "Erreur lors de l'ajout des modèles d'exemple";
       toast.error(msg);
     },
   });
@@ -302,11 +384,20 @@ CREATE POLICY "tenant catalog_models" ON public.catalog_models FOR ALL TO authen
                   <Plus className="mr-1.5 size-4" /> Ajouter mon premier modèle
                 </Button>
                 <Button
-                  variant="outline"
-                  onClick={() => setShowSqlHelp((v) => !v)}
-                  className="text-xs"
+                  variant="secondary"
+                  onClick={() => seedMutation.mutate()}
+                  disabled={seedMutation.isPending}
+                  className="font-bold shadow-xs"
                 >
-                  <Database className="mr-1.5 size-3.5" /> Initialisation base de données
+                  {seedMutation.isPending ? (
+                    <>
+                      <Loader2 className="mr-1.5 size-4 animate-spin" /> Ajout en cours...
+                    </>
+                  ) : (
+                    <>
+                      <Sparkles className="mr-1.5 size-4 text-primary" /> Charger 5 modèles d'exemple
+                    </>
+                  )}
                 </Button>
               </div>
             }
