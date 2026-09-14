@@ -95,8 +95,38 @@ function Dashboard() {
         </p>
       </header>
 
-      <div className="grid grid-cols-2 gap-2.5 sm:gap-3 sm:grid-cols-3 lg:grid-cols-6">
-        <Link to="/clients" className="block transition-transform active:scale-98">
+      <div className="grid grid-cols-2 gap-2 sm:gap-3 sm:grid-cols-3 lg:grid-cols-6">
+        <Link to="/commandes" className="block transition-transform active:scale-95">
+          <StatCard
+            label="En cours"
+            icon={Scissors}
+            iconColor="text-orange-600"
+            iconBg="bg-orange-500/15"
+            value={orders.isLoading ? "…" : active.length}
+            hint={late.length ? `${late.length} en retard` : undefined}
+          />
+        </Link>
+        <Link to="/commandes" className="block transition-transform active:scale-95">
+          <StatCard
+            label="À livrer"
+            icon={PackageCheck}
+            iconColor="text-emerald-600"
+            iconBg="bg-emerald-500/15"
+            value={toDeliver.length}
+            hint="7 jours"
+          />
+        </Link>
+        <Link to="/commandes" className="block transition-transform active:scale-95">
+          <StatCard
+            label="Atelier"
+            icon={Shirt}
+            iconColor="text-purple-600"
+            iconBg="bg-purple-500/15"
+            value={orders.isLoading ? "…" : inMaking.length}
+            hint="en coupe"
+          />
+        </Link>
+        <Link to="/clients" className="block transition-transform active:scale-95">
           <StatCard
             label="Clients"
             icon={Users}
@@ -105,44 +135,13 @@ function Dashboard() {
             value={clientsCount.isLoading ? "…" : clientsCount.data}
           />
         </Link>
-        <Link to="/commandes" className="block transition-transform active:scale-98">
+        <Link to="/rendez-vous" className="block transition-transform active:scale-95">
           <StatCard
-            label="En cours"
-            icon={Scissors}
-            iconColor="text-orange-600"
-            iconBg="bg-orange-500/15"
-            value={orders.isLoading ? "…" : active.length}
-            hint={late.length ? `⚠️ ${late.length} en retard` : undefined}
-          />
-        </Link>
-        <Link to="/commandes" className="block transition-transform active:scale-98">
-          <StatCard
-            label="À confectionner"
-            icon={Shirt}
-            iconColor="text-purple-600"
-            iconBg="bg-purple-500/15"
-            value={orders.isLoading ? "…" : inMaking.length}
-            hint="coupe & montage"
-          />
-        </Link>
-        <Link to="/commandes" className="block transition-transform active:scale-98">
-          <StatCard
-            label="À livrer"
-            icon={PackageCheck}
-            iconColor="text-emerald-600"
-            iconBg="bg-emerald-500/15"
-            value={toDeliver.length}
-            hint="sous 7 jours"
-          />
-        </Link>
-        <Link to="/rendez-vous" className="block transition-transform active:scale-98">
-          <StatCard
-            label="Rendez-vous"
+            label="RDV du jour"
             icon={CalendarDays}
             iconColor="text-indigo-600"
             iconBg="bg-indigo-500/15"
             value={todayAppts.length}
-            hint="aujourd'hui"
           />
         </Link>
         <div className="col-span-2 sm:col-span-1">
@@ -151,30 +150,31 @@ function Dashboard() {
             icon={Wallet}
             iconColor="text-amber-600"
             iconBg="bg-amber-500/15"
-            value={<span className="text-lg font-extrabold sm:text-xl">{fcfa(outstanding, business?.currency)}</span>}
+            value={<span className="text-base font-extrabold sm:text-lg lg:text-xl">{fcfa(outstanding, business?.currency)}</span>}
           />
         </div>
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5">
-        <Button asChild size="lg" className="min-h-[3rem] justify-start text-sm font-bold shadow-sm">
+      {/* Raccourcis 1-clic iconographiques */}
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 sm:gap-2.5">
+        <Button asChild size="default" className="h-11 justify-start text-xs sm:text-sm font-bold shadow-xs">
           <Link to="/commandes/nouvelle">
-            <Plus className="mr-1.5 size-5" /> Nouvelle commande
+            <Plus className="mr-1.5 size-4.5 shrink-0" /> Commande
           </Link>
         </Button>
-        <Button asChild size="lg" variant="secondary" className="min-h-[3rem] justify-start text-sm font-bold">
+        <Button asChild size="default" variant="secondary" className="h-11 justify-start text-xs sm:text-sm font-bold">
           <Link to="/catalogue">
-            <BookOpen className="mr-1.5 size-5 text-primary" /> Lookbook / Catalogue
+            <BookOpen className="mr-1.5 size-4.5 shrink-0 text-primary" /> Lookbook
           </Link>
         </Button>
-        <Button asChild size="lg" variant="outline" className="min-h-[3rem] justify-start text-sm font-bold">
+        <Button asChild size="default" variant="outline" className="h-11 justify-start text-xs sm:text-sm font-bold">
           <Link to="/clients" search={{ nouveau: true }}>
-            <UserPlus className="mr-1.5 size-5 text-blue-600" /> Nouveau client
+            <UserPlus className="mr-1.5 size-4.5 shrink-0 text-blue-600" /> Client
           </Link>
         </Button>
-        <Button asChild size="lg" variant="outline" className="min-h-[3rem] justify-start text-sm font-bold">
+        <Button asChild size="default" variant="outline" className="h-11 justify-start text-xs sm:text-sm font-bold">
           <Link to="/rendez-vous" search={{ nouveau: true }}>
-            <CalendarPlus className="mr-1.5 size-5 text-indigo-600" /> Nouveau RDV
+            <CalendarPlus className="mr-1.5 size-4.5 shrink-0 text-indigo-600" /> RDV
           </Link>
         </Button>
       </div>
@@ -213,72 +213,74 @@ function Dashboard() {
         )}
       </section>
 
-      <section className="grid gap-6 lg:grid-cols-2">
+      <section className="grid gap-4 lg:grid-cols-2">
         <div>
           <SectionTitle
             action={
-              <Link to="/rendez-vous" className="text-sm font-medium text-primary">
-                Agenda
+              <Link to="/rendez-vous" className="text-xs font-semibold text-primary hover:underline">
+                Agenda →
               </Link>
             }
           >
             Rappels
           </SectionTitle>
-          <div className="card-soft divide-y divide-border">
+          <div className="card-soft divide-y divide-border/70">
             <ReminderRow
               color="bg-destructive"
               label="Aujourd'hui"
-              value={`${todayAppts.length} rendez-vous`}
+              value={`${todayAppts.length} RDV`}
             />
             <ReminderRow
               color="bg-warning"
               label="Demain"
-              value={`${tomorrowAppts.length} rendez-vous`}
+              value={`${tomorrowAppts.length} RDV`}
             />
             <ReminderRow
               color="bg-success"
               label="Cette semaine"
-              value={`${weekDeliveries.length} livraisons prévues`}
+              value={`${weekDeliveries.length} livraisons`}
             />
             {late.length > 0 && (
               <ReminderRow
                 color="bg-destructive"
                 label="Retards"
-                value={`${late.length} commande(s) en retard`}
+                value={`${late.length} commande(s)`}
               />
             )}
           </div>
         </div>
 
         <div>
-          <SectionTitle>Rendez-vous du jour</SectionTitle>
+          <SectionTitle>RDV du jour</SectionTitle>
           {todayAppts.length === 0 ? (
-            <EmptyState title="Aucun rendez-vous aujourd'hui" />
+            <div className="card-soft p-5 text-center text-xs text-muted-foreground">
+              Aucun rendez-vous planifié aujourd'hui
+            </div>
           ) : (
-            <div className="space-y-3">
+            <div className="space-y-2">
               {todayAppts.map((a) => (
-                <div key={a.id} className="card-soft flex items-center justify-between gap-3 p-4">
-                  <div className="flex items-center gap-3 min-w-0">
-                    <span className="rounded-lg bg-primary/10 px-2.5 py-1.5 font-display text-sm font-bold text-primary">
+                <div key={a.id} className="card-soft flex items-center justify-between gap-2.5 p-3">
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <span className="rounded-lg bg-primary/10 px-2 py-1 font-display text-xs font-bold text-primary shrink-0">
                       {a.scheduled_time?.slice(0, 5) ?? "--:--"}
                     </span>
                     <div className="min-w-0">
-                      <p className="truncate text-sm font-semibold">{fullName(a.clients)}</p>
-                      <p className="text-xs text-muted-foreground">{appointmentLabel(a.type)}</p>
+                      <p className="truncate text-xs sm:text-sm font-semibold">{fullName(a.clients)}</p>
+                      <p className="text-[0.7rem] text-muted-foreground">{appointmentLabel(a.type)}</p>
                     </div>
                   </div>
 
                   {a.clients?.phone && (
                     <a
                       href={`https://wa.me/${cleanPhone(a.clients.whatsapp || a.clients.phone)}?text=${encodeURIComponent(
-                        `Bonjour ${a.clients.first_name}, nous vous rappelons votre rendez-vous de ${appointmentLabel(a.type)} prévu aujourd'hui à ${a.scheduled_time?.slice(0, 5) ?? ""} chez ${business?.name ?? "votre atelier"}.`,
+                        `Bonjour ${a.clients.first_name}, rappel de votre rendez-vous de ${appointmentLabel(a.type)} aujourd'hui à ${a.scheduled_time?.slice(0, 5) ?? ""} chez ${business?.name ?? "votre atelier"}.`,
                       )}`}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="inline-flex h-8 items-center gap-1 rounded-md border border-border px-2.5 text-xs font-medium text-success hover:bg-success/10 shrink-0"
+                      className="inline-flex h-7.5 items-center gap-1 rounded-md border border-success/30 bg-success/10 px-2 text-[0.7rem] font-semibold text-success hover:bg-success/20 shrink-0 active:scale-95 transition-all"
                       title="Rappeler par WhatsApp"
                     >
-                      <MessageCircle className="size-3.5" /> WhatsApp
+                      <MessageCircle className="size-3" /> WhatsApp
                     </a>
                   )}
                 </div>
@@ -291,38 +293,38 @@ function Dashboard() {
       {late.length > 0 && (
         <section>
           <SectionTitle>Commandes en retard</SectionTitle>
-          <div className="space-y-3">
+          <div className="space-y-2">
             {late.map((o) => (
-              <div key={o.id} className="card-soft flex items-center justify-between gap-3 p-4">
+              <div key={o.id} className="card-soft flex items-center justify-between gap-2.5 p-3">
                 <div className="min-w-0">
-                  <p className="truncate text-sm font-semibold">
+                  <p className="truncate text-xs sm:text-sm font-semibold">
                     {o.garment_type} — {fullName(o.clients)}
                   </p>
-                  <p className="text-xs text-muted-foreground">
-                    Prévue le {dateFr(o.due_date)} · {o.reference}
+                  <p className="text-[0.7rem] text-muted-foreground">
+                    Prévue le {dateFr(o.due_date)} · <span className="font-mono">{o.reference}</span>
                   </p>
                 </div>
-                <div className="flex shrink-0 items-center gap-2">
+                <div className="flex shrink-0 items-center gap-1.5">
                   <LateBadge />
                   {o.clients?.phone && (
                     <a
                       href={`https://wa.me/${cleanPhone(o.clients.whatsapp || o.clients.phone)}?text=${encodeURIComponent(
-                        `Bonjour ${o.clients.first_name}, votre commande ${o.reference} (${o.garment_type}) est en cours de finition chez ${business?.name ?? "votre atelier"}. Nous vous contacterons dès qu'elle sera prête.`,
+                        `Bonjour ${o.clients.first_name}, votre commande ${o.reference} (${o.garment_type}) est en cours de confection chez ${business?.name ?? "votre atelier"}.`,
                       )}`}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="inline-flex h-8 items-center gap-1 rounded-md border border-border px-2 text-xs font-medium text-success hover:bg-success/10"
+                      className="inline-flex h-7.5 items-center gap-1 rounded-md border border-success/30 bg-success/10 px-2 text-[0.7rem] font-semibold text-success hover:bg-success/20 active:scale-95"
                       title="Contacter par WhatsApp"
                     >
-                      <MessageCircle className="size-3.5" />
+                      <MessageCircle className="size-3" />
                     </a>
                   )}
                   <Link
                     to="/commandes/$orderId"
                     params={{ orderId: o.id }}
-                    className="text-sm font-medium text-primary"
+                    className="inline-flex h-7.5 items-center px-2 text-xs font-semibold text-primary hover:underline"
                   >
-                    Ouvrir
+                    Voir →
                   </Link>
                 </div>
               </div>

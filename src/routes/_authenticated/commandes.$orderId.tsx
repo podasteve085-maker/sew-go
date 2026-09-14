@@ -364,109 +364,116 @@ function OrderDetailPage() {
   return (
     <div className="mx-auto max-w-4xl space-y-6">
       {/* Navigation top */}
-      <div className="no-print flex flex-wrap items-center justify-between gap-3">
+      <div className="no-print flex flex-wrap items-center justify-between gap-2.5">
         <Link
           to="/commandes"
-          className="inline-flex items-center gap-1.5 text-sm font-medium text-muted-foreground hover:text-foreground"
+          className="inline-flex items-center gap-1.5 text-xs sm:text-sm font-medium text-muted-foreground hover:text-foreground"
         >
-          <ArrowLeft className="size-4" /> Retour aux commandes
+          <ArrowLeft className="size-4" /> Commandes
         </Link>
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
           <Button
             variant="outline"
             size="sm"
             onClick={() => setOpenReceiptModal(true)}
+            className="h-8 text-xs font-medium px-2.5 sm:px-3"
           >
-            <Printer className="size-4" /> Bon de commande / Reçu
+            <Printer className="mr-1.5 size-3.5" />
+            <span className="hidden sm:inline">Bon de commande / </span>Reçu
           </Button>
           <Button
             variant="outline"
             size="sm"
             onClick={() => setOpenEditModal(true)}
+            className="h-8 text-xs font-medium px-2.5 sm:px-3"
           >
-            <Edit className="size-4" /> Modifier
+            <Edit className="mr-1.5 size-3.5" /> Modifier
           </Button>
           {order.status !== "annulee" && order.status !== "livree" && (
             <Button
               variant="outline"
               size="sm"
-              className="text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+              className="h-8 text-xs text-muted-foreground hover:text-destructive hover:bg-destructive/10 px-2 sm:px-2.5"
               onClick={() => setCancelOrderOpen(true)}
               title="Annuler la commande"
             >
-              <XCircle className="size-4 mr-1" /> Annuler
+              <XCircle className="size-3.5 sm:mr-1" />
+              <span className="hidden sm:inline">Annuler</span>
             </Button>
           )}
           <Button
             variant="ghost"
             size="sm"
-            className="text-destructive hover:bg-destructive/10"
+            className="size-8 p-0 text-destructive hover:bg-destructive/10"
             onClick={() => setOpenDeleteModal(true)}
+            title="Supprimer"
           >
-            <Trash2 className="size-4" />
+            <Trash2 className="size-3.5" />
           </Button>
         </div>
       </div>
 
       {/* Bannière alerte quand le vêtement est prêt */}
       {order.status === "prete" && (
-        <div className="no-print flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-success/40 bg-success/10 p-4">
+        <div className="no-print flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-success/40 bg-success/10 p-3.5 sm:p-4">
           <div className="flex items-center gap-3">
-            <span className="flex size-10 items-center justify-center rounded-xl bg-success text-success-foreground font-bold">
+            <span className="flex size-10 items-center justify-center rounded-xl bg-success text-success-foreground font-bold shrink-0">
               <CheckCircle2 className="size-5" />
             </span>
             <div>
-              <p className="font-display text-sm font-bold text-foreground">
+              <p className="font-display text-xs sm:text-sm font-bold text-foreground">
                 Ce vêtement est prêt pour l'essayage ou le retrait !
               </p>
-              <p className="text-xs text-muted-foreground">
+              <p className="text-[0.7rem] sm:text-xs text-muted-foreground">
                 Avertissez votre client par message WhatsApp pour convenir d'un rendez-vous.
               </p>
             </div>
           </div>
           <Button
             size="sm"
-            className="bg-success text-success-foreground hover:bg-success/90"
+            className="h-8.5 font-bold text-xs bg-success text-success-foreground hover:bg-success/90"
             onClick={notifyReadyViaWhatsApp}
           >
-            <MessageCircle className="mr-1.5 size-4" /> Alerter le client par WhatsApp
+            <MessageCircle className="mr-1.5 size-3.5" /> Alerter WhatsApp
           </Button>
         </div>
       )}
 
       {/* Hero Header Card */}
-      <header className="no-print card-soft p-5 sm:p-6">
-        <div className="flex flex-wrap items-start justify-between gap-4">
+      <header className="no-print card-soft p-4 sm:p-6">
+        <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3 sm:gap-4">
           <div>
-            <div className="flex flex-wrap items-center gap-2.5">
+            <div className="flex flex-wrap items-center gap-2">
               <span className="font-mono text-xs font-bold uppercase tracking-wider text-muted-foreground">
                 {order.reference}
               </span>
               <StatusBadge status={order.status} />
               {isOrderLate && <LateBadge />}
             </div>
-            <h1 className="mt-2 font-display text-2xl font-bold sm:text-3xl">
+            <h1 className="mt-1.5 font-display text-xl font-bold sm:text-3xl text-foreground">
               {order.garment_type}
               {order.quantity > 1 ? ` (×${order.quantity})` : ""}
             </h1>
             {order.fabric && (
-              <p className="mt-1 text-sm font-medium text-muted-foreground">
+              <p className="mt-0.5 text-xs sm:text-sm font-medium text-muted-foreground">
                 Tissu : <span className="font-semibold text-foreground">{order.fabric}</span>
               </p>
             )}
           </div>
 
           {/* Quick Balance Status */}
-          <div className="rounded-2xl bg-surface p-4 text-right sm:min-w-[12rem]">
-            <p className="text-xs uppercase tracking-wide text-muted-foreground">Solde commande</p>
-            <p className="mt-1 font-display text-2xl font-bold text-foreground">
-              {fcfa(totalPrice, business?.currency)}
-            </p>
-            <div className="mt-1 text-xs">
+          <div className="rounded-2xl border border-border/60 bg-muted/40 p-3 sm:p-4 text-left sm:text-right sm:min-w-[12rem] flex sm:flex-col justify-between items-center sm:items-end">
+            <div>
+              <p className="text-[0.65rem] sm:text-xs uppercase tracking-wide text-muted-foreground">Solde commande</p>
+              <p className="font-display text-lg sm:text-2xl font-bold text-foreground">
+                {fcfa(totalPrice, business?.currency)}
+              </p>
+            </div>
+            <div className="text-right">
               {balanceDue <= 0 ? (
-                <span className="font-bold text-success">Entièrement payée ✅</span>
+                <span className="inline-block rounded-full bg-success/15 px-2 py-0.5 text-xs font-bold text-success">Payée ✅</span>
               ) : (
-                <span className="font-bold text-destructive">
+                <span className="inline-block rounded-full bg-destructive/15 px-2 py-0.5 text-xs font-bold text-destructive">
                   Reste : {fcfa(balanceDue, business?.currency)}
                 </span>
               )}

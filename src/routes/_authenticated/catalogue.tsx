@@ -5,7 +5,6 @@ import {
   BookOpen,
   Plus,
   Search,
-  Sparkles,
   Scissors,
   Coins,
   Share2,
@@ -15,10 +14,6 @@ import {
   ChevronLeft,
   ChevronRight,
   X,
-  Database,
-  Copy,
-  Check,
-  Loader2,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -64,10 +59,6 @@ export function CataloguePage() {
   // Mode Présentation Plein Écran pour le client
   const [presentationModel, setPresentationModel] = useState<CatalogModelRow | null>(null);
   const [currentPhotoIndex, setCurrentPhotoIndex] = useState(0);
-
-  // État pour afficher l'aide migration SQL si nécessaire
-  const [showSqlHelp, setShowSqlHelp] = useState(false);
-  const [copiedSql, setCopiedSql] = useState(false);
 
   const modelsQuery = useQuery({
     queryKey: ["catalog-models", selectedCategory],
@@ -158,28 +149,8 @@ export function CataloguePage() {
     });
   }
 
-  const SQL_SNIPPET = `-- Migration Supabase pour le catalogue de modèles :
-CREATE TABLE IF NOT EXISTS public.catalog_models (
-  id            UUID          PRIMARY KEY DEFAULT gen_random_uuid(),
-  business_id   UUID          NOT NULL REFERENCES public.businesses(id) ON DELETE CASCADE,
-  name          TEXT          NOT NULL,
-  category      TEXT          NOT NULL DEFAULT 'autre',
-  description   TEXT,
-  default_price NUMERIC(12,0),
-  fabric_needed TEXT,
-  photo_paths   TEXT[]        NOT NULL DEFAULT '{}',
-  tags          TEXT[]        NOT NULL DEFAULT '{}',
-  is_active     BOOLEAN       NOT NULL DEFAULT true,
-  created_at    TIMESTAMPTZ   NOT NULL DEFAULT now(),
-  updated_at    TIMESTAMPTZ   NOT NULL DEFAULT now()
-);
-CREATE INDEX IF NOT EXISTS catalog_models_business_idx ON public.catalog_models(business_id);
-GRANT SELECT, INSERT, UPDATE, DELETE ON public.catalog_models TO authenticated;
-ALTER TABLE public.catalog_models ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "tenant catalog_models" ON public.catalog_models FOR ALL TO authenticated USING (public.owns_business(business_id)) WITH CHECK (public.owns_business(business_id));`;
-
   return (
-    <div className="mx-auto max-w-6xl space-y-6">
+    <div className="mx-auto max-w-6xl space-y-4 sm:space-y-6">
       {/* En-tête de la page */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
@@ -187,20 +158,25 @@ CREATE POLICY "tenant catalog_models" ON public.catalog_models FOR ALL TO authen
             <span className="flex size-9 items-center justify-center rounded-xl bg-primary/10 text-primary">
               <BookOpen className="size-5" />
             </span>
-            <h1 className="page-title text-xl sm:text-2xl">Catalogue & Lookbook</h1>
+            <div className="flex items-center gap-2">
+              <h1 className="page-title text-lg sm:text-2xl">Catalogue & Lookbook</h1>
+              <span className="rounded-full bg-primary/10 px-2 py-0.5 text-xs font-bold text-primary">
+                {allModels.length}
+              </span>
+            </div>
           </div>
-          <p className="mt-1 text-xs sm:text-sm text-muted-foreground">
-            Présentez vos confections, inspirez vos clients et lancez une commande en 1 clic.
+          <p className="mt-1 text-xs text-muted-foreground sm:text-sm">
+            Vos modèles confections prêts à présenter et à commander en 1 clic.
           </p>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex items-center gap-2">
           {allModels.length > 0 && (
             <Button
               variant="outline"
               size="sm"
               onClick={() => openPresentation(allModels[0]!)}
-              className="h-10 text-xs font-semibold sm:text-sm"
+              className="h-9 text-xs font-semibold sm:h-10 sm:text-sm"
             >
               <Eye className="mr-1.5 size-4 text-primary" /> Mode Client
             </Button>
@@ -208,7 +184,7 @@ CREATE POLICY "tenant catalog_models" ON public.catalog_models FOR ALL TO authen
           <Button
             onClick={handleCreate}
             size="sm"
-            className="h-10 text-xs font-bold sm:text-sm shadow-sm"
+            className="h-9 text-xs font-bold sm:h-10 sm:text-sm shadow-xs"
           >
             <Plus className="mr-1.5 size-4" /> Nouveau modèle
           </Button>
@@ -216,14 +192,14 @@ CREATE POLICY "tenant catalog_models" ON public.catalog_models FOR ALL TO authen
       </div>
 
       {/* Barre de recherche et filtres */}
-      <div className="space-y-3">
+      <div className="space-y-2.5">
         <div className="relative">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
           <Input
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Rechercher par nom, tissu, style ou occasion (ex: Bazin, Mariage, Broderie)..."
-            className="h-11 pl-9 pr-8 text-sm"
+            placeholder="Rechercher par nom, tissu (ex: Bazin, Faso Dan Fani, Robe)..."
+            className="h-10 pl-9 pr-8 text-xs sm:text-sm"
           />
           {searchQuery && (
             <button
@@ -239,7 +215,7 @@ CREATE POLICY "tenant catalog_models" ON public.catalog_models FOR ALL TO authen
         <div className="flex gap-1.5 overflow-x-auto pb-1 scrollbar-none">
           <button
             onClick={() => setSelectedCategory("all")}
-            className={`flex shrink-0 items-center gap-1.5 rounded-full px-3.5 py-1.5 text-xs font-semibold transition-all active:scale-95 ${
+            className={`flex shrink-0 items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold transition-all active:scale-95 ${
               selectedCategory === "all"
                 ? "bg-primary text-primary-foreground shadow-xs"
                 : "border border-border bg-card text-muted-foreground hover:border-primary/40 hover:text-foreground"
@@ -258,7 +234,7 @@ CREATE POLICY "tenant catalog_models" ON public.catalog_models FOR ALL TO authen
               <button
                 key={c.value}
                 onClick={() => setSelectedCategory(c.value)}
-                className={`flex shrink-0 items-center gap-1.5 rounded-full px-3.5 py-1.5 text-xs font-semibold transition-all active:scale-95 ${
+                className={`flex shrink-0 items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold transition-all active:scale-95 ${
                   active
                     ? "bg-primary text-primary-foreground shadow-xs"
                     : "border border-border bg-card text-muted-foreground hover:border-primary/40 hover:text-foreground"
@@ -280,72 +256,31 @@ CREATE POLICY "tenant catalog_models" ON public.catalog_models FOR ALL TO authen
 
       {/* Grille des modèles */}
       {modelsQuery.isLoading ? (
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
+        <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 md:grid-cols-4 sm:gap-4">
           {[1, 2, 3, 4].map((n) => (
-            <div key={n} className="card-soft h-64 animate-pulse bg-muted/60" />
+            <div key={n} className="card-soft h-52 sm:h-64 animate-pulse bg-muted/60" />
           ))}
         </div>
       ) : filteredModels.length === 0 ? (
-        <div className="space-y-4">
-          <EmptyState
-            title={
-              searchQuery
-                ? "Aucun modèle ne correspond à votre recherche"
-                : "Votre catalogue est encore vide"
-            }
-            text={
-              searchQuery
-                ? "Essayez un autre mot-clé ou réinitialisez la recherche."
-                : "Ajoutez vos plus belles créations (Boubou, Faso Dan Fani, Robe de mariée...) pour les présenter fièrement à vos clients."
-            }
-            action={
-              <div className="flex flex-wrap items-center justify-center gap-2 pt-2">
-                <Button onClick={handleCreate} className="font-bold">
-                  <Plus className="mr-1.5 size-4" /> Ajouter mon premier modèle
-                </Button>
-              </div>
-            }
-          />
-
-          {showSqlHelp && (
-            <div className="rounded-xl border border-primary/20 bg-primary/5 p-4 text-xs">
-              <div className="flex items-center justify-between">
-                <span className="font-bold text-primary flex items-center gap-1.5">
-                  <Database className="size-4" /> Script SQL pour la table catalog_models
-                </span>
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  onClick={() => {
-                    navigator.clipboard.writeText(SQL_SNIPPET);
-                    setCopiedSql(true);
-                    setTimeout(() => setCopiedSql(false), 2000);
-                  }}
-                  className="h-7 text-xs"
-                >
-                  {copiedSql ? (
-                    <>
-                      <Check className="mr-1 size-3 text-success" /> Copié
-                    </>
-                  ) : (
-                    <>
-                      <Copy className="mr-1 size-3" /> Copier le SQL
-                    </>
-                  )}
-                </Button>
-              </div>
-              <p className="mt-1 text-muted-foreground">
-                Si la table n'a pas encore été créée dans votre console Supabase, copiez ce script
-                dans Supabase → SQL Editor → New Query et exécutez-le.
-              </p>
-              <pre className="mt-2.5 max-h-48 overflow-y-auto rounded-lg bg-background p-3 font-mono text-[0.7rem] text-foreground border border-border">
-                {SQL_SNIPPET}
-              </pre>
-            </div>
-          )}
-        </div>
+        <EmptyState
+          title={
+            searchQuery
+              ? "Aucun modèle ne correspond"
+              : "Votre catalogue est encore vide"
+          }
+          text={
+            searchQuery
+              ? "Essayez un autre mot-clé ou réinitialisez la recherche."
+              : "Ajoutez vos plus belles confections (Boubou, Faso Dan Fani, Robes...) pour les présenter facilement à vos clients."
+          }
+          action={
+            <Button onClick={handleCreate} className="font-bold">
+              <Plus className="mr-1.5 size-4" /> Ajouter un modèle
+            </Button>
+          }
+        />
       ) : (
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
+        <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 md:grid-cols-4 sm:gap-4">
           {filteredModels.map((model) => {
             const hasPhotos = model.photo_paths && model.photo_paths.length > 0;
             const coverPhoto = hasPhotos ? model.photo_paths[0] : null;
@@ -358,7 +293,7 @@ CREATE POLICY "tenant catalog_models" ON public.catalog_models FOR ALL TO authen
                 {/* Image de couverture ou visuel par défaut */}
                 <div
                   onClick={() => openPresentation(model)}
-                  className="relative aspect-4/3 w-full cursor-pointer overflow-hidden bg-muted transition-transform group-hover:opacity-95"
+                  className="relative aspect-square sm:aspect-4/3 w-full cursor-pointer overflow-hidden bg-muted transition-transform group-hover:opacity-95"
                 >
                   {coverPhoto ? (
                     <StoredImage
@@ -368,20 +303,20 @@ CREATE POLICY "tenant catalog_models" ON public.catalog_models FOR ALL TO authen
                     />
                   ) : (
                     <div className="flex size-full flex-col items-center justify-center gap-1 bg-primary/5 text-primary/70">
-                      <Scissors className="size-8 stroke-[1.5]" />
-                      <span className="text-[0.7rem] font-bold">Sans photo</span>
+                      <Scissors className="size-6 sm:size-8 stroke-[1.5]" />
+                      <span className="text-[0.65rem] sm:text-[0.7rem] font-bold">Sans photo</span>
                     </div>
                   )}
 
                   {/* Badge de catégorie */}
-                  <span className="absolute top-2 left-2 rounded-full bg-black/60 backdrop-blur px-2.5 py-0.5 text-[0.68rem] font-bold text-white shadow-xs">
+                  <span className="absolute top-1.5 left-1.5 rounded-full bg-black/60 backdrop-blur px-2 py-0.5 text-[0.62rem] font-bold text-white shadow-xs">
                     {catalogCategoryLabel(model.category)}
                   </span>
 
                   {/* Indicateur multi-photos */}
                   {model.photo_paths && model.photo_paths.length > 1 && (
-                    <span className="absolute bottom-2 right-2 rounded-full bg-black/65 px-2 py-0.5 text-[0.65rem] font-bold text-white backdrop-blur">
-                      +{model.photo_paths.length - 1} photos
+                    <span className="absolute bottom-1.5 right-1.5 rounded-full bg-black/65 px-1.5 py-0.5 text-[0.6rem] font-bold text-white backdrop-blur">
+                      +{model.photo_paths.length - 1}
                     </span>
                   )}
 
@@ -392,81 +327,67 @@ CREATE POLICY "tenant catalog_models" ON public.catalog_models FOR ALL TO authen
                       e.stopPropagation();
                       openPresentation(model);
                     }}
-                    className="absolute top-2 right-2 flex size-7 items-center justify-center rounded-full bg-black/50 text-white opacity-0 transition-opacity hover:bg-black group-hover:opacity-100"
+                    className="absolute top-1.5 right-1.5 flex size-6.5 items-center justify-center rounded-full bg-black/50 text-white opacity-90 sm:opacity-0 transition-opacity hover:bg-black group-hover:opacity-100"
                     title="Voir en plein écran"
                   >
-                    <Eye className="size-3.5" />
+                    <Eye className="size-3" />
                   </button>
                 </div>
 
                 {/* Contenu de la fiche modèle */}
-                <div className="flex flex-1 flex-col p-3.5">
+                <div className="flex flex-1 flex-col p-2.5 sm:p-3.5">
                   <div className="flex-1">
-                    <h3 className="font-display text-sm font-bold text-foreground line-clamp-1">
+                    <h3 className="font-display text-xs sm:text-sm font-bold text-foreground line-clamp-1">
                       {model.name}
                     </h3>
 
                     {model.description && (
-                      <p className="mt-1 text-xs text-muted-foreground line-clamp-2">
+                      <p className="mt-0.5 text-[0.7rem] sm:text-xs text-muted-foreground line-clamp-1">
                         {model.description}
                       </p>
                     )}
 
-                    <div className="mt-2.5 flex flex-wrap items-center gap-1.5 text-xs">
+                    <div className="mt-1.5 flex flex-wrap items-center gap-1 text-[0.7rem] sm:text-xs">
                       {model.default_price ? (
-                        <span className="inline-flex items-center gap-1 rounded-md bg-primary/10 px-2 py-0.5 font-bold text-primary">
-                          <Coins className="size-3" /> {fcfa(model.default_price)}
+                        <span className="inline-flex items-center gap-0.5 rounded-md bg-primary/10 px-1.5 py-0.5 font-bold text-primary">
+                          <Coins className="size-2.5 sm:size-3" /> {fcfa(model.default_price)}
                         </span>
                       ) : null}
 
                       {model.fabric_needed && (
-                        <span className="inline-flex items-center gap-1 rounded-md bg-muted px-2 py-0.5 text-[0.7rem] text-muted-foreground">
+                        <span className="inline-flex items-center rounded-md bg-muted px-1.5 py-0.5 text-[0.65rem] text-muted-foreground truncate max-w-[110px]">
                           🧵 {model.fabric_needed}
                         </span>
                       )}
                     </div>
-
-                    {/* Mots-clés / Tags */}
-                    {model.tags && model.tags.length > 0 && (
-                      <div className="mt-2 flex flex-wrap gap-1">
-                        {model.tags.slice(0, 3).map((tag) => (
-                          <span
-                            key={tag}
-                            className="rounded-full bg-accent px-1.5 py-0.2 text-[0.62rem] font-semibold text-accent-foreground"
-                          >
-                            #{tag}
-                          </span>
-                        ))}
-                      </div>
-                    )}
                   </div>
 
                   {/* Boutons d'action sous la carte */}
-                  <div className="mt-3.5 flex items-center justify-between gap-1.5 border-t border-border/70 pt-2.5">
+                  <div className="mt-2.5 flex items-center justify-between gap-1 border-t border-border/70 pt-2">
                     <Button
                       size="sm"
                       onClick={() => handleOrderFromModel(model)}
-                      className="h-8 flex-1 text-xs font-bold"
+                      className="h-7 sm:h-8 flex-1 text-[0.7rem] sm:text-xs font-bold px-1.5"
                     >
-                      <Scissors className="mr-1 size-3.5" /> Commander
+                      <Scissors className="mr-1 size-3" /> Commander
                     </Button>
 
                     <button
                       type="button"
                       onClick={() => handleShareWhatsApp(model)}
-                      title="Partager sur WhatsApp"
-                      className="flex size-8 shrink-0 items-center justify-center rounded-lg border border-success/30 bg-success/10 text-success transition-all hover:bg-success/20 active:scale-95"
+                      title="WhatsApp"
+                      className="flex size-7 sm:size-8 shrink-0 items-center justify-center rounded-md border border-success/30 bg-success/10 text-success transition-all hover:bg-success/20 active:scale-95"
                     >
-                      <Share2 className="size-3.5" />
+                      <Share2 className="size-3 sm:size-3.5" />
                     </button>
 
                     <button
                       type="button"
                       onClick={() => handleEdit(model)}
-                      title="Modifier le modèle"
-                      className="flex size-8 shrink-0 items-center justify-center rounded-lg border border-border text-muted-foreground transition-all hover:bg-accent hover:text-foreground active:scale-95"
+                      title="Modifier"
+                      className="flex size-7 sm:size-8 shrink-0 items-center justify-center rounded-md border border-border text-muted-foreground transition-all hover:bg-accent hover:text-foreground active:scale-95"
                     >
-                      <Edit className="size-3.5" />
+                      <Edit className="size-3 sm:size-3.5" />
                     </button>
 
                     <button
@@ -477,9 +398,9 @@ CREATE POLICY "tenant catalog_models" ON public.catalog_models FOR ALL TO authen
                         }
                       }}
                       title="Supprimer"
-                      className="flex size-8 shrink-0 items-center justify-center rounded-lg border border-border text-muted-foreground transition-all hover:border-destructive/30 hover:bg-destructive/10 hover:text-destructive active:scale-95"
+                      className="flex size-7 sm:size-8 shrink-0 items-center justify-center rounded-md border border-border text-muted-foreground transition-all hover:border-destructive/30 hover:bg-destructive/10 hover:text-destructive active:scale-95"
                     >
-                      <Trash2 className="size-3.5" />
+                      <Trash2 className="size-3 sm:size-3.5" />
                     </button>
                   </div>
                 </div>

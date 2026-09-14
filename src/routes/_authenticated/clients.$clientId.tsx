@@ -147,43 +147,54 @@ function ClientDetail() {
         <ArrowLeft className="size-4" /> Clients
       </Link>
 
-      <header className="card-soft p-5">
-        <div className="flex items-start gap-4">
-          {c.photo_url ? (
-            <StoredImage
-              path={c.photo_url}
-              alt={fullName(c)}
-              className="size-16 shrink-0 rounded-2xl object-cover"
-            />
-          ) : (
-            <span className="flex size-16 shrink-0 items-center justify-center rounded-2xl bg-secondary font-display text-lg font-bold text-secondary-foreground">
-              {initials(c.first_name, c.last_name)}
-            </span>
-          )}
-          <div className="min-w-0 flex-1">
-            <h1 className="truncate font-display text-xl font-bold">{fullName(c)}</h1>
-            <p className="text-sm text-muted-foreground">
-              {c.phone ?? "Sans téléphone"}
-              {c.city ? ` · ${c.city}` : ""}
-            </p>
-            <div className="mt-3">
-              <ContactButtons
-                phone={c.phone}
-                whatsapp={c.whatsapp}
-                message={`Bonjour ${c.first_name}, c'est ${business?.name ?? "votre atelier"}.`}
+      <header className="card-soft p-4 sm:p-5">
+        <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3 sm:gap-4">
+          <div className="flex items-start gap-3 min-w-0">
+            {c.photo_url ? (
+              <StoredImage
+                path={c.photo_url}
+                alt={fullName(c)}
+                className="size-13 sm:size-16 shrink-0 rounded-2xl object-cover"
               />
+            ) : (
+              <span className="flex size-13 sm:size-16 shrink-0 items-center justify-center rounded-2xl bg-primary/10 font-display text-base sm:text-lg font-bold text-primary">
+                {initials(c.first_name, c.last_name)}
+              </span>
+            )}
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-2">
+                <h1 className="truncate font-display text-lg sm:text-xl font-bold">{fullName(c)}</h1>
+                {c.city && (
+                  <span className="hidden sm:inline-block rounded-full bg-muted px-2 py-0.5 text-[0.65rem] font-medium text-muted-foreground">
+                    {c.city}
+                  </span>
+                )}
+              </div>
+              <p className="text-xs text-muted-foreground">
+                {c.phone ?? "Sans téléphone"}
+                {c.city ? ` · ${c.city}` : ""}
+              </p>
+              <div className="mt-2.5">
+                <ContactButtons
+                  phone={c.phone}
+                  whatsapp={c.whatsapp}
+                  message={`Bonjour ${c.first_name}, c'est ${business?.name ?? "votre atelier"}.`}
+                />
+              </div>
             </div>
           </div>
-          <Button variant="outline" size="sm" onClick={() => setEdit(true)}>
-            <Pencil className="size-4" /> Modifier
-          </Button>
+          <div className="flex items-center gap-2 self-end sm:self-start">
+            <Button variant="outline" size="sm" onClick={() => setEdit(true)} className="h-8 text-xs font-semibold">
+              <Pencil className="mr-1 size-3.5" /> Modifier
+            </Button>
+          </div>
         </div>
 
-        <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <div className="mt-4 grid grid-cols-2 gap-2 sm:gap-3 sm:grid-cols-4">
           <MiniStat label="Commandes" value={String(allOrders.length)} />
           <MiniStat label="Total payé" value={fcfa(totalPaid, business?.currency)} />
           <MiniStat label="Reste à payer" value={fcfa(totalDue, business?.currency)} />
-          <MiniStat label="Dernières mesures" value={lastSet ? dateFr(lastSet.recorded_at) : "—"} />
+          <MiniStat label="Mesures" value={lastSet ? dateFr(lastSet.recorded_at) : "Aucune"} />
         </div>
       </header>
 
@@ -473,9 +484,9 @@ function ClientDetail() {
 
 function MiniStat({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-xl bg-surface p-3">
-      <p className="text-[0.7rem] uppercase tracking-wide text-muted-foreground">{label}</p>
-      <p className="mt-1 text-sm font-bold">{value}</p>
+    <div className="rounded-xl border border-border/60 bg-muted/30 p-2.5 sm:p-3">
+      <p className="text-[0.65rem] sm:text-[0.7rem] uppercase tracking-wider font-semibold text-muted-foreground">{label}</p>
+      <p className="mt-0.5 text-xs sm:text-sm font-extrabold text-foreground truncate">{value}</p>
     </div>
   );
 }

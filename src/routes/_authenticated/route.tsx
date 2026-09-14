@@ -5,9 +5,14 @@ import { AppShell } from "@/components/app-shell";
 export const Route = createFileRoute("/_authenticated")({
   ssr: false,
   beforeLoad: async () => {
-    const { data, error } = await supabase.auth.getUser();
-    if (error || !data.user) throw redirect({ to: "/auth" });
-    return { user: data.user };
+    // Vérification instantanée depuis la mémoire locale (0 ms au lieu de 1 seconde de latence réseau)
+    const { data } = await supabase.auth.getSession();
+    if (!data.session?.user) {
+      const { data: userData, error } = await supabase.auth.getUser();
+      if (error || !userData.user) throw redirect({ to: "/auth" });
+      return { user: userData.user };
+    }
+    return { user: data.session.user };
   },
   component: () => (
     <AppShell>

@@ -77,25 +77,27 @@ export function StatCard({
   iconBg?: string | undefined;
 }) {
   return (
-    <div className="card-soft h-full p-3.5 sm:p-4.5 transition-all hover:border-primary/40">
-      <div className="flex items-center justify-between gap-2">
-        <p className="truncate text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+    <div className="card-soft flex flex-col justify-between p-3 sm:p-4 transition-all hover:border-primary/40 hover:shadow-xs">
+      <div className="flex items-center justify-between gap-1.5">
+        <p className="truncate text-[0.68rem] font-bold uppercase tracking-wider text-muted-foreground">
           {label}
         </p>
         {Icon && (
-          <span className={`flex size-8 shrink-0 items-center justify-center rounded-xl ${iconBg} ${iconColor}`}>
-            <Icon className="size-4.5" />
+          <span className={`flex size-7.5 shrink-0 items-center justify-center rounded-xl ${iconBg} ${iconColor}`}>
+            <Icon className="size-4" />
           </span>
         )}
       </div>
-      <p className="mt-2.5 font-display text-2xl font-bold leading-none tracking-tight sm:text-3xl">
-        {value}
-      </p>
-      {hint && (
-        <p className="mt-1.5 flex items-center gap-1 truncate text-xs font-medium text-muted-foreground">
-          {hint}
-        </p>
-      )}
+      <div className="mt-2">
+        <div className="font-display text-xl font-extrabold leading-none tracking-tight sm:text-2xl lg:text-3xl">
+          {value}
+        </div>
+        {hint && (
+          <p className="mt-1.5 inline-flex items-center gap-1 rounded-md bg-muted/60 px-1.5 py-0.5 text-[0.65rem] font-semibold text-muted-foreground truncate">
+            {hint}
+          </p>
+        )}
+      </div>
     </div>
   );
 }
@@ -194,13 +196,13 @@ export function OrderCard({ order }: { order: OrderRow }) {
   const clientPhone = cleanPhone(client?.whatsapp || client?.phone);
 
   return (
-    <div className="card-soft flex flex-col justify-between p-4 transition-all hover:border-primary/40 hover:shadow-md">
+    <div className="card-soft flex flex-col justify-between p-3 sm:p-4 transition-all hover:border-primary/40 hover:shadow-xs">
       <Link
         to="/commandes/$orderId"
         params={{ orderId: order.id }}
-        className="block min-w-0 flex-1 space-y-3"
+        className="block min-w-0 flex-1 space-y-2"
       >
-        <div className="flex items-start justify-between gap-2.5">
+        <div className="flex items-start justify-between gap-2">
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-1.5">
               <Shirt className="size-4 shrink-0 text-primary" />
@@ -219,9 +221,9 @@ export function OrderCard({ order }: { order: OrderRow }) {
           </div>
         </div>
 
-        {/* Info badges with clear icons */}
-        <div className="flex flex-wrap items-center gap-x-3.5 gap-y-1.5 text-xs text-muted-foreground">
-          <span className="font-mono text-[0.7rem] font-bold uppercase tracking-wider text-muted-foreground/80">
+        {/* Repères visuels clés avec icônes nettes */}
+        <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1 text-xs text-muted-foreground">
+          <span className="font-mono text-[0.68rem] font-bold uppercase tracking-wider text-muted-foreground/80">
             {order.reference}
           </span>
           <span className="inline-flex items-center gap-1">
@@ -233,45 +235,47 @@ export function OrderCard({ order }: { order: OrderRow }) {
             {fcfa(order.price)}
           </span>
           {due > 0 && (
-            <span className="rounded-md bg-destructive/10 px-1.5 py-0.5 font-bold text-destructive">
+            <span className="rounded-md bg-destructive/10 px-1.5 py-0.2 font-bold text-destructive text-[0.7rem]">
               Reste {fcfa(due)}
             </span>
           )}
         </div>
       </Link>
 
-      {/* Direct Quick Action Buttons (Call & WhatsApp) without needing to open order */}
-      {clientPhone && (
-        <div className="mt-3.5 flex items-center justify-end gap-2 border-t border-border/80 pt-2.5">
-          <a
-            href={`tel:${clientPhone}`}
-            onClick={(e) => e.stopPropagation()}
-            className="inline-flex h-8 min-w-[2rem] items-center justify-center gap-1 rounded-lg border border-border px-2.5 text-xs font-semibold text-muted-foreground transition-colors hover:bg-accent hover:text-foreground active:scale-95"
-            title={`Appeler ${fullName(client)}`}
-          >
-            <Phone className="size-3.5 text-primary" />
-            <span className="hidden xs:inline sm:hidden md:inline">Appeler</span>
-          </a>
-          <a
-            href={`https://wa.me/${clientPhone}?text=${encodeURIComponent(
-              `Bonjour ${client?.first_name ?? ""}, concernant votre commande ${order.reference} (${order.garment_type})…`,
-            )}`}
-            target="_blank"
-            rel="noopener noreferrer"
-            onClick={(e) => e.stopPropagation()}
-            className="inline-flex h-8 items-center gap-1 rounded-lg border border-success/30 bg-success/10 px-2.5 text-xs font-semibold text-success transition-colors hover:bg-success/20 active:scale-95"
-            title={`WhatsApp ${fullName(client)}`}
-          >
-            <MessageCircle className="size-3.5" />
-            <span>WhatsApp</span>
-          </a>
-          <Button size="sm" variant="ghost" className="h-8 text-xs font-semibold" asChild>
-            <Link to="/commandes/$orderId" params={{ orderId: order.id }}>
-              Détails →
-            </Link>
-          </Button>
-        </div>
-      )}
+      {/* Actions rapides tactiles (Appel & WhatsApp) */}
+      <div className="mt-2.5 flex items-center justify-end gap-1.5 border-t border-border/70 pt-2">
+        {clientPhone && (
+          <>
+            <a
+              href={`tel:${clientPhone}`}
+              onClick={(e) => e.stopPropagation()}
+              className="inline-flex h-7.5 items-center justify-center gap-1 rounded-lg border border-border px-2 text-[0.75rem] font-semibold text-muted-foreground transition-colors hover:bg-accent hover:text-foreground active:scale-95"
+              title={`Appeler ${fullName(client)}`}
+            >
+              <Phone className="size-3 text-primary" />
+              <span className="hidden xs:inline sm:hidden md:inline">Appel</span>
+            </a>
+            <a
+              href={`https://wa.me/${clientPhone}?text=${encodeURIComponent(
+                `Bonjour ${client?.first_name ?? ""}, concernant votre commande ${order.reference} (${order.garment_type})…`,
+              )}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={(e) => e.stopPropagation()}
+              className="inline-flex h-7.5 items-center gap-1 rounded-lg border border-success/30 bg-success/10 px-2 text-[0.75rem] font-semibold text-success transition-colors hover:bg-success/20 active:scale-95"
+              title={`WhatsApp ${fullName(client)}`}
+            >
+              <MessageCircle className="size-3" />
+              <span>WhatsApp</span>
+            </a>
+          </>
+        )}
+        <Button size="sm" variant="ghost" className="h-7.5 text-xs font-semibold px-2" asChild>
+          <Link to="/commandes/$orderId" params={{ orderId: order.id }}>
+            Détails →
+          </Link>
+        </Button>
+      </div>
     </div>
   );
 }

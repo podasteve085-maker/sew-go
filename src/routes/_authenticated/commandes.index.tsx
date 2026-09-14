@@ -81,58 +81,44 @@ function OrdersPage() {
         Commandes
       </SectionTitle>
 
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+      <div className="flex flex-col gap-2.5 sm:flex-row sm:items-center">
         <div className="relative flex-1">
           <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
           <Input
             value={term}
             onChange={(e) => setTerm(e.target.value)}
-            placeholder="Référence, client ou vêtement…"
-            className="pl-9 h-10 text-base sm:text-sm"
+            placeholder="Rechercher référence, client ou habit…"
+            className="pl-9 h-9 text-xs sm:text-sm"
           />
         </div>
-        <div className="flex gap-2 overflow-x-auto pb-1">
-          {FILTERS.map((f) => (
-            <button
-              key={f.value}
-              type="button"
-              onClick={() => setFilter(f.value)}
-              className={`shrink-0 rounded-full border px-3.5 py-1.5 text-xs sm:text-sm font-semibold transition-all active:scale-95 ${
-                filter === f.value
-                  ? "border-transparent bg-primary text-primary-foreground shadow-xs"
-                  : "border-border bg-card text-muted-foreground hover:text-foreground hover:bg-muted"
-              }`}
-            >
-              {f.label}
-            </button>
-          ))}
+        <div className="flex gap-1.5 overflow-x-auto pb-1 no-scrollbar">
+          {[
+            { value: "actives", label: "En cours", count: (orders.data ?? []).filter(o => isActive(o.status)).length },
+            { value: "retard", label: "En retard", count: (orders.data ?? []).filter(isLate).length },
+            { value: "prete", label: "Prêtes", count: counts["prete"] ?? 0 },
+            { value: "livree", label: "Livrées", count: counts["livree"] ?? 0 },
+            { value: "toutes", label: "Toutes", count: (orders.data ?? []).length },
+          ].map((f) => {
+            const isSelected = filter === f.value;
+            return (
+              <button
+                key={f.value}
+                type="button"
+                onClick={() => setFilter(f.value)}
+                className={`inline-flex shrink-0 items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold transition-all active:scale-95 ${
+                  isSelected
+                    ? "bg-primary text-primary-foreground shadow-xs"
+                    : "border border-border/70 bg-card text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                <span>{f.label}</span>
+                <span className={`rounded-full px-1.5 py-0.2 text-[0.65rem] ${isSelected ? "bg-primary-foreground/25 text-primary-foreground" : "bg-muted text-muted-foreground"}`}>
+                  {f.count}
+                </span>
+              </button>
+            );
+          })}
         </div>
-      </div>
-
-      {/* Puces de filtres par statut interactives */}
-      <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
-        {(Object.keys(ORDER_STATUS) as OrderStatus[]).map((s) => {
-          const isSelected = filter === s;
-          const count = counts[s] ?? 0;
-          return (
-            <button
-              key={s}
-              type="button"
-              onClick={() => setFilter(isSelected ? "toutes" : s)}
-              className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold transition-all active:scale-95 ${
-                isSelected
-                  ? "bg-primary text-primary-foreground shadow-xs"
-                  : "bg-surface text-muted-foreground hover:bg-muted hover:text-foreground"
-              }`}
-            >
-              <span className={`size-2 rounded-full ${isSelected ? "bg-primary-foreground" : ORDER_STATUS[s].dot}`} />
-              <span>{ORDER_STATUS[s].label}</span>
-              <span className={`rounded-full px-1.5 py-0.2 text-[0.68rem] ${isSelected ? "bg-primary-foreground/25" : "bg-muted"}`}>
-                {count}
-              </span>
-            </button>
-          );
-        })}
       </div>
 
       {orders.isLoading ? (
