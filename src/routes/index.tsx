@@ -19,11 +19,11 @@ import { supabase } from "@/integrations/supabase/client";
 export const Route = createFileRoute("/")({
   head: () => ({
     meta: [
-      { title: "CouturPro — Le logiciel des couturiers du Burkina Faso" },
+      { title: "CouturPro — Le logiciel de gestion pour ateliers de couture en Afrique & dans le monde" },
       {
         name: "description",
         content:
-          "Clients, carnet de mesures, commandes, paiements et rendez-vous : gérez tout votre atelier de couture depuis votre téléphone. Montants en FCFA.",
+          "Clients, carnet de mesures, commandes, paiements et rendez-vous : gérez tout votre atelier de couture depuis votre téléphone. Conçu pour tous les couturiers, tailleurs et créateurs de mode en Afrique et au-delà.",
       },
       { property: "og:title", content: "CouturPro — Gestion d'atelier de couture" },
       {
@@ -40,7 +40,7 @@ const features = [
   {
     icon: Users,
     title: "Fiches clients",
-    text: "Nom, téléphone, WhatsApp, quartier, photo et notes personnelles de chaque client.",
+    text: "Nom, téléphone, WhatsApp, ville, photo et notes personnelles de chaque client.",
   },
   {
     icon: Ruler,
@@ -54,8 +54,8 @@ const features = [
   },
   {
     icon: Wallet,
-    title: "Paiements en FCFA",
-    text: "Espèces, Orange Money, Moov Money, Wave. Avance, reste à payer, tout est clair.",
+    title: "Gestion des paiements",
+    text: "Espèces, Mobile Money (Orange, Wave, MTN, Moov...), virements et multi-devises. Acomptes, soldes et reçus instantanés.",
   },
   {
     icon: CalendarDays,
@@ -96,7 +96,7 @@ function Landing() {
       <main>
         <section className="mx-auto grid max-w-6xl items-center gap-10 px-5 pb-16 pt-8 lg:grid-cols-2 lg:pt-16">
           <div>
-            <span className="chip-new">Pensé pour le Burkina Faso 🇧🇫</span>
+            <span className="chip-new">Pensé pour l'Afrique & les créateurs du monde 🌍</span>
             <h1 className="mt-4 text-4xl font-bold leading-tight sm:text-5xl">
               Votre atelier de couture, enfin bien organisé
             </h1>
@@ -117,13 +117,13 @@ function Landing() {
             </div>
             <div className="mt-8 flex flex-wrap gap-5 text-sm text-muted-foreground">
               <span className="flex items-center gap-2">
-                <Smartphone className="size-4 text-primary" /> Sur téléphone d'abord
+                <Smartphone className="size-4 text-primary" /> 100% Mobile & Ordinateur
               </span>
               <span className="flex items-center gap-2">
-                <ShieldCheck className="size-4 text-primary" /> Vos données restent privées
+                <ShieldCheck className="size-4 text-primary" /> Données privées & sécurisées
               </span>
               <span className="flex items-center gap-2">
-                <Wallet className="size-4 text-primary" /> Montants en FCFA
+                <Wallet className="size-4 text-primary" /> Multi-devises & Mobile Money
               </span>
             </div>
           </div>
@@ -131,7 +131,7 @@ function Landing() {
             <div className="overflow-hidden rounded-3xl border border-border shadow-[var(--shadow-raised)]">
               <img
                 src={heroImage}
-                alt="Couturier burkinabè travaillant sur un tissu Faso Dan Fani dans son atelier"
+                alt="Couturier et styliste travaillant sur des créations dans son atelier de couture"
                 width={1600}
                 height={1104}
                 className="h-full w-full object-cover"
@@ -178,7 +178,7 @@ function Landing() {
       </main>
 
       <footer className="border-t border-border py-8 text-center text-sm text-muted-foreground">
-        CouturPro — gestion d'atelier de couture. Ouagadougou, Burkina Faso.
+        CouturPro — La solution de gestion pour les couturiers, tailleurs et créateurs de mode en Afrique et à l'international.
       </footer>
     </div>
   );

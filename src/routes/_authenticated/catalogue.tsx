@@ -39,7 +39,7 @@ export const Route = createFileRoute("/_authenticated/catalogue")({
       {
         name: "description",
         content:
-          "Catalogue de modèles, créations et lookbook pour atelier de couture au Burkina Faso.",
+          "Catalogue de modèles, créations et lookbook pour ateliers de couture et créateurs de mode.",
       },
     ],
   }),

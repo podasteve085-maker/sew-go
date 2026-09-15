@@ -42,7 +42,7 @@ export function fullName(c: { first_name?: string | null; last_name?: string | n
   return `${c.first_name ?? ""} ${(c.last_name ?? "").toUpperCase()}`.trim();
 }
 
-/** Normalise un numéro burkinabè pour un lien WhatsApp (indicatif +226 par défaut). */
+/** Normalise un numéro de téléphone pour un lien WhatsApp (conserve l'indicatif international). */
 export function waLink(phone: string | null | undefined, message?: string) {
   if (!phone) return null;
   let digits = phone.replace(/[^\d+]/g, "");
@@ -54,7 +54,7 @@ export function waLink(phone: string | null | undefined, message?: string) {
 }
 
 /**
- * Retourne uniquement les chiffres avec indicatif (+226 pour les numéros locaux à 8 chiffres).
+ * Retourne uniquement les chiffres avec indicatif.
  * Utilisé pour construire manuellement des URLs wa.me et des liens tel:.
  */
 export function cleanPhone(phone: string | null | undefined): string {

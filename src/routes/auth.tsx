@@ -456,7 +456,7 @@ function AuthPage() {
                   </div>
                   <div className="space-y-1.5">
                     <Label htmlFor="up-phone">Téléphone</Label>
-                    <Input id="up-phone" name="phone" inputMode="tel" placeholder="70 00 00 00" />
+                    <Input id="up-phone" name="phone" inputMode="tel" placeholder="Numéro avec indicatif (ex: +225, +226, +221...)" />
                   </div>
                   <div className="space-y-1.5">
                     <Label htmlFor="up-email">Email</Label>
