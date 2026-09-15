@@ -86,11 +86,24 @@ function Landing() {
           </span>
           CouturPro
         </span>
-        <Button asChild variant="secondary" size="sm">
-          <Link to={signedIn ? "/dashboard" : "/auth"}>
-            {signedIn ? "Mon atelier" : "Se connecter"}
-          </Link>
-        </Button>
+        <div className="flex items-center gap-2">
+          {signedIn ? (
+            <>
+              <Button asChild variant="secondary" size="sm">
+                <Link to="/dashboard">Mon atelier</Link>
+              </Button>
+              <Button asChild variant="ghost" size="sm" className="text-xs text-muted-foreground hover:text-foreground">
+                <Link to="/auth" search={{ reconnect: true }}>
+                  Changer de compte
+                </Link>
+              </Button>
+            </>
+          ) : (
+            <Button asChild variant="secondary" size="sm">
+              <Link to="/auth">Se connecter</Link>
+            </Button>
+          )}
+        </div>
       </header>
 
       <main>

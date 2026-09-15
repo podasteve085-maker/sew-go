@@ -20,6 +20,9 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { StoredImage } from "@/components/bits";
+import { useBusiness } from "@/hooks/use-business";
+import { checkClientQuota } from "@/lib/quotas";
+import { UpgradeDialog } from "@/components/upgrade-dialog";
 
 export function ClientFormDialog({
   open,
@@ -35,11 +38,30 @@ export function ClientFormDialog({
   onCreated?: (clientId: string) => void;
 }) {
   const queryClient = useQueryClient();
+  const { data: business } = useBusiness();
   const [photoPath, setPhotoPath] = useState<string | null>(client?.photo_url ?? null);
   const [uploading, setUploading] = useState(false);
+  const [upgradeOpen, setUpgradeOpen] = useState(false);
+  const [quotaReason, setQuotaReason] = useState("");
 
   const save = useMutation({
     mutationFn: async (values: Record<string, string>) => {
+      if (!client) {
+        // Contrôle du quota de clients pour le plan Gratuit
+        const { count, error: countErr } = await supabase
+          .from("clients")
+          .select("id", { count: "exact", head: true })
+          .eq("business_id", businessId);
+
+        if (!countErr && typeof count === "number") {
+          const quota = checkClientQuota(business, count);
+          if (!quota.allowed) {
+            setQuotaReason(quota.message || "Limite de clients atteinte.");
+            setUpgradeOpen(true);
+            throw new Error(quota.message || "Limite de clients atteinte.");
+          }
+        }
+      }
       const payload = {
         business_id: businessId,
         first_name: values["first_name"] ?? "",
@@ -101,6 +123,7 @@ export function ClientFormDialog({
   }
 
   return (
+    <>
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-lg">
         <DialogHeader>
@@ -212,5 +235,12 @@ export function ClientFormDialog({
         </form>
       </DialogContent>
     </Dialog>
+
+    <UpgradeDialog
+      open={upgradeOpen}
+      onOpenChange={setUpgradeOpen}
+      triggerReason={quotaReason}
+    />
+    </>
   );
 }

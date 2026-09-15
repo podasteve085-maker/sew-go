@@ -1,4 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   Users,
@@ -13,6 +14,7 @@ import {
   Shirt,
   MessageCircle,
   BookOpen,
+  Crown,
 } from "lucide-react";
 
 import { supabase } from "@/integrations/supabase/client";
@@ -23,6 +25,7 @@ import { fcfa, dateFr, dateLongFr, today, addDays, fullName, cleanPhone } from "
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { StatCard, EmptyState, SectionTitle, OrderCard, LateBadge } from "@/components/bits";
+import { UpgradeDialog } from "@/components/upgrade-dialog";
 
 export const Route = createFileRoute("/_authenticated/dashboard")({
   head: () => ({
@@ -83,6 +86,10 @@ function Dashboard() {
     .sort((a, b) => (a.due_date ?? "").localeCompare(b.due_date ?? ""))
     .slice(0, 5);
 
+  const [upgradeOpen, setUpgradeOpen] = useState(false);
+  const currentMonthStr = new Date().toISOString().slice(0, 7);
+  const ordersThisMonth = all.filter((o) => (o.ordered_at ?? "").startsWith(currentMonthStr)).length;
+
   const rawName = (business?.owner_name ?? "").split(" ")[0];
   const firstName = rawName ? rawName.charAt(0).toUpperCase() + rawName.slice(1) : "";
 
@@ -94,6 +101,32 @@ function Dashboard() {
           {dateLongFr(new Date().toISOString())}
         </p>
       </header>
+
+      {/* Jauge des quotas pour le Plan Gratuit */}
+      {(!business?.plan || business?.plan === "free") && (
+        <div className="rounded-2xl border border-primary/20 bg-gradient-to-r from-primary/10 via-primary/5 to-transparent p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-xs">
+          <div className="space-y-1">
+            <div className="flex items-center gap-2">
+              <span className="rounded-full bg-primary px-2.5 py-0.5 text-[10px] font-extrabold text-primary-foreground">
+                PLAN GRATUIT
+              </span>
+              <span className="text-xs text-muted-foreground font-medium">Formule d'essai atelier</span>
+            </div>
+            <p className="font-display text-sm font-bold text-foreground">
+              {clientsCount.data ?? 0} / 10 clients enregistrés · {ordersThisMonth} / 10 commandes ce mois
+            </p>
+            <p className="text-xs text-muted-foreground">
+              Passez à CouturPro pour débloquer l'illimité, les statistiques financières et les reçus WhatsApp.
+            </p>
+          </div>
+          <Button
+            onClick={() => setUpgradeOpen(true)}
+            className="font-bold shrink-0 shadow-xs h-9 text-xs sm:text-sm"
+          >
+            <Crown className="mr-1.5 size-4" /> Passer à Pro (dès 2 500 F)
+          </Button>
+        </div>
+      )}
 
       <div className="grid grid-cols-2 gap-2 sm:gap-3 sm:grid-cols-3 lg:grid-cols-6">
         <Link to="/commandes" className="block transition-transform active:scale-95">
@@ -332,6 +365,9 @@ function Dashboard() {
           </div>
         </section>
       )}
+
+      {/* Modale d'abonnement / passage à Pro */}
+      <UpgradeDialog open={upgradeOpen} onOpenChange={setUpgradeOpen} />
     </div>
   );
 }

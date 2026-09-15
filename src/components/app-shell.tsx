@@ -14,6 +14,8 @@ import {
   LogOut,
   Plus,
   BookOpen,
+  Crown,
+  ShieldAlert,
 } from "lucide-react";
 
 import { supabase } from "@/integrations/supabase/client";
@@ -22,6 +24,7 @@ import { fullName } from "@/lib/format";
 import { ORDER_STATUS, type OrderStatus } from "@/lib/domain";
 import { Button } from "@/components/ui/button";
 import { StoredImage } from "@/components/bits";
+import { UpgradeDialog } from "@/components/upgrade-dialog";
 import {
   Command,
   CommandEmpty,
@@ -54,6 +57,7 @@ const MOBILE_NAV = [
 export function AppShell({ children }: { children: ReactNode }) {
   const { data: business } = useBusiness();
   const [searchOpen, setSearchOpen] = useState(false);
+  const [upgradeOpen, setUpgradeOpen] = useState(false);
   const pathname = useRouterState({ select: (s) => s.location.pathname });
 
   useEffect(() => {
@@ -107,8 +111,43 @@ export function AppShell({ children }: { children: ReactNode }) {
               </Link>
             );
           })}
+
+          {/* Lien Administration Centrale réservé aux administrateurs */}
+          {business?.is_admin && (
+            <Link
+              to="/admin"
+              className={`flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-bold transition-colors ${
+                pathname.startsWith("/admin")
+                  ? "bg-purple-600/20 text-purple-700 dark:text-purple-300"
+                  : "text-purple-700/85 hover:bg-purple-600/10 hover:text-purple-700"
+              }`}
+            >
+              <ShieldAlert className="size-4.5 text-purple-600" />
+              <span>Administration</span>
+              <span className="ml-auto rounded bg-purple-600 px-1.5 py-0.5 text-[9px] font-extrabold text-white">
+                ADMIN
+              </span>
+            </Link>
+          )}
         </nav>
         <div className="space-y-2 p-3">
+          {(!business?.plan || business?.plan === "free") && (
+            <div className="rounded-xl border border-primary/20 bg-primary/10 p-3 space-y-1.5">
+              <div className="flex items-center gap-1.5 text-xs font-bold text-primary">
+                <Crown className="size-3.5" /> Plan Gratuit
+              </div>
+              <p className="text-[11px] text-muted-foreground leading-tight">
+                Clients et commandes illimités dès 2 500 F/mois.
+              </p>
+              <Button
+                size="sm"
+                className="w-full text-xs h-7 font-bold shadow-xs mt-1"
+                onClick={() => setUpgradeOpen(true)}
+              >
+                Passer à Pro ⭐
+              </Button>
+            </div>
+          )}
           <PwaInstallButton />
           <SignOutButton />
         </div>
@@ -144,6 +183,24 @@ export function AppShell({ children }: { children: ReactNode }) {
                 Ctrl K
               </kbd>
             </button>
+            {/* Badge Pro ou Admin dans l'en-tête mobile */}
+            {business?.is_admin ? (
+              <Link
+                to="/admin"
+                className="rounded-md bg-purple-600 px-2 py-0.5 text-[10px] font-extrabold text-white shrink-0"
+              >
+                ADMIN
+              </Link>
+            ) : (!business?.plan || business?.plan === "free") ? (
+              <button
+                type="button"
+                onClick={() => setUpgradeOpen(true)}
+                className="inline-flex items-center gap-1 rounded-full bg-primary/15 text-primary border border-primary/30 px-2 py-0.5 text-[10px] font-extrabold shrink-0 active:scale-95 cursor-pointer"
+              >
+                <Crown className="size-3" /> PRO
+              </button>
+            ) : null}
+
             <Button asChild size="sm" className="hidden sm:inline-flex shrink-0 shadow-xs">
               <Link to="/commandes/nouvelle">
                 <Plus className="size-4" /> Commande
@@ -216,6 +273,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       </nav>
 
       <GlobalSearch open={searchOpen} onOpenChange={setSearchOpen} />
+      <UpgradeDialog open={upgradeOpen} onOpenChange={setUpgradeOpen} />
     </div>
   );
 }

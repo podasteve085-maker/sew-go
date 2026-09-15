@@ -1,6 +1,6 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
-import { Scissors, Loader2, ArrowLeft, KeyRound, CheckCircle2 } from "lucide-react";
+import { Scissors, Loader2, ArrowLeft, KeyRound, CheckCircle2, ShieldCheck, LogOut } from "lucide-react";
 import { toast } from "sonner";
 
 import { supabase } from "@/integrations/supabase/client";
@@ -11,6 +11,12 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 export const Route = createFileRoute("/auth")({
   ssr: false,
+  validateSearch: (
+    search: Record<string, unknown>,
+  ): { logout?: boolean; reconnect?: boolean } => ({
+    logout: search["logout"] === true || search["logout"] === "true",
+    reconnect: search["reconnect"] === true || search["reconnect"] === "true",
+  }),
   head: () => ({
     meta: [
       { title: "Connexion & Inscription — CouturPro" },
@@ -31,9 +37,11 @@ export const Route = createFileRoute("/auth")({
 });
 
 function AuthPage() {
+  const { logout, reconnect } = Route.useSearch();
   const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
   const [mode, setMode] = useState<"tabs" | "forgot" | "update_password">("tabs");
+  const [activeSession, setActiveSession] = useState<{ email: string; businessName?: string } | null>(null);
 
   // Champs formulaires
   const [signInEmail, setSignInEmail] = useState("");
@@ -50,28 +58,42 @@ function AuthPage() {
       return;
     }
 
-    // 2. Écoute active des changements d'état d'authentification Supabase
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange((event, session) => {
-      if (event === "PASSWORD_RECOVERY") {
-        setMode("update_password");
-      } else if (session && event === "SIGNED_IN" && !window.location.hash.includes("type=recovery")) {
-        navigate({ to: "/dashboard", replace: true });
+    // 2. Si l'utilisateur demande explicitement une déconnexion pour changer de compte
+    if (logout || reconnect) {
+      supabase.auth.signOut().then(() => {
+        setActiveSession(null);
+      });
+      return;
+    }
+
+    // 3. Vérification de session active existante
+    supabase.auth.getSession().then(async ({ data }) => {
+      if (data.session?.user) {
+        const email = data.session.user.email ?? "";
+        // Récupérer le nom de l'atelier pour l'affichage de garde
+        const { data: b } = await supabase
+          .from("businesses")
+          .select("name")
+          .eq("owner_id", data.session.user.id)
+          .maybeSingle();
+
+        setActiveSession({ email, businessName: b?.name });
       }
     });
 
-    // 3. Si l'utilisateur est déjà connecté et ne demande pas de récupération
-    if (!hash.includes("type=recovery")) {
-      supabase.auth.getSession().then(({ data }) => {
-        if (data.session) navigate({ to: "/dashboard", replace: true });
-      });
-    }
+    // 4. Écoute des événements de récupération de mot de passe
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((event) => {
+      if (event === "PASSWORD_RECOVERY") {
+        setMode("update_password");
+      }
+    });
 
     return () => {
       subscription.unsubscribe();
     };
-  }, [navigate]);
+  }, [logout, reconnect]);
 
   // Connexion
   async function signIn(e: React.FormEvent<HTMLFormElement>) {
@@ -377,8 +399,59 @@ function AuthPage() {
           </div>
         )}
 
-        {/* MODE 3 : ONGLETS NORMAUX (Connexion / Créer mon atelier) */}
+        {/* MODE 3 : ONGLETS NORMAUX OU ÉCRAN DE SÉCURITÉ DE SESSION */}
         {mode === "tabs" && (
+          activeSession ? (
+            <div className="card-soft p-6 space-y-5">
+              <div className="flex items-center gap-3">
+                <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-amber-500/15 text-amber-600">
+                  <ShieldCheck className="size-5" />
+                </span>
+                <div>
+                  <h2 className="font-display text-base font-bold text-foreground">Session active détectée</h2>
+                  <p className="text-xs text-muted-foreground">
+                    Cet appareil est déjà connecté à un atelier.
+                  </p>
+                </div>
+              </div>
+
+              <div className="rounded-xl border border-border bg-card p-4 space-y-1">
+                <p className="font-display text-sm font-bold text-foreground">
+                  {activeSession.businessName || "Mon atelier"}
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  Compte connecté : <strong className="text-foreground">{activeSession.email}</strong>
+                </p>
+              </div>
+
+              <p className="text-xs text-muted-foreground leading-relaxed">
+                Pour garantir la confidentialité de votre atelier, confirmez si vous souhaitez accéder à cet atelier ou vous déconnecter pour changer de compte.
+              </p>
+
+              <div className="space-y-2 pt-1">
+                <Button
+                  className="w-full font-bold shadow-xs"
+                  onClick={() => navigate({ to: "/dashboard", replace: true })}
+                >
+                  Continuer vers mon atelier →
+                </Button>
+
+                <Button
+                  variant="outline"
+                  className="w-full text-xs font-semibold text-destructive hover:bg-destructive/10 hover:text-destructive"
+                  onClick={async () => {
+                    setLoading(true);
+                    await supabase.auth.signOut();
+                    setActiveSession(null);
+                    setLoading(false);
+                    toast.info("Session fermée. Vous pouvez saisir vos identifiants.");
+                  }}
+                >
+                  <LogOut className="mr-2 size-3.5" /> Se déconnecter / Utiliser un autre compte
+                </Button>
+              </div>
+            </div>
+          ) : (
           <div className="card-soft p-6">
             <Tabs defaultValue="signin">
               <TabsList className="grid w-full grid-cols-2">
@@ -480,6 +553,7 @@ function AuthPage() {
               </TabsContent>
             </Tabs>
           </div>
+          )
         )}
 
         <p className="mt-6 text-center text-xs text-muted-foreground">

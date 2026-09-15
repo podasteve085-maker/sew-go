@@ -27,6 +27,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { StoredImage } from "@/components/bits";
 import { ClientFormDialog } from "@/components/client-form-dialog";
 import { MeasurementDialog } from "@/components/measurement-dialog";
+import { checkOrderQuota } from "@/lib/quotas";
+import { UpgradeDialog } from "@/components/upgrade-dialog";
 
 export const Route = createFileRoute("/_authenticated/commandes/nouvelle")({
   validateSearch: (
@@ -68,6 +70,8 @@ function NewOrder() {
   const [selectedClientId, setSelectedClientId] = useState<string>(search.client ?? "");
   const [openNewClient, setOpenNewClient] = useState(false);
   const [openNewMeasure, setOpenNewMeasure] = useState(false);
+  const [upgradeOpen, setUpgradeOpen] = useState(false);
+  const [quotaReason, setQuotaReason] = useState("");
 
   const clients = useQuery({ queryKey: ["clients", ""], queryFn: () => fetchClients() });
   const garments = useQuery({ queryKey: ["garment-types"], queryFn: fetchGarmentTypes });
@@ -110,6 +114,23 @@ function NewOrder() {
   const create = useMutation({
     mutationFn: async (values: Record<string, string>) => {
       if (!business) throw new Error("no business");
+
+      // Contrôle du quota de commandes du mois en cours pour le plan Gratuit
+      const currentMonthStart = new Date().toISOString().slice(0, 7) + "-01";
+      const { count, error: countErr } = await supabase
+        .from("orders")
+        .select("id", { count: "exact", head: true })
+        .eq("business_id", business.id)
+        .gte("ordered_at", currentMonthStart);
+
+      if (!countErr && typeof count === "number") {
+        const quota = checkOrderQuota(business, count);
+        if (!quota.allowed) {
+          setQuotaReason(quota.message || "Limite mensuelle de commandes atteinte.");
+          setUpgradeOpen(true);
+          throw new Error(quota.message || "Limite mensuelle de commandes atteinte.");
+        }
+      }
 
       const totalVal = Number(values["price"] || 0);
       const depositVal = Number(values["deposit"] || 0);
@@ -546,6 +567,12 @@ function NewOrder() {
           }}
         />
       )}
+      {/* Modale d'abonnement / passage à Pro */}
+      <UpgradeDialog
+        open={upgradeOpen}
+        onOpenChange={setUpgradeOpen}
+        triggerReason={quotaReason}
+      />
     </div>
   );
 }
