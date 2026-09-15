@@ -27,14 +27,27 @@ export function useBusiness() {
   return useQuery({
     queryKey: ["business"],
     staleTime: 60_000,
+    retry: 1,
     queryFn: async (): Promise<Business | null> => {
       const { data, error } = await supabase
         .from("businesses")
         .select("*")
         .limit(1)
         .maybeSingle();
-      if (error) throw error;
-      return data as Business | null;
+
+      if (error) {
+        console.error("[useBusiness error]", error);
+        throw error;
+      }
+      if (!data) return null;
+
+      return {
+        ...data,
+        plan: ((data as Record<string, unknown>).plan as SubscriptionPlan) || "free",
+        plan_status: ((data as Record<string, unknown>).plan_status as SubscriptionStatus) || "active",
+        plan_expires_at: ((data as Record<string, unknown>).plan_expires_at as string) || null,
+        is_admin: Boolean((data as Record<string, unknown>).is_admin),
+      } as Business;
     },
   });
 }

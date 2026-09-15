@@ -25,6 +25,7 @@ import { ORDER_STATUS, type OrderStatus } from "@/lib/domain";
 import { Button } from "@/components/ui/button";
 import { StoredImage } from "@/components/bits";
 import { UpgradeDialog } from "@/components/upgrade-dialog";
+import { isProOrAdmin } from "@/lib/quotas";
 import {
   Command,
   CommandEmpty,
@@ -43,6 +44,7 @@ const NAV = [
   { to: "/catalogue", label: "Lookbook", icon: BookOpen },
   { to: "/rendez-vous", label: "Rendez-vous", icon: CalendarDays },
   { to: "/statistiques", label: "Statistiques", icon: BarChart3 },
+  { to: "/abonnement", label: "Abonnement", icon: Crown },
   { to: "/atelier", label: "Mon atelier", icon: Settings },
 ] as const;
 
@@ -56,6 +58,7 @@ const MOBILE_NAV = [
 
 export function AppShell({ children }: { children: ReactNode }) {
   const { data: business } = useBusiness();
+  const isPro = isProOrAdmin(business);
   const [searchOpen, setSearchOpen] = useState(false);
   const [upgradeOpen, setUpgradeOpen] = useState(false);
   const pathname = useRouterState({ select: (s) => s.location.pathname });
@@ -131,7 +134,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           )}
         </nav>
         <div className="space-y-2 p-3">
-          {(!business?.plan || business?.plan === "free") && (
+          {!isPro && (
             <div className="rounded-xl border border-primary/20 bg-primary/10 p-3 space-y-1.5">
               <div className="flex items-center gap-1.5 text-xs font-bold text-primary">
                 <Crown className="size-3.5" /> Plan Gratuit
@@ -140,11 +143,13 @@ export function AppShell({ children }: { children: ReactNode }) {
                 Clients et commandes illimités dès 2 500 F/mois.
               </p>
               <Button
+                asChild
                 size="sm"
                 className="w-full text-xs h-7 font-bold shadow-xs mt-1"
-                onClick={() => setUpgradeOpen(true)}
               >
-                Passer à Pro ⭐
+                <Link to="/abonnement">
+                  Voir l'abonnement ⭐
+                </Link>
               </Button>
             </div>
           )}
@@ -191,15 +196,21 @@ export function AppShell({ children }: { children: ReactNode }) {
               >
                 ADMIN
               </Link>
-            ) : (!business?.plan || business?.plan === "free") ? (
-              <button
-                type="button"
-                onClick={() => setUpgradeOpen(true)}
-                className="inline-flex items-center gap-1 rounded-full bg-primary/15 text-primary border border-primary/30 px-2 py-0.5 text-[10px] font-extrabold shrink-0 active:scale-95 cursor-pointer"
+            ) : isPro ? (
+              <Link
+                to="/abonnement"
+                className="inline-flex items-center gap-1 rounded-full bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 border border-emerald-500/30 px-2.5 py-0.5 text-[10px] font-extrabold shrink-0 active:scale-95"
               >
                 <Crown className="size-3" /> PRO
-              </button>
-            ) : null}
+              </Link>
+            ) : (
+              <Link
+                to="/abonnement"
+                className="inline-flex items-center gap-1 rounded-full bg-primary/15 text-primary border border-primary/30 px-2.5 py-0.5 text-[10px] font-extrabold shrink-0 active:scale-95"
+              >
+                <Crown className="size-3" /> PRO
+              </Link>
+            )}
 
             <Button asChild size="sm" className="hidden sm:inline-flex shrink-0 shadow-xs">
               <Link to="/commandes/nouvelle">

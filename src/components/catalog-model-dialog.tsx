@@ -19,6 +19,8 @@ import { uploadImage } from "@/hooks/use-signed-url";
 import { CATALOG_CATEGORIES, type CatalogCategory } from "@/lib/domain";
 import type { CatalogModelRow } from "@/lib/queries";
 import { StoredImage } from "@/components/bits";
+import { checkCatalogQuota } from "@/lib/quotas";
+import { UpgradeDialog } from "@/components/upgrade-dialog";
 
 const SUGGESTED_TAGS = [
   "Cérémonie",
@@ -59,6 +61,8 @@ export function CatalogModelDialog({ open, onOpenChange, model }: CatalogModelDi
   const [tags, setTags] = useState<string[]>(model?.tags ?? []);
   const [tagInput, setTagInput] = useState("");
   const [uploading, setUploading] = useState(false);
+  const [upgradeOpen, setUpgradeOpen] = useState(false);
+  const [quotaReason, setQuotaReason] = useState("");
 
   // Synchronise whenever the dialog opens with a specific model
   function resetForm(m?: CatalogModelRow | null) {
@@ -118,6 +122,23 @@ export function CatalogModelDialog({ open, onOpenChange, model }: CatalogModelDi
       if (!business) throw new Error("Atelier non identifié");
       if (!name.trim()) throw new Error("Le nom du modèle est obligatoire");
 
+      if (!isEdit) {
+        // Contrôle strict du quota de modèles du catalogue pour le plan Gratuit
+        const { count, error: countErr } = await supabase
+          .from("catalog_models")
+          .select("id", { count: "exact", head: true })
+          .eq("business_id", business.id);
+
+        if (!countErr && typeof count === "number") {
+          const quota = checkCatalogQuota(business, count);
+          if (!quota.allowed) {
+            setQuotaReason(quota.message || "Limite de modèles atteinte.");
+            setUpgradeOpen(true);
+            throw new Error(quota.message || "Limite de modèles atteinte.");
+          }
+        }
+      }
+
       const payload = {
         business_id: business.id,
         name: name.trim(),
@@ -157,6 +178,7 @@ export function CatalogModelDialog({ open, onOpenChange, model }: CatalogModelDi
   });
 
   return (
+    <>
     <Dialog
       open={open}
       onOpenChange={(val) => {
@@ -427,5 +449,12 @@ export function CatalogModelDialog({ open, onOpenChange, model }: CatalogModelDi
         </form>
       </DialogContent>
     </Dialog>
+
+    <UpgradeDialog
+      open={upgradeOpen}
+      onOpenChange={setUpgradeOpen}
+      triggerReason={quotaReason}
+    />
+    </>
   );
 }

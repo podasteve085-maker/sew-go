@@ -14,11 +14,13 @@ import {
   ChevronLeft,
   ChevronRight,
   X,
+  Crown,
 } from "lucide-react";
 import { toast } from "sonner";
 
 import { supabase } from "@/integrations/supabase/client";
 import { useBusiness } from "@/hooks/use-business";
+import { isProOrAdmin } from "@/lib/quotas";
 import {
   fetchCatalogModels,
   deleteCatalogModel,
@@ -30,6 +32,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { StoredImage, EmptyState, SectionTitle } from "@/components/bits";
 import { CatalogModelDialog } from "@/components/catalog-model-dialog";
+import { UpgradeDialog } from "@/components/upgrade-dialog";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 
 export const Route = createFileRoute("/_authenticated/catalogue")({
@@ -51,10 +54,14 @@ export function CataloguePage() {
   const queryClient = useQueryClient();
   const { data: business } = useBusiness();
 
+  const isPro = isProOrAdmin(business);
+
   const [selectedCategory, setSelectedCategory] = useState<string>("all");
   const [searchQuery, setSearchQuery] = useState("");
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingModel, setEditingModel] = useState<CatalogModelRow | null>(null);
+  const [upgradeOpen, setUpgradeOpen] = useState(false);
+  const [quotaReason, setQuotaReason] = useState("");
 
   // Mode Présentation Plein Écran pour le client
   const [presentationModel, setPresentationModel] = useState<CatalogModelRow | null>(null);

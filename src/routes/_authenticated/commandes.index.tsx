@@ -1,15 +1,18 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Plus, Search } from "lucide-react";
+import { Plus, Search, Crown, Scissors, AlertCircle } from "lucide-react";
 
+import { useBusiness } from "@/hooks/use-business";
 import { fetchOrders } from "@/lib/queries";
 import { ORDER_STATUS, isLate, isActive, type OrderStatus } from "@/lib/domain";
 import { fullName } from "@/lib/format";
+import { isProOrAdmin, checkOrderQuota } from "@/lib/quotas";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState, OrderCard, SectionTitle } from "@/components/bits";
+import { UpgradeDialog } from "@/components/upgrade-dialog";
 
 const FILTERS = [
   { value: "actives", label: "En cours" },
@@ -36,9 +39,30 @@ export const Route = createFileRoute("/_authenticated/commandes/")({
 });
 
 function OrdersPage() {
+  const navigate = useNavigate();
+  const { data: business } = useBusiness();
   const [filter, setFilter] = useState<string>("actives");
   const [term, setTerm] = useState("");
+  const [upgradeOpen, setUpgradeOpen] = useState(false);
+  const [quotaReason, setQuotaReason] = useState("");
+
   const orders = useQuery({ queryKey: ["orders"], queryFn: () => fetchOrders() });
+
+  const isPro = isProOrAdmin(business);
+  const currentMonthStart = new Date().toISOString().slice(0, 7);
+  const monthlyOrdersCount = (orders.data ?? []).filter((o) =>
+    (o.ordered_at ?? "").startsWith(currentMonthStart),
+  ).length;
+  const orderQuota = checkOrderQuota(business, monthlyOrdersCount);
+
+  function handleNewOrder() {
+    if (!orderQuota.allowed) {
+      setQuotaReason(orderQuota.message || "Limite mensuelle de commandes atteinte.");
+      setUpgradeOpen(true);
+    } else {
+      navigate({ to: "/commandes/nouvelle" });
+    }
+  }
 
   const list = useMemo(() => {
     const all = orders.data ?? [];
@@ -71,15 +95,50 @@ function OrdersPage() {
     <div className="space-y-6">
       <SectionTitle
         action={
-          <Button asChild className="h-10 text-sm font-bold shadow-xs">
-            <Link to="/commandes/nouvelle">
-              <Plus className="mr-1 size-4.5" /> Nouvelle commande
-            </Link>
+          <Button onClick={handleNewOrder} className="h-10 text-sm font-bold shadow-xs">
+            <Plus className="mr-1 size-4.5" /> Nouvelle commande
           </Button>
         }
       >
         Commandes
       </SectionTitle>
+
+      {/* Jauge Quota pour le Plan Gratuit */}
+      {!isPro && (
+        <div
+          className={`rounded-xl border p-3 text-xs flex flex-wrap items-center justify-between gap-2.5 ${
+            !orderQuota.allowed
+              ? "border-destructive/40 bg-destructive/10 text-destructive"
+              : monthlyOrdersCount >= 8
+              ? "border-amber-500/40 bg-amber-500/10 text-amber-800 dark:text-amber-300"
+              : "border-border bg-card text-muted-foreground"
+          }`}
+        >
+          <div className="flex items-center gap-2">
+            <Scissors className="size-4 shrink-0 text-primary" />
+            <span>
+              Quota commandes du mois :{" "}
+              <strong className="text-foreground">
+                {monthlyOrdersCount} / 10 commandes
+              </strong>
+              {!orderQuota.allowed
+                ? " — Limite mensuelle atteinte ! Passez à Pro pour continuer."
+                : ` (${10 - monthlyOrdersCount} restantes ce mois)`}
+            </span>
+          </div>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => {
+              setQuotaReason("Passez à CouturPro pour enregistrer des commandes en illimité chaque mois.");
+              setUpgradeOpen(true);
+            }}
+            className="h-7 text-xs font-bold text-primary border-primary/30 hover:bg-primary/10 ml-auto"
+          >
+            <Crown className="mr-1 size-3.5" /> Passer à Pro (Illimité)
+          </Button>
+        </div>
+      )}
 
       <div className="flex flex-col gap-2.5 sm:flex-row sm:items-center">
         <div className="relative flex-1">
@@ -143,6 +202,12 @@ function OrdersPage() {
           ))}
         </div>
       )}
+
+      <UpgradeDialog
+        open={upgradeOpen}
+        onOpenChange={setUpgradeOpen}
+        triggerReason={quotaReason}
+      />
     </div>
   );
 }

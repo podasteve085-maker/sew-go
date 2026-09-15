@@ -34,7 +34,7 @@ export const Route = createFileRoute("/_authenticated/atelier")({
 
 function WorkshopPage() {
   const queryClient = useQueryClient();
-  const { data: business, isLoading } = useBusiness();
+  const { data: business, isLoading, isError, error, refetch } = useBusiness();
   const [logoPath, setLogoPath] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
 
@@ -79,8 +79,25 @@ function WorkshopPage() {
     }
   }
 
+  if (isError) {
+    return (
+      <div className="card-soft mx-auto max-w-xl p-6 text-center space-y-3 mt-8">
+        <p className="text-destructive font-bold text-sm">Impossible de charger les données de votre atelier</p>
+        <p className="text-xs text-muted-foreground">{error instanceof Error ? error.message : "Erreur de connexion"}</p>
+        <Button onClick={() => refetch()} variant="outline" size="sm">
+          Réessayer
+        </Button>
+      </div>
+    );
+  }
+
   if (isLoading || !business) {
-    return <Skeleton className="h-64 w-full rounded-xl" />;
+    return (
+      <div className="space-y-4 max-w-3xl mx-auto">
+        <Skeleton className="h-8 w-40 rounded-lg" />
+        <Skeleton className="h-64 w-full rounded-xl" />
+      </div>
+    );
   }
 
   return (

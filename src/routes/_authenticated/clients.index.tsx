@@ -1,16 +1,18 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useState, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Plus, Search, MapPin, Phone, MessageCircle } from "lucide-react";
+import { Plus, Search, MapPin, Phone, MessageCircle, Crown, AlertCircle, Users } from "lucide-react";
 
 import { fetchClients } from "@/lib/queries";
 import { useBusiness } from "@/hooks/use-business";
 import { fullName, initials, dateFr, cleanPhone } from "@/lib/format";
+import { isProOrAdmin, checkClientQuota } from "@/lib/quotas";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState, StoredImage } from "@/components/bits";
 import { ClientFormDialog } from "@/components/client-form-dialog";
+import { UpgradeDialog } from "@/components/upgrade-dialog";
 
 export const Route = createFileRoute("/_authenticated/clients/")({
   validateSearch: (search: Record<string, unknown>): { nouveau?: boolean } => ({
@@ -35,14 +37,29 @@ function ClientsPage() {
   const [term, setTerm] = useState("");
   const [openNew, setOpenNew] = useState(Boolean(nouveau));
   const [genderFilter, setGenderFilter] = useState<string>("all");
+  const [upgradeOpen, setUpgradeOpen] = useState(false);
+  const [quotaReason, setQuotaReason] = useState("");
   const { data: business } = useBusiness();
   const clients = useQuery({ queryKey: ["clients", term], queryFn: () => fetchClients(term) });
+
+  const isPro = isProOrAdmin(business);
+  const totalClients = (clients.data ?? []).length;
+  const clientQuota = checkClientQuota(business, totalClients);
 
   const filteredClients = useMemo(() => {
     const list = clients.data ?? [];
     if (genderFilter === "all") return list;
     return list.filter((c) => c.gender?.toLowerCase() === genderFilter.toLowerCase());
   }, [clients.data, genderFilter]);
+
+  function handleOpenNew() {
+    if (!clientQuota.allowed) {
+      setQuotaReason(clientQuota.message || "Limite de 10 clients atteinte.");
+      setUpgradeOpen(true);
+    } else {
+      setOpenNew(true);
+    }
+  }
 
   return (
     <div className="mx-auto max-w-4xl space-y-6">
@@ -53,10 +70,47 @@ function ClientsPage() {
             {filteredClients.length}
           </span>
         </div>
-        <Button size="sm" onClick={() => setOpenNew(true)} className="shadow-xs">
+        <Button size="sm" onClick={handleOpenNew} className="shadow-xs">
           <Plus className="size-4" /> Nouveau
         </Button>
       </header>
+
+      {/* Jauge Quota pour le Plan Gratuit */}
+      {!isPro && (
+        <div
+          className={`rounded-xl border p-3 text-xs flex flex-wrap items-center justify-between gap-2.5 ${
+            !clientQuota.allowed
+              ? "border-destructive/40 bg-destructive/10 text-destructive"
+              : totalClients >= 8
+              ? "border-amber-500/40 bg-amber-500/10 text-amber-800 dark:text-amber-300"
+              : "border-border bg-card text-muted-foreground"
+          }`}
+        >
+          <div className="flex items-center gap-2">
+            <Users className="size-4 shrink-0 text-primary" />
+            <span>
+              Quota formule Gratuite :{" "}
+              <strong className="text-foreground">
+                {totalClients} / 10 clients
+              </strong>
+              {!clientQuota.allowed
+                ? " — Limite atteinte ! Passez à Pro pour continuer."
+                : ` (${10 - totalClients} restants)`}
+            </span>
+          </div>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => {
+              setQuotaReason("Passez à CouturPro pour enregistrer un nombre illimité de clients.");
+              setUpgradeOpen(true);
+            }}
+            className="h-7 text-xs font-bold text-primary border-primary/30 hover:bg-primary/10 ml-auto"
+          >
+            <Crown className="mr-1 size-3.5" /> Passer à Pro (Illimité)
+          </Button>
+        </div>
+      )}
 
       <div className="flex flex-col gap-2.5 sm:flex-row sm:items-center">
         <div className="relative flex-1">
@@ -196,6 +250,12 @@ function ClientsPage() {
       {business && (
         <ClientFormDialog open={openNew} onOpenChange={setOpenNew} businessId={business.id} />
       )}
+
+      <UpgradeDialog
+        open={upgradeOpen}
+        onOpenChange={setUpgradeOpen}
+        triggerReason={quotaReason}
+      />
     </div>
   );
 }

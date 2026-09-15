@@ -6,11 +6,13 @@ export const PLAN_CONFIG = {
     badge: "bg-muted text-muted-foreground border-border",
     maxClients: 10,
     maxMonthlyOrders: 10,
+    maxCatalogModels: 5,
     priceMonthly: 0,
     priceYearly: 0,
     features: [
       "Jusqu'à 10 clients enregistrés",
       "Jusqu'à 10 commandes par mois",
+      "Jusqu'à 5 modèles au catalogue",
       "Carnet de mesures complet",
       "Gestion des rendez-vous",
       "Suivi des statuts de commandes",
@@ -21,18 +23,19 @@ export const PLAN_CONFIG = {
     badge: "bg-primary/15 text-primary border-primary/30",
     maxClients: Infinity,
     maxMonthlyOrders: Infinity,
+    maxCatalogModels: Infinity,
     priceMonthly: 2500,
     priceYearly: 30000,
     features: [
       "Clients illimités",
       "Commandes illimitées",
+      "Catalogue & Lookbook illimités",
       "Mesures & Gabarits illimités",
       "Historique complet",
       "Paiements, acomptes & soldes",
       "Reçus d'atelier imprimables & WhatsApp",
       "Photos des modèles & tissus illimitées",
       "Statistiques & analyses du chiffre d'affaires",
-      "Lookbook / Catalogue atelier",
       "Sauvegarde cloud sécurisée",
     ],
   },
@@ -41,6 +44,7 @@ export const PLAN_CONFIG = {
     badge: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 border-emerald-500/30",
     maxClients: Infinity,
     maxMonthlyOrders: Infinity,
+    maxCatalogModels: Infinity,
     priceMonthly: 2083,
     priceYearly: 25000, // 25 000 FCFA / an au lieu de 30 000 FCFA (2 mois offerts)
     features: [
@@ -55,6 +59,7 @@ export const PLAN_CONFIG = {
     badge: "bg-purple-500/15 text-purple-700 dark:text-purple-300 border-purple-500/30",
     maxClients: Infinity,
     maxMonthlyOrders: Infinity,
+    maxCatalogModels: Infinity,
     priceMonthly: 0,
     priceYearly: 0,
     features: [
@@ -145,5 +150,40 @@ export function checkOrderQuota(
     message: allowed
       ? undefined
       : `Vous avez atteint la limite de ${limit} commandes ce mois-ci sur le plan Gratuit. Passez à CouturPro pour enregistrer vos commandes sans limite.`,
+  };
+}
+
+/** Vérifie si l'atelier peut enregistrer un nouveau modèle au catalogue selon son quota */
+export function checkCatalogQuota(
+  business: Business | null | undefined,
+  currentCatalogCount: number,
+): {
+  allowed: boolean;
+  limit: number;
+  current: number;
+  remaining: number;
+  message?: string;
+} {
+  if (isProOrAdmin(business)) {
+    return {
+      allowed: true,
+      limit: Infinity,
+      current: currentCatalogCount,
+      remaining: Infinity,
+    };
+  }
+
+  const limit = PLAN_CONFIG.free.maxCatalogModels;
+  const remaining = Math.max(0, limit - currentCatalogCount);
+  const allowed = currentCatalogCount < limit;
+
+  return {
+    allowed,
+    limit,
+    current: currentCatalogCount,
+    remaining,
+    message: allowed
+      ? undefined
+      : `Vous avez atteint la limite de ${limit} modèles du plan Gratuit. Passez à CouturPro pour enrichir votre catalogue sans aucune restriction.`,
   };
 }

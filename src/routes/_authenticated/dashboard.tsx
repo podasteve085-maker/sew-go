@@ -26,6 +26,7 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { StatCard, EmptyState, SectionTitle, OrderCard, LateBadge } from "@/components/bits";
 import { UpgradeDialog } from "@/components/upgrade-dialog";
+import { isProOrAdmin } from "@/lib/quotas";
 
 export const Route = createFileRoute("/_authenticated/dashboard")({
   head: () => ({
@@ -103,7 +104,7 @@ function Dashboard() {
       </header>
 
       {/* Jauge des quotas pour le Plan Gratuit */}
-      {(!business?.plan || business?.plan === "free") && (
+      {!isProOrAdmin(business) && (
         <div className="rounded-2xl border border-primary/20 bg-gradient-to-r from-primary/10 via-primary/5 to-transparent p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-xs">
           <div className="space-y-1">
             <div className="flex items-center gap-2">

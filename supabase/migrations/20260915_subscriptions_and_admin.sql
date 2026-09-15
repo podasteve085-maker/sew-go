@@ -64,52 +64,40 @@ BEGIN
   END IF;
 END $$;
 
--- 3. Politiques d'administration (permet aux admins de lire et gérer tous les ateliers)
-DO $$
-BEGIN
-  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'admin select all businesses' AND tablename = 'businesses') THEN
-    CREATE POLICY "admin select all businesses" ON public.businesses
-    FOR SELECT TO authenticated
-    USING (
-      owner_id = auth.uid()
-      OR EXISTS (
-        SELECT 1 FROM public.businesses b
-        WHERE b.owner_id = auth.uid() AND b.is_admin = true
-      )
-    );
-  END IF;
+-- 3. Fonction SECURITY DEFINER pour éviter toute récursion infinie dans les RLS
+CREATE OR REPLACE FUNCTION public.is_admin()
+RETURNS boolean
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+  SELECT COALESCE(
+    (SELECT is_admin FROM public.businesses WHERE owner_id = auth.uid() LIMIT 1),
+    false
+  );
+$$;
 
-  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'admin update all businesses' AND tablename = 'businesses') THEN
-    CREATE POLICY "admin update all businesses" ON public.businesses
-    FOR UPDATE TO authenticated
-    USING (
-      owner_id = auth.uid()
-      OR EXISTS (
-        SELECT 1 FROM public.businesses b
-        WHERE b.owner_id = auth.uid() AND b.is_admin = true
-      )
-    )
-    WITH CHECK (
-      owner_id = auth.uid()
-      OR EXISTS (
-        SELECT 1 FROM public.businesses b
-        WHERE b.owner_id = auth.uid() AND b.is_admin = true
-      )
-    );
-  END IF;
+GRANT EXECUTE ON FUNCTION public.is_admin() TO authenticated;
+GRANT EXECUTE ON FUNCTION public.is_admin() TO service_role;
 
-  -- Les admins peuvent voir toutes les transactions
-  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'admin view all transactions' AND tablename = 'payment_transactions') THEN
-    CREATE POLICY "admin view all transactions" ON public.payment_transactions
-    FOR SELECT TO authenticated
-    USING (
-      EXISTS (
-        SELECT 1 FROM public.businesses b
-        WHERE b.owner_id = auth.uid() AND b.is_admin = true
-      )
-    );
-  END IF;
-END $$;
+-- Politiques d'administration (permet aux admins de lire et gérer tous les ateliers sans récursion)
+DROP POLICY IF EXISTS "admin select all businesses" ON public.businesses;
+DROP POLICY IF EXISTS "admin update all businesses" ON public.businesses;
+DROP POLICY IF EXISTS "admin view all transactions" ON public.payment_transactions;
+
+CREATE POLICY "admin select all businesses" ON public.businesses
+FOR SELECT TO authenticated
+USING (owner_id = auth.uid() OR public.is_admin());
+
+CREATE POLICY "admin update all businesses" ON public.businesses
+FOR UPDATE TO authenticated
+USING (owner_id = auth.uid() OR public.is_admin())
+WITH CHECK (owner_id = auth.uid() OR public.is_admin());
+
+CREATE POLICY "admin view all transactions" ON public.payment_transactions
+FOR SELECT TO authenticated
+USING (public.owns_business(business_id) OR public.is_admin());
 
 -- 4. Attribution automatique des droits admin au compte principal de l'utilisateur
 UPDATE public.businesses
