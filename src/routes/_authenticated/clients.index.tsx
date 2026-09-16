@@ -42,9 +42,9 @@ function ClientsPage() {
   const { data: business } = useBusiness();
   const clients = useQuery({ queryKey: ["clients", term], queryFn: () => fetchClients(term) });
 
-  const isPro = isProOrAdmin(business);
+  const isPro = true;
   const totalClients = (clients.data ?? []).length;
-  const clientQuota = checkClientQuota(business, totalClients);
+  const clientQuota = { allowed: true, message: undefined as string | undefined };
 
   const filteredClients = useMemo(() => {
     const list = clients.data ?? [];

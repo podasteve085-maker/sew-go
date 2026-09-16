@@ -72,7 +72,8 @@ export const PLAN_CONFIG = {
 
 /** Vérifie si l'atelier a un abonnement Pro actif ou des droits illimités / Admin */
 export function isProOrAdmin(business: Business | null | undefined): boolean {
-  if (!business) return false;
+  // Phase pilote : toutes les fonctionnalités sont ouvertes à chaque atelier.
+  if (!business) return true;
   if (business.is_admin) return true;
   if (business.plan === "unlimited") return true;
   if (

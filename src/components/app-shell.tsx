@@ -44,7 +44,6 @@ const NAV = [
   { to: "/catalogue", label: "Lookbook", icon: BookOpen },
   { to: "/rendez-vous", label: "Rendez-vous", icon: CalendarDays },
   { to: "/statistiques", label: "Statistiques", icon: BarChart3 },
-  { to: "/abonnement", label: "Abonnement", icon: Crown },
   { to: "/atelier", label: "Mon atelier", icon: Settings },
 ] as const;
 
