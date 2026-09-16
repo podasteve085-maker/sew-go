@@ -77,15 +77,19 @@ function AdminPage() {
   const [filterPlan, setFilterPlan] = useState<string>("all");
 
   // Sécurité d'accès : Réservé uniquement aux administrateurs
-  if (!isAuthLoading && !currentBusiness?.is_admin) {
+  const isAdmin = currentBusiness?.is_admin === true;
+
+  if (!isAuthLoading && !isAdmin) {
     toast.error("Accès refusé", { description: "Cet espace est réservé aux administrateurs de CouturPro." });
     navigate({ to: "/dashboard", replace: true });
     return null;
   }
 
-  // 1. Liste de tous les ateliers
+  // Les requêtes sont désactivées tant que le droit n'est pas confirmé.
+  // La migration RLS bloque également les accès directs côté base de données.
   const businessesQuery = useQuery({
     queryKey: ["admin", "businesses"],
+    enabled: isAdmin,
     queryFn: async (): Promise<BusinessRow[]> => {
       const { data, error } = await supabase
         .from("businesses")
@@ -100,6 +104,7 @@ function AdminPage() {
   // 2. Statistiques globales
   const statsQuery = useQuery({
     queryKey: ["admin", "stats"],
+    enabled: isAdmin,
     queryFn: async () => {
       const [clientsRes, ordersRes, transactionsRes] = await Promise.all([
         supabase.from("clients").select("id", { count: "exact", head: true }),
@@ -123,6 +128,7 @@ function AdminPage() {
   // 3. Transactions récentes
   const transactionsQuery = useQuery({
     queryKey: ["admin", "transactions"],
+    enabled: isAdmin,
     queryFn: async (): Promise<TransactionRow[]> => {
       const { data, error } = await supabase
         .from("payment_transactions")
