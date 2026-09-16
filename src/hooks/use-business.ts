@@ -29,15 +29,21 @@ export function useBusiness() {
     staleTime: 60_000,
     retry: 1,
     queryFn: async (): Promise<Business | null> => {
+      // Vérifier l'utilisateur avant la requête métier : sans session Supabase,
+      // RLS renvoie une erreur et l'écran affichait à tort une simple erreur réseau.
+      const { data: authData, error: authError } = await supabase.auth.getUser();
+      if (authError) throw new Error("Votre session a expiré. Reconnectez-vous pour accéder à votre atelier.");
+      if (!authData.user) throw new Error("Aucune session active. Reconnectez-vous pour accéder à votre atelier.");
+
       const { data, error } = await supabase
         .from("businesses")
         .select("*")
-        .limit(1)
+        .eq("owner_id", authData.user.id)
         .maybeSingle();
 
       if (error) {
         console.error("[useBusiness error]", error);
-        throw error;
+        throw new Error(`Impossible de charger votre atelier (${error.message})`);
       }
       if (!data) return null;
 

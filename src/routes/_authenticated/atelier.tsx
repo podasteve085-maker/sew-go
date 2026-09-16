@@ -80,13 +80,23 @@ function WorkshopPage() {
   }
 
   if (isError) {
+    const message = error instanceof Error ? error.message : "Erreur de connexion";
+    const sessionExpired = message.toLowerCase().includes("session") || message.toLowerCase().includes("reconnectez");
+
     return (
-      <div className="card-soft mx-auto max-w-xl p-6 text-center space-y-3 mt-8">
-        <p className="text-destructive font-bold text-sm">Impossible de charger les données de votre atelier</p>
-        <p className="text-xs text-muted-foreground">{error instanceof Error ? error.message : "Erreur de connexion"}</p>
-        <Button onClick={() => refetch()} variant="outline" size="sm">
-          Réessayer
-        </Button>
+      <div className="card-soft mx-auto mt-8 max-w-xl space-y-3 p-6 text-center">
+        <p className="text-sm font-bold text-destructive">Impossible de charger les données de votre atelier</p>
+        <p className="text-xs text-muted-foreground">{message}</p>
+        <div className="flex justify-center gap-2">
+          <Button onClick={() => refetch()} variant="outline" size="sm">
+            Réessayer
+          </Button>
+          {sessionExpired && (
+            <Button asChild size="sm">
+              <a href="/auth">Se reconnecter</a>
+            </Button>
+          )}
+        </div>
       </div>
     );
   }

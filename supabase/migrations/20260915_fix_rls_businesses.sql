@@ -1,4 +1,4 @@
-﻿-- ==============================================================================
+-- ==============================================================================
 -- Correction critique des politiques RLS sur public.businesses
 -- Problème : la policy "own business" FOR ALL et "admin select all businesses"
 -- FOR SELECT créent un conflit — Postgres applique AND entre elles, bloquant
