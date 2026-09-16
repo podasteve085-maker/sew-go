@@ -290,14 +290,13 @@ export function AppShell({ children }: { children: ReactNode }) {
 }
 
 function SignOutButton() {
-  const navigate = useNavigate();
   const queryClient = useQueryClient();
 
   async function handleSignOut() {
     await queryClient.cancelQueries();
     queryClient.clear();
     await supabase.auth.signOut();
-    navigate({ to: "/", replace: true });
+    window.location.replace("/");
   }
 
   return (
