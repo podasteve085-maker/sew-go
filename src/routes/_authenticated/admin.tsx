@@ -1,5 +1,5 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   ShieldAlert,
@@ -76,12 +76,7 @@ function AdminPage() {
   const [term, setTerm] = useState("");
   const [filterPlan, setFilterPlan] = useState<string>("all");
 
-  // Sécurité d'accès : Réservé uniquement aux administrateurs
-  if (!isAuthLoading && !currentBusiness?.is_admin) {
-    toast.error("Accès refusé", { description: "Cet espace est réservé aux administrateurs de CouturPro." });
-    navigate({ to: "/dashboard", replace: true });
-    return null;
-  }
+  const isAdmin = currentBusiness?.is_admin === true;
 
   // 1. Liste de tous les ateliers
   const businessesQuery = useQuery({
@@ -95,6 +90,7 @@ function AdminPage() {
       if (error) throw error;
       return (data ?? []) as BusinessRow[];
     },
+    enabled: isAdmin,
   });
 
   // 2. Statistiques globales
@@ -118,6 +114,7 @@ function AdminPage() {
         totalRevenue,
       };
     },
+    enabled: isAdmin,
   });
 
   // 3. Transactions récentes
@@ -133,6 +130,7 @@ function AdminPage() {
       if (error) throw error;
       return (data ?? []) as unknown as TransactionRow[];
     },
+    enabled: isAdmin,
   });
 
   // 4. Mutation pour changer le plan ou les droits d'un atelier en 1 clic
@@ -178,6 +176,19 @@ function AdminPage() {
       toast.error("Erreur lors de la mise à jour de l'atelier");
     },
   });
+
+  useEffect(() => {
+    if (!isAuthLoading && currentBusiness && !isAdmin) {
+      toast.error("Accès refusé", {
+        description: "Cet espace est réservé aux administrateurs de CouturPro.",
+      });
+      navigate({ to: "/dashboard", replace: true });
+    }
+  }, [currentBusiness, isAdmin, isAuthLoading, navigate]);
+
+  if (isAuthLoading || !currentBusiness || !isAdmin) {
+    return null;
+  }
 
   const businesses = businessesQuery.data ?? [];
 
