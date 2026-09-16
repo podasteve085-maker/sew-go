@@ -59,12 +59,19 @@ function AuthPage() {
     }
 
     // 2. Si l'utilisateur demande explicitement une déconnexion pour changer de compte
-    if (logout || reconnect) {
-      supabase.auth.signOut().then(() => {
-        setActiveSession(null);
-      });
-      return;
-    }
+  if (logout) {
+    supabase.auth.signOut().then(() => {
+      window.location.replace("/");
+    });
+    return;
+  }
+
+  if (reconnect) {
+    supabase.auth.signOut().then(() => {
+      setActiveSession(null);
+    });
+    return;
+  }
 
     // 3. Vérification de session active existante
     supabase.auth.getSession().then(async ({ data }) => {
