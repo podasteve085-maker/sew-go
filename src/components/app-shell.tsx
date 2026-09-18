@@ -325,16 +325,25 @@ function GlobalSearch({
     enabled: open && term.trim().length >= 2,
     queryFn: async () => {
       const like = `%${term.trim()}%`;
+      const { data: currentBusiness } = await supabase
+        .from("businesses")
+        .select("id")
+        .eq("owner_id", (await supabase.auth.getUser()).data.user?.id ?? "")
+        .maybeSingle();
+      if (!currentBusiness?.id) return { clients: [], orders: [] };
+
       const [clients, orders] = await Promise.all([
         supabase
           .from("clients")
           .select("id, first_name, last_name, phone, city")
+          .eq("business_id", currentBusiness.id)
           .or(`first_name.ilike.${like},last_name.ilike.${like},phone.ilike.${like}`)
           .order("first_name")
           .limit(8),
         supabase
           .from("orders")
           .select("id, reference, garment_type, status, clients(first_name, last_name)")
+          .eq("business_id", currentBusiness.id)
           .or(`reference.ilike.${like},garment_type.ilike.${like},fabric.ilike.${like}`)
           .order("created_at", { ascending: false })
           .limit(8),

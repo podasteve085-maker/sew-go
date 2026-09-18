@@ -81,7 +81,12 @@ function MeasurementsPage() {
 
   const deleteSetMutation = useMutation({
     mutationFn: async (setId: string) => {
-      const { error } = await supabase.from("measurement_sets").delete().eq("id", setId);
+      if (!business?.id) throw new Error("Atelier non identifié");
+      const { error } = await supabase
+        .from("measurement_sets")
+        .delete()
+        .eq("id", setId)
+        .eq("business_id", business.id);
       if (error) throw error;
     },
     onSuccess: () => {

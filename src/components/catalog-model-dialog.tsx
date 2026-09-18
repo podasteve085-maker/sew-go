@@ -155,7 +155,8 @@ export function CatalogModelDialog({ open, onOpenChange, model }: CatalogModelDi
         const { error } = await supabase
           .from("catalog_models")
           .update(payload)
-          .eq("id", model.id);
+          .eq("id", model.id)
+          .eq("business_id", business.id);
         if (error) throw error;
       } else {
         const { error } = await supabase.from("catalog_models").insert(payload);

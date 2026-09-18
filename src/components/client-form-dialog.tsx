@@ -76,7 +76,11 @@ export function ClientFormDialog({
         photo_url: photoPath,
       };
       if (client) {
-        const { error } = await supabase.from("clients").update(payload).eq("id", client.id);
+        const { error } = await supabase
+          .from("clients")
+          .update(payload)
+          .eq("id", client.id)
+          .eq("business_id", businessId);
         if (error) throw error;
         return client.id;
       } else {

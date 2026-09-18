@@ -49,7 +49,8 @@ function SubscriptionPage() {
     queryFn: async () => {
       const { count, error } = await supabase
         .from("clients")
-        .select("id", { count: "exact", head: true });
+        .select("id", { count: "exact", head: true })
+        .eq("business_id", business?.id ?? "");
       if (error) throw error;
       return count ?? 0;
     },
@@ -63,6 +64,7 @@ function SubscriptionPage() {
       const { count, error } = await supabase
         .from("orders")
         .select("id", { count: "exact", head: true })
+        .eq("business_id", business?.id ?? "")
         .gte("ordered_at", currentMonthStart);
       if (error) throw error;
       return count ?? 0;

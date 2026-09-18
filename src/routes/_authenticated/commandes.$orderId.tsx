@@ -208,7 +208,12 @@ function OrderDetailPage() {
   // Delete Payment Mutation
   const deletePaymentMutation = useMutation({
     mutationFn: async (pId: string) => {
-      const { error } = await supabase.from("payments").delete().eq("id", pId);
+      if (!business?.id) throw new Error("Atelier non identifié");
+      const { error } = await supabase
+        .from("payments")
+        .delete()
+        .eq("id", pId)
+        .eq("business_id", business.id);
       if (error) throw error;
     },
     onSuccess: () => {
@@ -224,10 +229,12 @@ function OrderDetailPage() {
   // Cancel Order Mutation
   const cancelOrderMutation = useMutation({
     mutationFn: async () => {
+      if (!business?.id) throw new Error("Atelier non identifié");
       const { error } = await supabase
         .from("orders")
         .update({ status: "annulee" })
-        .eq("id", orderId);
+        .eq("id", orderId)
+        .eq("business_id", business.id);
       if (error) throw error;
     },
     onSuccess: () => {
@@ -263,7 +270,12 @@ function OrderDetailPage() {
         payload.delivered_to = delivered_to || null;
         payload.delivery_note = delivery_note || null;
       }
-      const { error } = await supabase.from("orders").update(payload).eq("id", orderId);
+      if (!business?.id) throw new Error("Atelier non identifié");
+      const { error } = await supabase
+        .from("orders")
+        .update(payload)
+        .eq("id", orderId)
+        .eq("business_id", business.id);
       if (error) throw error;
     },
     onSuccess: () => {
@@ -280,7 +292,12 @@ function OrderDetailPage() {
   // Delete Order
   const deleteOrderMutation = useMutation({
     mutationFn: async () => {
-      const { error } = await supabase.from("orders").delete().eq("id", orderId);
+      if (!business?.id) throw new Error("Atelier non identifié");
+      const { error } = await supabase
+        .from("orders")
+        .delete()
+        .eq("id", orderId)
+        .eq("business_id", business.id);
       if (error) throw error;
     },
     onSuccess: () => {
@@ -298,6 +315,7 @@ function OrderDetailPage() {
     setUploadingImage(true);
     try {
       const path = await uploadImage(business.id, file, "orders");
+      if (!business?.id) throw new Error("Atelier non identifié");
       const { error } = await supabase.from("order_images").insert({
         business_id: business.id,
         order_id: orderId,
@@ -318,7 +336,12 @@ function OrderDetailPage() {
   // Delete Photo
   const deleteImageMutation = useMutation({
     mutationFn: async (imgId: string) => {
-      const { error } = await supabase.from("order_images").delete().eq("id", imgId);
+      if (!business?.id) throw new Error("Atelier non identifié");
+      const { error } = await supabase
+        .from("order_images")
+        .delete()
+        .eq("id", imgId)
+        .eq("business_id", business.id);
       if (error) throw error;
     },
     onSuccess: () => {

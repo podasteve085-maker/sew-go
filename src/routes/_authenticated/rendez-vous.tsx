@@ -88,7 +88,12 @@ function AppointmentsPage() {
 
   const update = useMutation({
     mutationFn: async ({ id, status }: { id: string; status: string }) => {
-      const { error } = await supabase.from("appointments").update({ status }).eq("id", id);
+      if (!business?.id) throw new Error("Atelier non identifié");
+      const { error } = await supabase
+        .from("appointments")
+        .update({ status })
+        .eq("id", id)
+        .eq("business_id", business.id);
       if (error) throw error;
     },
     onSuccess: () => {
@@ -100,7 +105,12 @@ function AppointmentsPage() {
 
   const remove = useMutation({
     mutationFn: async (id: string) => {
-      const { error } = await supabase.from("appointments").delete().eq("id", id);
+      if (!business?.id) throw new Error("Atelier non identifié");
+      const { error } = await supabase
+        .from("appointments")
+        .delete()
+        .eq("id", id)
+        .eq("business_id", business.id);
       if (error) throw error;
     },
     onSuccess: () => {

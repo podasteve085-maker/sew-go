@@ -52,7 +52,8 @@ function Dashboard() {
     queryFn: async () => {
       const { count, error } = await supabase
         .from("clients")
-        .select("id", { count: "exact", head: true });
+        .select("id", { count: "exact", head: true })
+        .eq("business_id", business?.id ?? "");
       if (error) throw error;
       return count ?? 0;
     },

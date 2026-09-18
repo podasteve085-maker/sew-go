@@ -87,7 +87,12 @@ function ClientDetail() {
 
   const remove = useMutation({
     mutationFn: async () => {
-      const { error } = await supabase.from("clients").delete().eq("id", clientId);
+      if (!business?.id) throw new Error("Atelier non identifié");
+      const { error } = await supabase
+        .from("clients")
+        .delete()
+        .eq("id", clientId)
+        .eq("business_id", business.id);
       if (error) throw error;
     },
     onSuccess: () => {
@@ -100,7 +105,12 @@ function ClientDetail() {
 
   const deleteMeasureSet = useMutation({
     mutationFn: async (setId: string) => {
-      const { error } = await supabase.from("measurement_sets").delete().eq("id", setId);
+      if (!business?.id) throw new Error("Atelier non identifié");
+      const { error } = await supabase
+        .from("measurement_sets")
+        .delete()
+        .eq("id", setId)
+        .eq("business_id", business.id);
       if (error) throw error;
     },
     onSuccess: () => {

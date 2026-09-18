@@ -218,6 +218,7 @@ function GarmentTypes({ businessId }: { businessId: string }) {
 
   const add = useMutation({
     mutationFn: async (values: { name: string; price: string }) => {
+      if (!businessId) throw new Error("Atelier non identifié");
       const { error } = await supabase.from("garment_types").insert({
         business_id: businessId,
         name: values.name,
@@ -234,7 +235,12 @@ function GarmentTypes({ businessId }: { businessId: string }) {
 
   const remove = useMutation({
     mutationFn: async (id: string) => {
-      const { error } = await supabase.from("garment_types").delete().eq("id", id);
+      if (!business?.id) throw new Error("Atelier non identifié");
+      const { error } = await supabase
+        .from("garment_types")
+        .delete()
+        .eq("id", id)
+        .eq("business_id", business.id);
       if (error) throw error;
     },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["garment-types"] }),
@@ -316,7 +322,12 @@ function Templates({ businessId }: { businessId: string }) {
 
   const remove = useMutation({
     mutationFn: async (id: string) => {
-      const { error } = await supabase.from("measurement_templates").delete().eq("id", id);
+      if (!business?.id) throw new Error("Atelier non identifié");
+      const { error } = await supabase
+        .from("measurement_templates")
+        .delete()
+        .eq("id", id)
+        .eq("business_id", business.id);
       if (error) throw error;
     },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["templates"] }),
