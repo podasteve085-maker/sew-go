@@ -48,12 +48,13 @@ function Dashboard() {
   const { data: business } = useBusiness();
 
   const clientsCount = useQuery({
-    queryKey: ["clients-count"],
+    queryKey: ["clients-count", business?.id],
+    enabled: Boolean(business?.id),
     queryFn: async () => {
       const { count, error } = await supabase
         .from("clients")
         .select("id", { count: "exact", head: true })
-        .eq("business_id", business?.id ?? "");
+        .eq("business_id", business!.id);
       if (error) throw error;
       return count ?? 0;
     },

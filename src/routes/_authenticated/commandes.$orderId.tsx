@@ -1070,6 +1070,7 @@ function OrderDetailPage() {
         open={openEditModal}
         onOpenChange={setOpenEditModal}
         order={order}
+        businessId={business?.id ?? ""}
         onUpdated={() => {
           queryClient.invalidateQueries({ queryKey: ["order", orderId] });
           queryClient.invalidateQueries({ queryKey: ["orders"] });
@@ -1387,6 +1388,7 @@ function EditOrderDialog({
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   order: any;
   onUpdated: () => void;
+  businessId: string;
 }) {
   const garmentsQuery = useQuery({ queryKey: ["garment-types"], queryFn: fetchGarmentTypes, enabled: open });
   const [saving, setSaving] = useState(false);
@@ -1408,7 +1410,8 @@ function EditOrderDialog({
           description: String(fd.get("description") || "").trim() || null,
           notes: String(fd.get("notes") || "").trim() || null,
         })
-        .eq("id", order.id);
+        .eq("id", order.id)
+        .eq("business_id", businessId);
       if (error) throw error;
       toast.success("Commande mise à jour");
       onUpdated();

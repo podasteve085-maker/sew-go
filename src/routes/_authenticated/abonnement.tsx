@@ -45,12 +45,13 @@ function SubscriptionPage() {
 
   // 1. Quota clients actuels
   const clientsCountQuery = useQuery({
-    queryKey: ["clients-count"],
+    queryKey: ["clients-count", business?.id],
+    enabled: Boolean(business?.id),
     queryFn: async () => {
       const { count, error } = await supabase
         .from("clients")
         .select("id", { count: "exact", head: true })
-        .eq("business_id", business?.id ?? "");
+        .eq("business_id", business!.id);
       if (error) throw error;
       return count ?? 0;
     },
@@ -58,13 +59,14 @@ function SubscriptionPage() {
 
   // 2. Quota commandes du mois
   const ordersMonthlyQuery = useQuery({
-    queryKey: ["orders-monthly-count"],
+    queryKey: ["orders-monthly-count", business?.id],
+    enabled: Boolean(business?.id),
     queryFn: async () => {
       const currentMonthStart = new Date().toISOString().slice(0, 7) + "-01";
       const { count, error } = await supabase
         .from("orders")
         .select("id", { count: "exact", head: true })
-        .eq("business_id", business?.id ?? "")
+        .eq("business_id", business!.id)
         .gte("ordered_at", currentMonthStart);
       if (error) throw error;
       return count ?? 0;

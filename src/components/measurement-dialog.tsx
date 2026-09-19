@@ -78,6 +78,7 @@ export function MeasurementDialog({
 
   const save = useMutation({
     mutationFn: async () => {
+      if (!businessId) throw new Error("Atelier non identifié");
       const activeClientId = selectedClientId || initialClientId;
       if (!activeClientId) {
         throw new Error("Veuillez sélectionner un client.");
@@ -94,13 +95,15 @@ export function MeasurementDialog({
             notes: notes || null,
             recorded_at: recordedAt,
           })
-          .eq("id", targetSetId);
+          .eq("id", targetSetId)
+          .eq("business_id", businessId);
         if (setErr) throw setErr;
 
         const { error: delErr } = await supabase
           .from("measurement_values")
           .delete()
-          .eq("set_id", targetSetId);
+          .eq("set_id", targetSetId)
+          .eq("business_id", businessId);
         if (delErr) throw delErr;
       } else {
         const { data, error } = await supabase
@@ -130,7 +133,9 @@ export function MeasurementDialog({
           position: i,
         }));
       if (values.length) {
-        const { error: valueError } = await supabase.from("measurement_values").insert(values);
+        const { error: valueError } = await supabase
+          .from("measurement_values")
+          .insert(values);
         if (valueError) throw valueError;
       }
 

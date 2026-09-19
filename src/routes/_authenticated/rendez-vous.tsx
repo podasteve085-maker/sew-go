@@ -330,6 +330,7 @@ function AppointmentsPage() {
           open={Boolean(editingAppointment)}
           onOpenChange={(v) => !v && setEditingAppointment(null)}
           appointment={editingAppointment}
+          businessId={business.id}
         />
       )}
     </div>
@@ -357,6 +358,7 @@ function AppointmentDialog({
 
   const create = useMutation({
     mutationFn: async (values: Record<string, string>) => {
+      if (!businessId) throw new Error("Atelier non identifié");
       const { error } = await supabase.from("appointments").insert({
         business_id: businessId,
         client_id: values["client_id"] || null,
@@ -464,10 +466,12 @@ function EditAppointmentDialog({
   open,
   onOpenChange,
   appointment,
+  businessId,
 }: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
   appointment: AppointmentRow;
+  businessId: string;
 }) {
   const queryClient = useQueryClient();
   const clients = useQuery({ queryKey: ["clients", ""], queryFn: () => fetchClients(), enabled: open });
@@ -484,7 +488,8 @@ function EditAppointmentDialog({
           notes: values["notes"] || null,
           status: values["status"] || "prevu",
         })
-        .eq("id", appointment.id);
+        .eq("id", appointment.id)
+        .eq("business_id", businessId);
       if (error) throw error;
     },
     onSuccess: () => {

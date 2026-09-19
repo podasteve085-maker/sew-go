@@ -159,7 +159,9 @@ export function CatalogModelDialog({ open, onOpenChange, model }: CatalogModelDi
           .eq("business_id", business.id);
         if (error) throw error;
       } else {
-        const { error } = await supabase.from("catalog_models").insert(payload);
+        const { error } = await supabase
+          .from("catalog_models")
+          .insert(payload);
         if (error) throw error;
       }
     },

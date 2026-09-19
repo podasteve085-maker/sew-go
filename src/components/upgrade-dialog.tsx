@@ -90,7 +90,8 @@ export function UpgradeDialog({
           plan_status: "active",
           plan_expires_at: expiresAt.toISOString(),
         })
-        .eq("id", business.id);
+        .eq("id", business.id)
+        .eq("owner_id", business.owner_id);
 
       if (busError) throw busError;
     },
