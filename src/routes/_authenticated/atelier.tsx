@@ -304,6 +304,7 @@ function Templates({ businessId }: { businessId: string }) {
 
   const add = useMutation({
     mutationFn: async (values: { name: string; fields: string }) => {
+      if (!businessId) throw new Error("Atelier non identifié");
       const fields = values.fields
         .split(",")
         .map((f) => f.trim())

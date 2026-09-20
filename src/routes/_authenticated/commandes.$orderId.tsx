@@ -1382,6 +1382,7 @@ function EditOrderDialog({
   onOpenChange,
   order,
   onUpdated,
+  businessId,
 }: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
