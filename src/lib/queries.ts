@@ -1,5 +1,6 @@
 import { supabase } from "@/integrations/supabase/client";
 import type { OrderStatus } from "@/lib/domain";
+import { deleteStorageFiles } from "@/hooks/use-signed-url";
 
 async function currentBusinessId() {
   const { data, error } = await supabase.auth.getUser();
@@ -303,5 +304,115 @@ export async function deleteCatalogModel(id: string) {
     .update({ is_active: false })
     .eq("id", id)
     .eq("business_id", businessId);
+  if (error) throw error;
+}
+
+// ============================================================
+// Fonctions de suppression en cascade (avec purge Storage)
+// ============================================================
+
+/**
+ * Supprime un client et toutes ses données liées :
+ * mesures, photos de commandes, commandes, paiements + fichiers Storage.
+ */
+export async function deleteClientCascade(clientId: string, businessId?: string) {
+  // 1. Récupère les avatars client
+  const { data: clientData } = await supabase
+    .from("clients")
+    .select("avatar_url")
+    .eq("id", clientId)
+    .maybeSingle();
+
+  // 2. Récupère les commandes du client
+  let ordersQuery = supabase
+    .from("orders")
+    .select("id")
+    .eq("client_id", clientId);
+  if (businessId) ordersQuery = ordersQuery.eq("business_id", businessId);
+  const { data: orders } = await ordersQuery;
+  const orderIds = (orders ?? []).map((o) => o.id);
+
+  // 3. Récupère les paths de toutes les photos de commandes
+  let photoPaths: string[] = [];
+  if (orderIds.length > 0) {
+    const { data: images } = await supabase
+      .from("order_images")
+      .select("path")
+      .in("order_id", orderIds);
+    photoPaths = (images ?? []).map((img) => img.path).filter(Boolean) as string[];
+  }
+
+  // 4. Purge Storage (avatars + photos)
+  const storagePaths = [clientData?.avatar_url, ...photoPaths].filter(Boolean) as string[];
+  if (storagePaths.length > 0) {
+    await deleteStorageFiles(storagePaths);
+  }
+
+  // 5. Essaie la suppression via RPC (si disponible en base)
+  try {
+    const { error: rpcError } = await supabase.rpc("delete_client_cascade", {
+      p_client_id: clientId,
+      p_business_id: businessId ?? null,
+    } as never);
+    if (!rpcError) return;
+  } catch {
+    // RPC non disponible → suppression applicative
+  }
+
+  // 6. Suppression applicative séquentielle
+  if (orderIds.length > 0) {
+    await supabase.from("order_images").delete().in("order_id", orderIds);
+    await supabase.from("payments").delete().in("order_id", orderIds);
+  }
+  let ordDel = supabase.from("orders").delete().eq("client_id", clientId);
+  if (businessId) ordDel = ordDel.eq("business_id", businessId);
+  await ordDel;
+
+  let setsDel = supabase.from("measurement_sets").delete().eq("client_id", clientId);
+  if (businessId) setsDel = setsDel.eq("business_id", businessId);
+  await setsDel;
+
+  let clientDel = supabase.from("clients").delete().eq("id", clientId);
+  if (businessId) clientDel = clientDel.eq("business_id", businessId);
+  const { error } = await clientDel;
+  if (error) throw error;
+}
+
+/**
+ * Supprime une commande et toutes ses données liées :
+ * photos, paiements + fichiers Storage.
+ */
+export async function deleteOrderCascade(orderId: string, businessId?: string) {
+  // 1. Récupère les photos de la commande
+  let imagesQuery = supabase
+    .from("order_images")
+    .select("path")
+    .eq("order_id", orderId);
+  if (businessId) imagesQuery = imagesQuery.eq("business_id", businessId);
+  const { data: images } = await imagesQuery;
+  const photoPaths = (images ?? []).map((img) => img.path).filter(Boolean) as string[];
+
+  // 2. Purge Storage
+  if (photoPaths.length > 0) {
+    await deleteStorageFiles(photoPaths);
+  }
+
+  // 3. Suppression des données liées
+  await supabase.from("order_images").delete().eq("order_id", orderId);
+  await supabase.from("payments").delete().eq("order_id", orderId);
+
+  let orderDel = supabase.from("orders").delete().eq("id", orderId);
+  if (businessId) orderDel = orderDel.eq("business_id", businessId);
+  const { error } = await orderDel;
+  if (error) throw error;
+}
+
+/**
+ * Supprime un ensemble de mesures.
+ */
+export async function deleteMeasurementSetCascade(setId: string, businessId?: string) {
+  let query = supabase.from("measurement_sets").delete().eq("id", setId);
+  if (businessId) query = query.eq("business_id", businessId);
+  const { error } = await query;
   if (error) throw error;
 }

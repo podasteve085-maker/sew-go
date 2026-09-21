@@ -63,7 +63,7 @@ export function UpgradeDialog({
       }
 
       // 1. Enregistrement de la transaction de paiement
-      const { error: txError } = await supabase.from("payment_transactions").insert({
+      const { error: txError } = await (supabase as any).from("payment_transactions").insert({
         business_id: business.id,
         plan: selectedPlan,
         amount,
@@ -83,8 +83,7 @@ export function UpgradeDialog({
       }
 
       // 2. Mise à niveau de l'abonnement du business
-      const { error: busError } = await supabase
-        .from("businesses")
+      const { error: busError } = await (supabase.from("businesses") as any)
         .update({
           plan: selectedPlan,
           plan_status: "active",

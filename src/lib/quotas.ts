@@ -97,7 +97,7 @@ export function checkClientQuota(
   limit: number;
   current: number;
   remaining: number;
-  message?: string;
+  message?: string | undefined;
 } {
   if (isProOrAdmin(business)) {
     return { allowed: true, limit: Infinity, current: currentClientsCount, remaining: Infinity };
@@ -127,7 +127,7 @@ export function checkOrderQuota(
   limit: number;
   current: number;
   remaining: number;
-  message?: string;
+  message?: string | undefined;
 } {
   if (isProOrAdmin(business)) {
     return {
@@ -162,7 +162,7 @@ export function checkCatalogQuota(
   limit: number;
   current: number;
   remaining: number;
-  message?: string;
+  message?: string | undefined;
 } {
   if (isProOrAdmin(business)) {
     return {

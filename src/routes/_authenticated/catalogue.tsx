@@ -49,7 +49,7 @@ export const Route = createFileRoute("/_authenticated/catalogue")({
   component: CataloguePage,
 });
 
-export function CataloguePage() {
+function CataloguePage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const { data: business } = useBusiness();
@@ -68,8 +68,9 @@ export function CataloguePage() {
   const [currentPhotoIndex, setCurrentPhotoIndex] = useState(0);
 
   const modelsQuery = useQuery({
-    queryKey: ["catalog-models", selectedCategory],
-    queryFn: () => fetchCatalogModels(selectedCategory),
+    queryKey: ["catalog-models", business?.id, selectedCategory],
+    queryFn: () => fetchCatalogModels(business?.id ?? "", selectedCategory),
+    enabled: Boolean(business?.id),
   });
 
   const allModels = modelsQuery.data ?? [];
@@ -98,7 +99,7 @@ export function CataloguePage() {
   }, [allModels]);
 
   const deleteMutation = useMutation({
-    mutationFn: (id: string) => deleteCatalogModel(id),
+    mutationFn: (id: string) => deleteCatalogModel(id, business?.id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["catalog-models"] });
       toast.success("Modèle retiré du catalogue");

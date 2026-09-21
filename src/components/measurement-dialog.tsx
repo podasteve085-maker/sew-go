@@ -36,10 +36,18 @@ export function MeasurementDialog({
   mode?: "create" | "edit" | "copy";
   onSaved?: (setId: string) => void;
 }) {
-  const queryClient = useQueryClient();
-  const clients = useQuery({ queryKey: ["clients", ""], queryFn: () => fetchClients(), enabled: open });
-  const templates = useQuery({ queryKey: ["templates"], queryFn: fetchTemplates, enabled: open });
+  const clients = useQuery({
+    queryKey: ["clients", businessId, ""],
+    queryFn: () => fetchClients(businessId),
+    enabled: Boolean(open && businessId),
+  });
+  const templates = useQuery({
+    queryKey: ["templates", businessId],
+    queryFn: () => fetchTemplates(businessId),
+    enabled: Boolean(open && businessId),
+  });
 
+  const queryClient = useQueryClient();
   const [selectedClientId, setSelectedClientId] = useState<string>(initialClientId ?? "");
   const [templateName, setTemplateName] = useState("");
   const [fields, setFields] = useState<{ name: string; value: string }[]>([]);

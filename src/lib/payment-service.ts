@@ -38,7 +38,7 @@ export async function processPaymentWebhook(payload: WebhookPayload): Promise<{
   }
 
   // 1. Enregistrement / mise à jour de la transaction
-  await supabase.from("payment_transactions").insert({
+  await (supabase as any).from("payment_transactions").insert({
     business_id: businessId,
     plan,
     amount,
@@ -63,8 +63,7 @@ export async function processPaymentWebhook(payload: WebhookPayload): Promise<{
       expiresAt.setFullYear(expiresAt.getFullYear() + 1);
     }
 
-    const { error: busError } = await supabase
-      .from("businesses")
+    const { error: busError } = await (supabase.from("businesses") as any)
       .update({
         plan,
         plan_status: "active",

@@ -1,12 +1,12 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Loader2, Plus, Trash2, Image as ImageIcon, KeyRound } from "lucide-react";
+import { Loader2, Plus, Trash2, Image as ImageIcon, KeyRound, LogOut } from "lucide-react";
 import { toast } from "sonner";
 
 import { supabase } from "@/integrations/supabase/client";
 import { useBusiness } from "@/hooks/use-business";
-import { uploadImage } from "@/hooks/use-signed-url";
+import { uploadImage, deleteStorageFile } from "@/hooks/use-signed-url";
 import { fetchGarmentTypes, fetchTemplates } from "@/lib/queries";
 import { money } from "@/lib/format";
 import { Button } from "@/components/ui/button";
@@ -69,6 +69,10 @@ function WorkshopPage() {
     if (!file || !business) return;
     setUploading(true);
     try {
+      // Supprime l'ancien logo du bucket avant d'uploader le nouveau
+      if (business.logo_url) {
+        await deleteStorageFile(business.logo_url);
+      }
       const path = await uploadImage(business.id, file, "atelier");
       setLogoPath(path);
       toast.success("Logo prêt : enregistrez pour valider");
@@ -208,13 +212,18 @@ function WorkshopPage() {
       <GarmentTypes businessId={business.id} />
       <Templates businessId={business.id} />
       <PasswordChangeSection />
+      <SessionSignOutSection />
     </div>
   );
 }
 
 function GarmentTypes({ businessId }: { businessId: string }) {
   const queryClient = useQueryClient();
-  const list = useQuery({ queryKey: ["garment-types"], queryFn: fetchGarmentTypes });
+  const list = useQuery({
+    queryKey: ["garment-types", businessId],
+    queryFn: () => fetchGarmentTypes(businessId),
+    enabled: Boolean(businessId),
+  });
 
   const add = useMutation({
     mutationFn: async (values: { name: string; price: string }) => {
@@ -300,7 +309,11 @@ function GarmentTypes({ businessId }: { businessId: string }) {
 
 function Templates({ businessId }: { businessId: string }) {
   const queryClient = useQueryClient();
-  const list = useQuery({ queryKey: ["templates"], queryFn: fetchTemplates });
+  const list = useQuery({
+    queryKey: ["templates", businessId],
+    queryFn: () => fetchTemplates(businessId),
+    enabled: Boolean(businessId),
+  });
 
   const add = useMutation({
     mutationFn: async (values: { name: string; fields: string }) => {
@@ -465,6 +478,45 @@ function PasswordChangeSection() {
           {saving && <Loader2 className="mr-2 size-4 animate-spin" />} Enregistrer le mot de passe
         </Button>
       </form>
+    </section>
+  );
+}
+
+function SessionSignOutSection() {
+  const queryClient = useQueryClient();
+  const [loading, setLoading] = useState(false);
+
+  async function handleSignOut() {
+    setLoading(true);
+    try {
+      await queryClient.cancelQueries();
+      queryClient.clear();
+      await supabase.auth.signOut();
+      toast.success("Vous avez été déconnecté avec succès.");
+    } finally {
+      window.location.href = "/auth";
+    }
+  }
+
+  return (
+    <section className="card-soft space-y-3 p-5 border-destructive/20 bg-destructive/5">
+      <div className="flex items-center gap-2 text-destructive">
+        <LogOut className="size-4.5" />
+        <h2 className="font-display text-sm font-bold">Session & Déconnexion</h2>
+      </div>
+      <p className="text-xs text-muted-foreground leading-relaxed">
+        Déconnectez-vous de votre compte atelier sur cet appareil. Vos données resteront sauvegardées en toute sécurité.
+      </p>
+      <Button
+        variant="destructive"
+        size="sm"
+        disabled={loading}
+        onClick={handleSignOut}
+        className="font-bold cursor-pointer shadow-xs"
+      >
+        <LogOut className="mr-2 size-4" />
+        {loading ? "Déconnexion..." : "Se déconnecter de l'atelier"}
+      </Button>
     </section>
   );
 }

@@ -1,9 +1,9 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useState, useMemo } from "react";
-import { useQuery } from "@tanstack/react-query";
-import { Plus, Search, MapPin, Phone, MessageCircle, Crown, AlertCircle, Users } from "lucide-react";
+import { useState, useMemo, useDeferredValue } from "react";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { Plus, Search, MapPin, Phone, MessageCircle, Crown, AlertCircle, Users, Trash2 } from "lucide-react";
 
-import { fetchClients } from "@/lib/queries";
+import { fetchClients, deleteClientCascade, type ClientRow } from "@/lib/queries";
 import { useBusiness } from "@/hooks/use-business";
 import { fullName, initials, dateFr, cleanPhone } from "@/lib/format";
 import { isProOrAdmin, checkClientQuota } from "@/lib/quotas";
@@ -13,6 +13,17 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState, StoredImage } from "@/components/bits";
 import { ClientFormDialog } from "@/components/client-form-dialog";
 import { UpgradeDialog } from "@/components/upgrade-dialog";
+import { toast } from "sonner";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
 export const Route = createFileRoute("/_authenticated/clients/")({
   validateSearch: (search: Record<string, unknown>): { nouveau?: boolean } => ({
@@ -34,13 +45,40 @@ export const Route = createFileRoute("/_authenticated/clients/")({
 
 function ClientsPage() {
   const { nouveau } = Route.useSearch();
+  const queryClient = useQueryClient();
   const [term, setTerm] = useState("");
+  const deferredTerm = useDeferredValue(term);
   const [openNew, setOpenNew] = useState(Boolean(nouveau));
   const [genderFilter, setGenderFilter] = useState<string>("all");
   const [upgradeOpen, setUpgradeOpen] = useState(false);
   const [quotaReason, setQuotaReason] = useState("");
+  const [clientToDelete, setClientToDelete] = useState<ClientRow | null>(null);
+
   const { data: business } = useBusiness();
-  const clients = useQuery({ queryKey: ["clients", term], queryFn: () => fetchClients(term) });
+  const clients = useQuery({
+    queryKey: ["clients", business?.id, deferredTerm],
+    queryFn: () => fetchClients(business?.id ?? "", deferredTerm),
+    enabled: Boolean(business?.id),
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: async (clientId: string) => {
+      await deleteClientCascade(clientId, business?.id);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["clients"] });
+      queryClient.invalidateQueries({ queryKey: ["orders"] });
+      queryClient.invalidateQueries({ queryKey: ["measurements"] });
+      queryClient.invalidateQueries({ queryKey: ["appointments"] });
+      queryClient.invalidateQueries({ queryKey: ["clients-count"] });
+      toast.success("Client et données associées supprimés");
+      setClientToDelete(null);
+    },
+    onError: (err: unknown) => {
+      const msg = err instanceof Error ? err.message : "Suppression impossible";
+      toast.error(`Erreur : ${msg}`);
+    },
+  });
 
   const isPro = isProOrAdmin(business);
   const totalClients = (clients.data ?? []).length;
@@ -162,7 +200,7 @@ function ClientsPage() {
           {filteredClients.map((c) => (
             <div
               key={c.id}
-              className="card-soft flex flex-col justify-between p-3 sm:p-3.5 transition-all hover:border-primary/40 hover:shadow-xs"
+              className="card-soft list-card-fast flex flex-col justify-between p-3 sm:p-3.5 transition-all hover:border-primary/40 hover:shadow-xs"
             >
               <Link
                 to="/clients/$clientId"
@@ -210,7 +248,7 @@ function ClientsPage() {
                 </div>
               </Link>
 
-              {/* Actions tactiles directes (Appel / WhatsApp / Fiche) */}
+              {/* Actions tactiles directes (Appel / WhatsApp / Fiche / Supprimer) */}
               <div className="mt-2.5 flex items-center justify-end gap-1.5 border-t border-border/70 pt-2">
                 {c.phone && (
                   <a
@@ -241,11 +279,52 @@ function ClientsPage() {
                     Fiche →
                   </Link>
                 </Button>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setClientToDelete(c);
+                  }}
+                  className="inline-flex size-7.5 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-destructive/15 hover:text-destructive active:scale-95 cursor-pointer"
+                  title={`Supprimer ${c.first_name}`}
+                  aria-label={`Supprimer ${c.first_name}`}
+                >
+                  <Trash2 className="size-3.5" />
+                </button>
               </div>
             </div>
           ))}
         </div>
       )}
+
+      {/* Boîte de dialogue de confirmation de suppression */}
+      <AlertDialog
+        open={Boolean(clientToDelete)}
+        onOpenChange={(v) => !v && setClientToDelete(null)}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Supprimer {clientToDelete ? fullName(clientToDelete) : "ce client"} ?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Cette action supprimera définitivement le client ainsi que l'ensemble de son
+              historique de mesures, commandes, paiements et rendez-vous associés.
+              Cette opération est irréversible.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleteMutation.isPending}>Annuler</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={deleteMutation.isPending}
+              onClick={() => {
+                if (clientToDelete) deleteMutation.mutate(clientToDelete.id);
+              }}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              {deleteMutation.isPending ? "Suppression en cours…" : "Supprimer définitivement"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {business && (
         <ClientFormDialog open={openNew} onOpenChange={setOpenNew} businessId={business.id} />

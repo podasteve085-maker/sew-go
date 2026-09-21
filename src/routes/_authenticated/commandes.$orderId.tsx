@@ -31,7 +31,7 @@ import { toast } from "sonner";
 
 import { supabase } from "@/integrations/supabase/client";
 import { useBusiness } from "@/hooks/use-business";
-import { uploadImage } from "@/hooks/use-signed-url";
+import { uploadImage, deleteStorageFile } from "@/hooks/use-signed-url";
 import {
   fetchOrder,
   fetchPayments,
@@ -39,6 +39,7 @@ import {
   fetchClient,
   fetchMeasurementSets,
   fetchGarmentTypes,
+  deleteOrderCascade,
 } from "@/lib/queries";
 import {
   ORDER_STATUS,
@@ -127,33 +128,36 @@ function OrderDetailPage() {
 
   // Queries
   const orderQuery = useQuery({
-    queryKey: ["order", orderId],
-    queryFn: () => fetchOrder(orderId),
+    queryKey: ["order", orderId, business?.id],
+    queryFn: () => fetchOrder(orderId, business?.id),
+    enabled: Boolean(orderId && business?.id),
   });
 
   const paymentsQuery = useQuery({
-    queryKey: ["payments", orderId],
-    queryFn: () => fetchPayments(orderId),
+    queryKey: ["payments", orderId, business?.id],
+    queryFn: () => fetchPayments(orderId, business?.id),
+    enabled: Boolean(orderId && business?.id),
   });
 
   const imagesQuery = useQuery({
-    queryKey: ["order-images", orderId],
-    queryFn: () => fetchOrderImages(orderId),
+    queryKey: ["order-images", orderId, business?.id],
+    queryFn: () => fetchOrderImages(orderId, business?.id),
+    enabled: Boolean(orderId && business?.id),
   });
 
   const order = orderQuery.data;
   const clientId = order?.client_id;
 
   const clientQuery = useQuery({
-    queryKey: ["client", clientId],
-    queryFn: () => fetchClient(clientId!),
-    enabled: !!clientId,
+    queryKey: ["client", clientId, business?.id],
+    queryFn: () => fetchClient(clientId!, business?.id),
+    enabled: Boolean(clientId && business?.id),
   });
 
   const measuresQuery = useQuery({
-    queryKey: ["measurements", clientId],
-    queryFn: () => fetchMeasurementSets(clientId!),
-    enabled: !!clientId,
+    queryKey: ["measurements", clientId, business?.id],
+    queryFn: () => fetchMeasurementSets(clientId!, business?.id),
+    enabled: Boolean(clientId && business?.id),
   });
 
   // Calculate finances
@@ -208,12 +212,7 @@ function OrderDetailPage() {
   // Delete Payment Mutation
   const deletePaymentMutation = useMutation({
     mutationFn: async (pId: string) => {
-      if (!business?.id) throw new Error("Atelier non identifié");
-      const { error } = await supabase
-        .from("payments")
-        .delete()
-        .eq("id", pId)
-        .eq("business_id", business.id);
+      const { error } = await supabase.from("payments").delete().eq("id", pId);
       if (error) throw error;
     },
     onSuccess: () => {
@@ -229,12 +228,10 @@ function OrderDetailPage() {
   // Cancel Order Mutation
   const cancelOrderMutation = useMutation({
     mutationFn: async () => {
-      if (!business?.id) throw new Error("Atelier non identifié");
       const { error } = await supabase
         .from("orders")
         .update({ status: "annulee" })
-        .eq("id", orderId)
-        .eq("business_id", business.id);
+        .eq("id", orderId);
       if (error) throw error;
     },
     onSuccess: () => {
@@ -270,12 +267,7 @@ function OrderDetailPage() {
         payload.delivered_to = delivered_to || null;
         payload.delivery_note = delivery_note || null;
       }
-      if (!business?.id) throw new Error("Atelier non identifié");
-      const { error } = await supabase
-        .from("orders")
-        .update(payload)
-        .eq("id", orderId)
-        .eq("business_id", business.id);
+      const { error } = await supabase.from("orders").update(payload).eq("id", orderId);
       if (error) throw error;
     },
     onSuccess: () => {
@@ -292,20 +284,18 @@ function OrderDetailPage() {
   // Delete Order
   const deleteOrderMutation = useMutation({
     mutationFn: async () => {
-      if (!business?.id) throw new Error("Atelier non identifié");
-      const { error } = await supabase
-        .from("orders")
-        .delete()
-        .eq("id", orderId)
-        .eq("business_id", business.id);
-      if (error) throw error;
+      await deleteOrderCascade(orderId, business?.id);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["orders"] });
+      queryClient.invalidateQueries({ queryKey: ["clients"] });
       toast.success("Commande supprimée avec succès");
       navigate({ to: "/commandes" });
     },
-    onError: () => toast.error("Suppression impossible"),
+    onError: (err: unknown) => {
+      const msg = err instanceof Error ? err.message : "Suppression impossible";
+      toast.error(`Erreur : ${msg}`);
+    },
   });
 
   // Upload Photo
@@ -315,7 +305,6 @@ function OrderDetailPage() {
     setUploadingImage(true);
     try {
       const path = await uploadImage(business.id, file, "orders");
-      if (!business?.id) throw new Error("Atelier non identifié");
       const { error } = await supabase.from("order_images").insert({
         business_id: business.id,
         order_id: orderId,
@@ -336,12 +325,14 @@ function OrderDetailPage() {
   // Delete Photo
   const deleteImageMutation = useMutation({
     mutationFn: async (imgId: string) => {
-      if (!business?.id) throw new Error("Atelier non identifié");
-      const { error } = await supabase
-        .from("order_images")
-        .delete()
-        .eq("id", imgId)
-        .eq("business_id", business.id);
+      // Récupère le path Storage avant suppression pour nettoyage physique
+      const image = imagesQuery.data?.find((img) => img.id === imgId);
+      // Supprime d'abord le fichier physique dans le bucket
+      if (image?.path) {
+        await deleteStorageFile(image.path);
+      }
+      // Puis supprime la ligne en base
+      const { error } = await supabase.from("order_images").delete().eq("id", imgId);
       if (error) throw error;
     },
     onSuccess: () => {
@@ -1070,7 +1061,6 @@ function OrderDetailPage() {
         open={openEditModal}
         onOpenChange={setOpenEditModal}
         order={order}
-        businessId={business?.id ?? ""}
         onUpdated={() => {
           queryClient.invalidateQueries({ queryKey: ["order", orderId] });
           queryClient.invalidateQueries({ queryKey: ["orders"] });
@@ -1382,16 +1372,19 @@ function EditOrderDialog({
   onOpenChange,
   order,
   onUpdated,
-  businessId,
 }: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   order: any;
   onUpdated: () => void;
-  businessId: string;
 }) {
-  const garmentsQuery = useQuery({ queryKey: ["garment-types"], queryFn: fetchGarmentTypes, enabled: open });
+  const businessId = order?.business_id;
+  const garmentsQuery = useQuery({
+    queryKey: ["garment-types", businessId],
+    queryFn: () => fetchGarmentTypes(businessId),
+    enabled: Boolean(open && businessId),
+  });
   const [saving, setSaving] = useState(false);
 
   async function handleSave(e: React.FormEvent<HTMLFormElement>) {
@@ -1411,8 +1404,7 @@ function EditOrderDialog({
           description: String(fd.get("description") || "").trim() || null,
           notes: String(fd.get("notes") || "").trim() || null,
         })
-        .eq("id", order.id)
-        .eq("business_id", businessId);
+        .eq("id", order.id);
       if (error) throw error;
       toast.success("Commande mise à jour");
       onUpdated();

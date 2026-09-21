@@ -13,6 +13,8 @@ import {
   fetchAppointments,
   balance,
   paidTotal,
+  deleteClientCascade,
+  deleteMeasurementSetCascade,
   type MeasurementSetRow,
 } from "@/lib/queries";
 import { appointmentLabel } from "@/lib/domain";
@@ -71,54 +73,59 @@ function ClientDetail() {
   const [measureMode, setMeasureMode] = useState<"create" | "edit" | "copy">("create");
   const [deleteMeasureSetId, setDeleteMeasureSetId] = useState<string | null>(null);
 
-  const client = useQuery({ queryKey: ["client", clientId], queryFn: () => fetchClient(clientId) });
+  const client = useQuery({
+    queryKey: ["client", clientId, business?.id],
+    queryFn: () => fetchClient(clientId, business?.id),
+    enabled: Boolean(clientId && business?.id),
+  });
   const sets = useQuery({
-    queryKey: ["measurements", clientId],
-    queryFn: () => fetchMeasurementSets(clientId),
+    queryKey: ["measurements", clientId, business?.id],
+    queryFn: () => fetchMeasurementSets(clientId, business?.id),
+    enabled: Boolean(clientId && business?.id),
   });
   const orders = useQuery({
-    queryKey: ["orders", { clientId }],
-    queryFn: () => fetchOrders({ clientId }),
+    queryKey: ["orders", business?.id, { clientId }],
+    queryFn: () => fetchOrders(business?.id ?? "", { clientId }),
+    enabled: Boolean(business?.id),
   });
   const appointments = useQuery({
-    queryKey: ["appointments", { clientId }],
-    queryFn: () => fetchAppointments({ clientId }),
+    queryKey: ["appointments", business?.id, { clientId }],
+    queryFn: () => fetchAppointments(business?.id ?? "", { clientId }),
+    enabled: Boolean(business?.id),
   });
 
   const remove = useMutation({
     mutationFn: async () => {
-      if (!business?.id) throw new Error("Atelier non identifié");
-      const { error } = await supabase
-        .from("clients")
-        .delete()
-        .eq("id", clientId)
-        .eq("business_id", business.id);
-      if (error) throw error;
+      await deleteClientCascade(clientId, business?.id);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["clients"] });
-      toast.success("Client supprimé");
+      queryClient.invalidateQueries({ queryKey: ["orders"] });
+      queryClient.invalidateQueries({ queryKey: ["measurements"] });
+      queryClient.invalidateQueries({ queryKey: ["appointments"] });
+      queryClient.invalidateQueries({ queryKey: ["clients-count"] });
+      toast.success("Client et données associées supprimés");
       navigate({ to: "/clients" });
     },
-    onError: () => toast.error("Suppression impossible"),
+    onError: (err: unknown) => {
+      const msg = err instanceof Error ? err.message : "Suppression impossible";
+      toast.error(`Erreur : ${msg}`);
+    },
   });
 
   const deleteMeasureSet = useMutation({
     mutationFn: async (setId: string) => {
-      if (!business?.id) throw new Error("Atelier non identifié");
-      const { error } = await supabase
-        .from("measurement_sets")
-        .delete()
-        .eq("id", setId)
-        .eq("business_id", business.id);
-      if (error) throw error;
+      await deleteMeasurementSetCascade(setId, business?.id);
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["measurements", clientId] });
+      queryClient.invalidateQueries({ queryKey: ["measurements"] });
       toast.success("Relevé de mesures supprimé");
       setDeleteMeasureSetId(null);
     },
-    onError: () => toast.error("Suppression impossible"),
+    onError: (err: unknown) => {
+      const msg = err instanceof Error ? err.message : "Suppression impossible";
+      toast.error(`Erreur : ${msg}`);
+    },
   });
 
   if (client.isLoading) {
@@ -433,12 +440,13 @@ function ClientDetail() {
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Annuler</AlertDialogCancel>
+            <AlertDialogCancel disabled={remove.isPending}>Annuler</AlertDialogCancel>
             <AlertDialogAction
+              disabled={remove.isPending}
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
               onClick={() => remove.mutate()}
             >
-              Supprimer
+              {remove.isPending ? "Suppression en cours…" : "Supprimer définitivement"}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

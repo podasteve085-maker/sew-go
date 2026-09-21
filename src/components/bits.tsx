@@ -194,6 +194,7 @@ export function StoredImage({
         src={path}
         alt={alt}
         loading="lazy"
+        decoding="async"
         onError={() => setLoadError(true)}
         className={cls}
       />
@@ -210,6 +211,7 @@ export function StoredImage({
       src={data}
       alt={alt}
       loading="lazy"
+      decoding="async"
       onError={() => setLoadError(true)}
       className={cls}
     />
@@ -223,7 +225,7 @@ export function OrderCard({ order }: { order: OrderRow }) {
   const clientPhone = cleanPhone(client?.whatsapp || client?.phone);
 
   return (
-    <div className="card-soft flex flex-col justify-between p-3 sm:p-4 transition-all hover:border-primary/40 hover:shadow-xs">
+    <div className="card-soft list-card-fast flex flex-col justify-between p-3 sm:p-4 transition-all hover:border-primary/40 hover:shadow-xs">
       <Link
         to="/commandes/$orderId"
         params={{ orderId: order.id }}

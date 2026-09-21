@@ -169,6 +169,7 @@
     touch-action: manipulation;
     -webkit-text-size-adjust: 100%;
     scroll-behavior: smooth;
+    overscroll-behavior-y: none;
   }
 
   body {
@@ -176,6 +177,8 @@
     color: var(--color-foreground);
     font-family: var(--font-sans);
     -webkit-tap-highlight-color: transparent;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior-y: none;
     min-height: 100dvh;
     overflow-x: hidden;
   }
@@ -185,6 +188,7 @@
   select,
   textarea {
     font-size: 16px;
+    touch-action: manipulation;
   }
   @media (min-width: 640px) {
     input,
@@ -194,10 +198,13 @@
     }
   }
 
+  /* Réactivité tactile instantanée (0ms delay) et protection contre la sélection accidentelle */
   button,
-  a {
+  a,
+  [role="button"] {
     user-select: none;
     -webkit-user-select: none;
+    touch-action: manipulation;
   }
 
   h1,
@@ -207,6 +214,12 @@
     font-family: var(--font-display);
     letter-spacing: -0.015em;
   }
+}
+
+/* Optimisation de rendu ultra-rapide pour longues listes sur mobile (cartes) */
+@utility list-card-fast {
+  content-visibility: auto;
+  contain-intrinsic-size: 0 95px;
 }
 
 /* Pastille de statut de commande */

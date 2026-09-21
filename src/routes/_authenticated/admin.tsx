@@ -79,16 +79,16 @@ function AdminPage() {
   const isAdmin = currentBusiness?.is_admin === true;
 
   // 1. Liste de tous les ateliers
+  // 1. Liste de tous les ateliers
   const businessesQuery = useQuery({
     queryKey: ["admin", "businesses"],
     queryFn: async (): Promise<BusinessRow[]> => {
-      const { data, error } = await supabase
-        .from("businesses")
+      const { data, error } = await (supabase.from("businesses") as any)
         .select("id, name, owner_name, phone, city, plan, plan_status, plan_expires_at, is_admin, created_at")
         .order("created_at", { ascending: false });
 
       if (error) throw error;
-      return (data ?? []) as BusinessRow[];
+      return (data ?? []) as unknown as BusinessRow[];
     },
     enabled: isAdmin,
   });
@@ -97,13 +97,28 @@ function AdminPage() {
   const statsQuery = useQuery({
     queryKey: ["admin", "stats"],
     queryFn: async () => {
+      // Tenter d'abord la fonction RPC sécurisée
+      try {
+        const { data: rpcStats, error: rpcError } = await (supabase.rpc as any)("get_admin_platform_stats");
+        if (!rpcError && rpcStats) {
+          const parsed = (typeof rpcStats === "string" ? JSON.parse(rpcStats) : rpcStats) as Record<string, number>;
+          return {
+            totalClients: Number(parsed["total_clients"] || 0),
+            totalOrders: Number(parsed["total_orders"] || 0),
+            totalRevenue: Number(parsed["total_revenue"] || 0),
+          };
+        }
+      } catch {
+        // Fallback en cas de fonction non encore déployée
+      }
+
       const [clientsRes, ordersRes, transactionsRes] = await Promise.all([
         supabase.from("clients").select("id", { count: "exact", head: true }),
         supabase.from("orders").select("id", { count: "exact", head: true }),
-        supabase.from("payment_transactions").select("amount, status"),
+        (supabase as any).from("payment_transactions").select("amount, status"),
       ]);
 
-      const txList = transactionsRes.data ?? [];
+      const txList = (transactionsRes.data ?? []) as { amount: number; status: string }[];
       const totalRevenue = txList
         .filter((t) => t.status === "completed")
         .reduce((sum, t) => sum + Number(t.amount || 0), 0);
@@ -121,7 +136,7 @@ function AdminPage() {
   const transactionsQuery = useQuery({
     queryKey: ["admin", "transactions"],
     queryFn: async (): Promise<TransactionRow[]> => {
-      const { data, error } = await supabase
+      const { data, error } = await (supabase as any)
         .from("payment_transactions")
         .select("id, business_id, plan, amount, currency, provider, customer_phone, status, created_at, businesses(name)")
         .order("created_at", { ascending: false })
@@ -144,7 +159,12 @@ function AdminPage() {
       plan?: SubscriptionPlan;
       isAdmin?: boolean;
     }) => {
-      const updates: Record<string, unknown> = {};
+      const updates: {
+        plan?: SubscriptionPlan;
+        plan_status?: string;
+        plan_expires_at?: string | null;
+        is_admin?: boolean;
+      } = {};
 
       if (plan !== undefined) {
         updates.plan = plan;
@@ -165,7 +185,7 @@ function AdminPage() {
         updates.is_admin = isAdmin;
       }
 
-      const { error } = await supabase.from("businesses").update(updates).eq("id", businessId);
+      const { error } = await (supabase.from("businesses") as any).update(updates).eq("id", businessId);
       if (error) throw error;
     },
     onSuccess: () => {

@@ -26,19 +26,26 @@ export type Business = {
 export function useBusiness() {
   return useQuery({
     queryKey: ["business"],
-    staleTime: 60_000,
+    staleTime: 5 * 60 * 1000,
+    gcTime: 30 * 60 * 1000,
     retry: 1,
     queryFn: async (): Promise<Business | null> => {
-      // Vérifier l'utilisateur avant la requête métier : sans session Supabase,
-      // RLS renvoie une erreur et l'écran affichait à tort une simple erreur réseau.
-      const { data: authData, error: authError } = await supabase.auth.getUser();
-      if (authError) throw new Error("Votre session a expiré. Reconnectez-vous pour accéder à votre atelier.");
-      if (!authData.user) throw new Error("Aucune session active. Reconnectez-vous pour accéder à votre atelier.");
+      // Optimisation performance mobile : lecture instantanée de la session locale en mémoire (0ms réseau)
+      const { data: sessionData } = await supabase.auth.getSession();
+      let userId = sessionData.session?.user?.id;
+
+      if (!userId) {
+        const { data: authData, error: authError } = await supabase.auth.getUser();
+        if (authError || !authData.user) {
+          throw new Error("Aucune session active. Reconnectez-vous pour accéder à votre atelier.");
+        }
+        userId = authData.user.id;
+      }
 
       const { data, error } = await supabase
         .from("businesses")
         .select("*")
-        .eq("owner_id", authData.user.id)
+        .eq("owner_id", userId)
         .maybeSingle();
 
       if (error) {
@@ -47,12 +54,13 @@ export function useBusiness() {
       }
       if (!data) return null;
 
+      const rawData = data as unknown as Record<string, unknown>;
       return {
         ...data,
-        plan: ((data as Record<string, unknown>).plan as SubscriptionPlan) || "free",
-        plan_status: ((data as Record<string, unknown>).plan_status as SubscriptionStatus) || "active",
-        plan_expires_at: ((data as Record<string, unknown>).plan_expires_at as string) || null,
-        is_admin: Boolean((data as Record<string, unknown>).is_admin),
+        plan: (rawData["plan"] as SubscriptionPlan) || "free",
+        plan_status: (rawData["plan_status"] as SubscriptionStatus) || "active",
+        plan_expires_at: (rawData["plan_expires_at"] as string) || null,
+        is_admin: Boolean(rawData["is_admin"]),
       } as Business;
     },
   });

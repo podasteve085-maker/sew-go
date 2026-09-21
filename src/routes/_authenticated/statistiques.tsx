@@ -45,11 +45,19 @@ function monthLabel(key: string) {
   return d.toLocaleDateString("fr-FR", { month: "long", year: "numeric" });
 }
 
-export function StatsPage() {
+function StatsPage() {
   const { data: business } = useBusiness();
   const currency = business?.currency ?? "FCFA";
-  const orders = useQuery({ queryKey: ["orders"], queryFn: () => fetchOrders() });
-  const clients = useQuery({ queryKey: ["clients"], queryFn: () => fetchClients() });
+  const orders = useQuery({
+    queryKey: ["orders", business?.id],
+    queryFn: () => fetchOrders(business?.id ?? ""),
+    enabled: Boolean(business?.id),
+  });
+  const clients = useQuery({
+    queryKey: ["clients", business?.id],
+    queryFn: () => fetchClients(business?.id ?? ""),
+    enabled: Boolean(business?.id),
+  });
   const [month, setMonth] = useState(() => new Date().toISOString().slice(0, 7));
 
   const months = useMemo(() => {

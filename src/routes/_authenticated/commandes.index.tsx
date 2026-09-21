@@ -1,5 +1,5 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { useMemo, useState } from "react";
+import { useMemo, useState, useDeferredValue } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Plus, Search, Crown, Scissors, AlertCircle } from "lucide-react";
 
@@ -43,10 +43,15 @@ function OrdersPage() {
   const { data: business } = useBusiness();
   const [filter, setFilter] = useState<string>("actives");
   const [term, setTerm] = useState("");
+  const deferredTerm = useDeferredValue(term);
   const [upgradeOpen, setUpgradeOpen] = useState(false);
   const [quotaReason, setQuotaReason] = useState("");
 
-  const orders = useQuery({ queryKey: ["orders"], queryFn: () => fetchOrders() });
+  const orders = useQuery({
+    queryKey: ["orders", business?.id],
+    queryFn: () => fetchOrders(business?.id ?? ""),
+    enabled: Boolean(business?.id),
+  });
 
   const isPro = isProOrAdmin(business);
   const currentMonthStart = new Date().toISOString().slice(0, 7);
@@ -74,7 +79,7 @@ function OrdersPage() {
       if (filter === "toutes") return true;
       return o.status === filter;
     });
-    const q = term.trim().toLowerCase();
+    const q = deferredTerm.trim().toLowerCase();
     if (!q) return byFilter;
     return byFilter.filter(
       (o) =>
@@ -82,7 +87,7 @@ function OrdersPage() {
         o.garment_type.toLowerCase().includes(q) ||
         fullName(o.clients).toLowerCase().includes(q),
     );
-  }, [orders.data, filter, term]);
+  }, [orders.data, filter, deferredTerm]);
 
   const counts = useMemo(() => {
     const all = orders.data ?? [];
