@@ -1,5 +1,4 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
 import {
   Ruler,
   Users,
@@ -13,8 +12,8 @@ import {
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { ThemeToggle } from "@/components/theme-toggle";
 import heroImage from "@/assets/hero-atelier.jpg";
-import { supabase } from "@/integrations/supabase/client";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -70,29 +69,6 @@ const features = [
 ];
 
 function Landing() {
-  const [signedIn, setSignedIn] = useState(false);
-
-  useEffect(() => {
-    supabase.auth.getUser().then(({ data }) => setSignedIn(Boolean(data?.user)));
-  }, []);
-
-  async function handleSignOut() {
-    if (typeof window !== "undefined") {
-      try {
-        localStorage.clear();
-        sessionStorage.clear();
-      } catch {
-        // ignore
-      }
-    }
-    try {
-      await supabase.auth.signOut({ scope: "global" });
-    } catch {
-      await supabase.auth.signOut();
-    }
-    setSignedIn(false);
-  }
-
   return (
     <div className="min-h-screen bg-background">
       <div className="faso-stripes h-2 w-full" />
@@ -103,27 +79,16 @@ function Landing() {
           </span>
           CouturPro
         </span>
-        <div className="flex items-center gap-2">
-          {signedIn ? (
-            <>
-              <Button asChild variant="secondary" size="sm">
-                <Link to="/dashboard">Mon atelier</Link>
-              </Button>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={handleSignOut}
-                className="text-xs text-muted-foreground hover:text-destructive cursor-pointer"
-                title="Fermer la session sur cet appareil"
-              >
-                Se déconnecter
-              </Button>
-            </>
-          ) : (
-            <Button asChild variant="secondary" size="sm">
-              <Link to="/auth">Se connecter</Link>
-            </Button>
-          )}
+        <div className="flex items-center gap-2 sm:gap-3">
+          <ThemeToggle />
+          <Button asChild variant="secondary" size="sm">
+            <Link to="/auth">Se connecter</Link>
+          </Button>
+          <Button asChild size="sm" className="hidden sm:inline-flex">
+            <Link to="/auth" search={{ tab: "signup" }}>
+              Créer un atelier
+            </Link>
+          </Button>
         </div>
       </header>
 
@@ -141,8 +106,8 @@ function Landing() {
             </p>
             <div className="mt-7 flex flex-wrap gap-3">
               <Button asChild size="lg">
-                <Link to={signedIn ? "/dashboard" : "/auth"}>
-                  {signedIn ? "Accéder à mon atelier" : "Commencer gratuitement"} <ArrowRight className="ml-1 size-4" />
+                <Link to="/auth">
+                  Commencer gratuitement <ArrowRight className="ml-1 size-4" />
                 </Link>
               </Button>
               <Button asChild size="lg" variant="outline">

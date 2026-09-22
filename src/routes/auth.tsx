@@ -30,10 +30,11 @@ export const Route = createFileRoute("/auth")({
   ssr: false,
   validateSearch: (
     search: Record<string, unknown>,
-  ): { logout?: boolean; reconnect?: boolean } => {
-    const res: { logout?: boolean; reconnect?: boolean } = {};
+  ): { logout?: boolean; reconnect?: boolean; tab?: "signin" | "signup" } => {
+    const res: { logout?: boolean; reconnect?: boolean; tab?: "signin" | "signup" } = {};
     if (search["logout"] === true || search["logout"] === "true") res.logout = true;
     if (search["reconnect"] === true || search["reconnect"] === "true") res.reconnect = true;
+    if (search["tab"] === "signup" || search["tab"] === "signin") res.tab = search["tab"];
     return res;
   },
   head: () => ({
@@ -56,7 +57,7 @@ export const Route = createFileRoute("/auth")({
 });
 
 function AuthPage() {
-  const { logout, reconnect } = Route.useSearch();
+  const { logout, reconnect, tab } = Route.useSearch();
   const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
   const [mode, setMode] = useState<"tabs" | "forgot" | "update_password">("tabs");
@@ -443,7 +444,7 @@ function AuthPage() {
             {/* MODE 3 : FORMULAIRE DE CONNEXION / CRÉATION D'ATELIER SÉCURISÉ */}
             {mode === "tabs" && (
               <div className="rounded-2xl border border-border/80 bg-card p-6 sm:p-8 shadow-sm space-y-6">
-                  <Tabs defaultValue="signin" className="w-full">
+                  <Tabs defaultValue={tab === "signup" ? "signup" : "signin"} className="w-full">
                     <TabsList className="grid w-full grid-cols-2 p-1 bg-muted/70 rounded-xl h-11">
                       <TabsTrigger value="signin" className="rounded-lg font-bold text-xs sm:text-sm">
                         Connexion

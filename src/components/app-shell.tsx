@@ -1,6 +1,7 @@
 import { Link, useNavigate, useRouterState } from "@tanstack/react-router";
 import { useEffect, useState, useRef, type ReactNode } from "react";
 import { PwaInstallButton } from "@/components/pwa-install-banner";
+import { ThemeToggle, ThemeSegmentedControl } from "@/components/theme-toggle";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Home,
@@ -190,6 +191,12 @@ export function AppShell({ children }: { children: ReactNode }) {
               </Button>
             </div>
           )}
+          <div className="pt-2">
+            <p className="text-[10px] font-semibold uppercase tracking-wider text-sidebar-foreground/60 mb-1.5 px-1">
+              Thème d'affichage
+            </p>
+            <ThemeSegmentedControl />
+          </div>
           <PwaInstallButton />
           <SignOutButton />
         </div>
@@ -264,6 +271,9 @@ export function AppShell({ children }: { children: ReactNode }) {
                 <Crown className="size-3" /> PRO
               </Link>
             )}
+
+            {/* Bascule Thème Clair / Sombre / Auto */}
+            <ThemeToggle />
 
             <Button asChild size="sm" className="hidden sm:inline-flex shrink-0 shadow-xs">
               <Link to="/commandes/nouvelle">
@@ -466,8 +476,14 @@ export function AppShell({ children }: { children: ReactNode }) {
             </div>
           </div>
 
-          {/* Pied du tiroir : Installation PWA + Bouton Se Déconnecter */}
-          <div className="p-3 border-t border-sidebar-border space-y-2 bg-sidebar/70">
+          {/* Pied du tiroir : Thème + Installation PWA + Bouton Se Déconnecter */}
+          <div className="p-3 border-t border-sidebar-border space-y-2.5 bg-sidebar/70">
+            <div>
+              <p className="text-[10px] font-semibold uppercase tracking-wider text-sidebar-foreground/60 mb-1.5 px-1">
+                Thème d'affichage
+              </p>
+              <ThemeSegmentedControl />
+            </div>
             <PwaInstallButton />
             <SignOutButton
               onDone={() => setMobileMenuOpen(false)}

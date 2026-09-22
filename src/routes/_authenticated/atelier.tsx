@@ -15,6 +15,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Skeleton } from "@/components/ui/skeleton";
 import { SectionTitle, StoredImage } from "@/components/bits";
+import { ThemeSegmentedControl } from "@/components/theme-toggle";
 
 export const Route = createFileRoute("/_authenticated/atelier")({
   head: () => ({
@@ -247,6 +248,7 @@ function WorkshopPage() {
 
       <GarmentTypes businessId={business.id} />
       <Templates businessId={business.id} />
+      <ThemeSettingsSection />
       <PasswordChangeSection />
       <SessionSignOutSection />
     </div>
@@ -518,6 +520,22 @@ function PasswordChangeSection() {
   );
 }
 
+function ThemeSettingsSection() {
+  return (
+    <section className="card-soft space-y-3 p-5">
+      <div className="space-y-1">
+        <h2 className="font-display text-sm font-bold">Apparence & Thème d'affichage</h2>
+        <p className="text-xs text-muted-foreground">
+          Basculez entre le mode Clair (lumineux), Sombre / Noir (économise la batterie et repose les yeux), ou Automatique (selon votre appareil).
+        </p>
+      </div>
+      <div className="max-w-xs pt-1">
+        <ThemeSegmentedControl />
+      </div>
+    </section>
+  );
+}
+
 function SessionSignOutSection() {
   const queryClient = useQueryClient();
   const [loading, setLoading] = useState(false);
@@ -527,9 +545,20 @@ function SessionSignOutSection() {
     try {
       await queryClient.cancelQueries();
       queryClient.clear();
-      await supabase.auth.signOut();
-      toast.success("Vous avez été déconnecté avec succès.");
+      try {
+        await supabase.auth.signOut({ scope: "global" });
+      } catch {
+        await supabase.auth.signOut();
+      }
     } finally {
+      if (typeof window !== "undefined") {
+        try {
+          localStorage.clear();
+          sessionStorage.clear();
+        } catch {
+          // ignore
+        }
+      }
       window.location.href = "/auth";
     }
   }
