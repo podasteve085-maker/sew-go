@@ -139,7 +139,7 @@ function RootShell({ children }: { children: ReactNode }) {
         <HeadContent />
         <script
           dangerouslySetInnerHTML={{
-            __html: `(function(){try{var t=localStorage.getItem("couturpro_theme");var isDark=t==="dark"||((!t||t==="system")&&window.matchMedia("(prefers-color-scheme: dark)").matches);if(isDark){document.documentElement.classList.add("dark");}else{document.documentElement.classList.remove("dark");}}catch(e){}})();`,
+            __html: `(function(){try{var t=localStorage.getItem("couturpro_theme");var isDark=false;if(t==="dark"){isDark=true;}else if(t==="light"){isDark=false;}else{var h=new Date().getHours()+new Date().getMinutes()/60;isDark=(h<6||h>=18.5);}if(isDark){document.documentElement.classList.add("dark");}else{document.documentElement.classList.remove("dark");}}catch(e){}})();`,
           }}
         />
               {/* BLINK_PICKER_RUNTIME_V2:d74d75e6c99e */}

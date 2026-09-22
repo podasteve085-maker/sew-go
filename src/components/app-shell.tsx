@@ -212,19 +212,20 @@ export function AppShell({ children }: { children: ReactNode }) {
       <div className="lg:pl-64">
         {/* En-tête épuré et ultra-rapide */}
         <header className="no-print sticky top-0 z-20 border-b border-border/80 bg-background/95 backdrop-blur-md">
-          <div className="flex items-center gap-2 px-3 py-2 sm:px-4 sm:py-2.5 lg:px-8">
+          <div className="flex items-center gap-1.5 sm:gap-2 px-2.5 py-2 sm:px-4 sm:py-2.5 lg:px-8">
             {/* Bouton Menu hamburger sur mobile */}
             <button
               onClick={() => setMobileMenuOpen(true)}
-              className="lg:hidden flex size-8.5 items-center justify-center rounded-lg border border-border/70 bg-card text-foreground hover:bg-muted active:scale-95 shrink-0 cursor-pointer shadow-2xs"
+              className="lg:hidden flex size-8.5 items-center justify-center rounded-xl border border-border/80 bg-card text-foreground hover:bg-muted active:scale-95 shrink-0 cursor-pointer shadow-2xs"
               aria-label="Ouvrir le menu"
             >
               <Menu className="size-4.5" />
             </button>
 
+            {/* Logo atelier mobile */}
             <button
               onClick={() => setMobileMenuOpen(true)}
-              className="flex items-center gap-2 lg:hidden shrink-0 text-left cursor-pointer active:opacity-80"
+              className="flex items-center gap-1.5 lg:hidden shrink-0 text-left cursor-pointer active:opacity-80"
               title="Voir tous les modules"
             >
               <div className="size-7.5 rounded-lg overflow-hidden shrink-0 border border-border/70 bg-primary/10 flex items-center justify-center shadow-2xs">
@@ -239,51 +240,58 @@ export function AppShell({ children }: { children: ReactNode }) {
                   }
                 />
               </div>
-              <span className="max-w-[6.5rem] xs:max-w-[7.5rem] truncate font-display text-xs font-bold sm:text-sm">
+              <span className="hidden md:inline-block max-w-[7rem] truncate font-display text-xs font-bold">
                 {business?.name ?? "Mon atelier"}
               </span>
             </button>
 
+            {/* Barre de recherche responsive */}
             <button
               onClick={() => setSearchOpen(true)}
-              className="ml-auto flex flex-1 items-center gap-2 rounded-full border border-border/70 bg-card/80 px-3 py-1.5 text-xs text-muted-foreground transition-all hover:border-primary/40 hover:bg-card sm:px-4 sm:py-2 sm:text-sm lg:max-w-sm cursor-pointer shadow-2xs"
+              className="flex flex-1 items-center gap-2 rounded-full border border-border/80 bg-card/90 px-2.5 py-1.5 text-xs text-muted-foreground transition-all hover:border-primary/40 hover:bg-card sm:px-4 sm:py-2 sm:text-sm lg:max-w-sm cursor-pointer shadow-2xs min-w-0"
               aria-label="Rechercher"
             >
               <Search className="size-3.5 shrink-0 text-muted-foreground" />
-              <span className="truncate">Rechercher…</span>
+              <span className="truncate hidden xs:inline">Rechercher…</span>
               <kbd className="ml-auto hidden rounded bg-muted px-1.5 py-0.5 text-[0.65rem] font-mono font-medium text-muted-foreground sm:inline-block">
                 Ctrl K
               </kbd>
             </button>
-            {/* Badge Pro ou Admin dans l'en-tête mobile */}
+
+            {/* Badge Pro ou Admin dans l'en-tête */}
             {business?.is_admin ? (
               <Link
                 to="/admin"
-                className="rounded-md bg-purple-600 px-2 py-0.5 text-[10px] font-extrabold text-white shrink-0"
+                className="rounded-md bg-purple-600 px-1.5 py-0.5 text-[9px] font-extrabold text-white shrink-0"
               >
                 ADMIN
               </Link>
             ) : isPro ? (
               <Link
                 to="/abonnement"
-                className="inline-flex items-center gap-1 rounded-full bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 border border-emerald-500/30 px-2.5 py-0.5 text-[10px] font-extrabold shrink-0 active:scale-95"
+                className="inline-flex items-center gap-1 rounded-full bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 border border-emerald-500/30 px-2 py-0.5 text-[10px] font-extrabold shrink-0 active:scale-95"
               >
                 <Crown className="size-3" /> PRO
               </Link>
             ) : (
               <Link
                 to="/abonnement"
-                className="inline-flex items-center gap-1 rounded-full bg-primary/15 text-primary border border-primary/30 px-2.5 py-0.5 text-[10px] font-extrabold shrink-0 active:scale-95"
+                className="inline-flex items-center gap-1 rounded-full bg-primary/15 text-primary border border-primary/30 px-2 py-0.5 text-[10px] font-extrabold shrink-0 active:scale-95"
               >
                 <Crown className="size-3" /> PRO
               </Link>
             )}
 
-            {/* Indicateur de connectivité & Synchronisation */}
-            <SyncStatusBadge />
+            {/* Indicateur de connectivité & Synchronisation compact sur mobile */}
+            <div className="shrink-0">
+              <SyncStatusBadge compact={true} className="sm:hidden" />
+              <SyncStatusBadge compact={false} className="hidden sm:inline-flex" />
+            </div>
 
-            {/* Bascule Thème Clair / Sombre / Auto */}
-            <ThemeToggle />
+            {/* Bascule Thème Clair / Sombre / Auto TOUJOURS VISIBLE */}
+            <div className="shrink-0 flex items-center">
+              <ThemeToggle align="end" />
+            </div>
 
             <Button asChild size="sm" className="hidden sm:inline-flex shrink-0 shadow-xs">
               <Link to="/commandes/nouvelle">
@@ -404,6 +412,19 @@ export function AppShell({ children }: { children: ReactNode }) {
                 </div>
               </div>
             </div>
+          </div>
+
+          {/* Sélecteur de thème immédiat au sommet du menu mobile */}
+          <div className="px-3.5 py-2.5 border-b border-sidebar-border bg-sidebar-accent/30 shrink-0">
+            <div className="flex items-center justify-between mb-1.5 px-0.5">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-sidebar-foreground/70">
+                Thème d'affichage
+              </span>
+              <span className="text-[10px] font-medium text-sidebar-foreground/50">
+                Jour / Nuit
+              </span>
+            </div>
+            <ThemeSegmentedControl />
           </div>
 
           {/* Liste complète de tous les modules */}

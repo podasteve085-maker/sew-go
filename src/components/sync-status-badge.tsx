@@ -33,11 +33,17 @@ export function SyncStatusBadge({
   if (!isOnline) {
     return (
       <div
-        className={`inline-flex items-center gap-1.5 rounded-full bg-amber-500/15 text-amber-700 dark:text-amber-400 border border-amber-500/30 px-2.5 py-1 text-xs font-semibold shadow-2xs ${className ?? ""}`}
-        title="Mode hors-ligne : vous pouvez continuer à travailler, vos données sont sauvegardées en toute sécurité sur cet appareil et seront synchronisées au retour de la connexion."
+        className={`inline-flex items-center gap-1 rounded-full bg-amber-500/15 text-amber-700 dark:text-amber-400 border border-amber-500/30 ${
+          compact ? "px-1.5 py-1" : "px-2.5 py-1"
+        } text-xs font-semibold shadow-2xs ${className ?? ""}`}
+        title="Mode hors-ligne : données sécurisées localement sur cet appareil"
       >
-        <WifiOff className="size-3.5" />
-        {!compact && (
+        <WifiOff className="size-3.5 shrink-0" />
+        {compact ? (
+          pendingCount > 0 ? (
+            <span className="text-[10px] font-bold">{pendingCount}</span>
+          ) : null
+        ) : (
           <span>
             {pendingCount > 0
               ? `Hors-ligne (${pendingCount})`
