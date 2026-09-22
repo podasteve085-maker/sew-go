@@ -11,6 +11,14 @@ import {
 } from "./offline-storage";
 
 export async function currentBusinessId(): Promise<string> {
+  // 0. Si hors-ligne avéré, accès instantané au cache local (0ms de latence)
+  if (typeof navigator !== "undefined" && !navigator.onLine) {
+    if (typeof window !== "undefined") {
+      const cachedBizId = localStorage.getItem("couturpro_current_business_id");
+      if (cachedBizId) return cachedBizId;
+    }
+  }
+
   // 1. Tenter la session active Supabase
   try {
     const { data, error } = await supabase.auth.getUser();

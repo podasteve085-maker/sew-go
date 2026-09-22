@@ -30,29 +30,54 @@ export function useBusiness() {
     gcTime: 30 * 60 * 1000,
     retry: 1,
     queryFn: async (): Promise<Business | null> => {
-      // Optimisation performance mobile : lecture instantanée de la session locale en mémoire (0ms réseau)
-      const { data: sessionData } = await supabase.auth.getSession();
-      let userId = sessionData.session?.user?.id;
-
-      if (!userId) {
-        const { data: authData, error: authError } = await supabase.auth.getUser();
-        if (authError || !authData.user) {
-          throw new Error("Aucune session active. Reconnectez-vous pour accéder à votre atelier.");
+      const getCached = (): Business | null => {
+        if (typeof window === "undefined") return null;
+        try {
+          const cached = localStorage.getItem("couturpro_cached_business");
+          return cached ? (JSON.parse(cached) as Business) : null;
+        } catch {
+          return null;
         }
-        userId = authData.user.id;
+      };
+
+      const isOnline = typeof navigator !== "undefined" ? navigator.onLine : true;
+
+      // Mode hors-ligne direct : retour instantané des données de l'atelier en mémoire locale
+      if (!isOnline) {
+        const cached = getCached();
+        if (cached) return cached;
       }
 
       try {
+        const { data: sessionData } = await supabase.auth.getSession();
+        let userId = sessionData.session?.user?.id;
+
+        if (!userId) {
+          try {
+            const { data: authData } = await supabase.auth.getUser();
+            userId = authData?.user?.id;
+          } catch {
+            // mode hors ligne ou micro-coupure réseau
+          }
+        }
+
+        if (!userId) {
+          const cached = getCached();
+          if (cached) return cached;
+          return null;
+        }
+
         const { data, error } = await supabase
           .from("businesses")
           .select("*")
           .eq("owner_id", userId)
           .maybeSingle();
 
-        if (error) {
-          throw error;
+        if (error) throw error;
+        if (!data) {
+          const cached = getCached();
+          return cached;
         }
-        if (!data) return null;
 
         const rawData = data as unknown as Record<string, unknown>;
         const result: Business = {
@@ -67,26 +92,19 @@ export function useBusiness() {
           try {
             localStorage.setItem("couturpro_cached_business", JSON.stringify(result));
             localStorage.setItem("couturpro_current_business_id", result.id);
+            if (userId) localStorage.setItem("couturpro_current_user_id", userId);
           } catch {
             // ignore
           }
         }
 
         return result;
-      } catch (networkError) {
-        // En cas de coupure de réseau / mode hors-ligne, charger le profil atelier depuis le cache local
-        if (typeof window !== "undefined") {
-          const cached = localStorage.getItem("couturpro_cached_business");
-          if (cached) {
-            try {
-              return JSON.parse(cached) as Business;
-            } catch {
-              // ignore
-            }
-          }
-        }
-        console.error("[useBusiness error]", networkError);
-        throw new Error("Impossible de charger votre atelier hors-ligne.");
+      } catch (err) {
+        // En cas d'échec réseau, renvoyer l'atelier mis en cache sans jamais bloquer l'interface
+        const cached = getCached();
+        if (cached) return cached;
+        console.warn("[useBusiness] Utilisation hors-ligne sans cache :", err);
+        return null;
       }
     },
   });

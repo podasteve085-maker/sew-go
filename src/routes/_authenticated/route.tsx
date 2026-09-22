@@ -28,6 +28,9 @@ export const Route = createFileRoute("/_authenticated")({
         if (sessionData?.session?.user) {
           return { user: sessionData.session.user };
         }
+        if (typeof window !== "undefined" && localStorage.getItem("couturpro_current_business_id")) {
+          return { user: { id: localStorage.getItem("couturpro_current_user_id") || "offline_user" } };
+        }
         throw redirect({ to: "/auth" });
       }
       return { user: userData.user };
@@ -35,6 +38,9 @@ export const Route = createFileRoute("/_authenticated")({
       const { data: sessionData } = await supabase.auth.getSession();
       if (sessionData?.session?.user) {
         return { user: sessionData.session.user };
+      }
+      if (typeof window !== "undefined" && localStorage.getItem("couturpro_current_business_id")) {
+        return { user: { id: localStorage.getItem("couturpro_current_user_id") || "offline_user" } };
       }
       throw redirect({ to: "/auth" });
     }

@@ -51,12 +51,20 @@ function Dashboard() {
     queryKey: ["clients-count", business?.id],
     enabled: Boolean(business?.id),
     queryFn: async () => {
-      const { count, error } = await supabase
-        .from("clients")
-        .select("id", { count: "exact", head: true })
-        .eq("business_id", business!.id);
-      if (error) throw error;
-      return count ?? 0;
+      try {
+        if (typeof navigator === "undefined" || navigator.onLine) {
+          const { count, error } = await supabase
+            .from("clients")
+            .select("id", { count: "exact", head: true })
+            .eq("business_id", business!.id);
+          if (!error && count !== null) return count;
+        }
+      } catch {
+        // Fallback hors-ligne
+      }
+      const { getAllLocalItems } = await import("@/lib/offline-storage");
+      const local = await getAllLocalItems<{ business_id: string }>("clients");
+      return local.filter((c) => c.business_id === business!.id).length;
     },
   });
 

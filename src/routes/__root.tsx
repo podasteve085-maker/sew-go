@@ -49,6 +49,11 @@ function ErrorComponent({ error, reset }: { error: Error; reset: () => void }) {
         <p className="mt-2 text-sm text-muted-foreground">
           Une erreur est survenue. Réessayez ou revenez à l'accueil.
         </p>
+        {error?.message && (
+          <div className="mt-4 rounded-xl border border-destructive/20 bg-destructive/5 p-3 text-left font-mono text-xs text-destructive max-h-32 overflow-auto break-all">
+            {error.message}
+          </div>
+        )}
         <div className="mt-6 flex flex-wrap justify-center gap-2">
           <button
             onClick={() => {
@@ -60,10 +65,10 @@ function ErrorComponent({ error, reset }: { error: Error; reset: () => void }) {
             Réessayer
           </button>
           <a
-            href="/"
+            href="/dashboard"
             className="inline-flex items-center justify-center rounded-md border border-input bg-background px-4 py-2 text-sm font-medium text-foreground transition-colors hover:bg-accent"
           >
-            Accueil
+            Tableau de bord
           </a>
         </div>
       </div>
@@ -172,21 +177,65 @@ function RootComponent() {
     }
   }, [queryClient]);
 
-  // Enregistrement du Service Worker PWA
+  // Enregistrement immédiat et résilient du Service Worker PWA
   useEffect(() => {
-    if ("serviceWorker" in navigator) {
-      window.addEventListener("load", () => {
+    if (typeof navigator !== "undefined" && "serviceWorker" in navigator) {
+      const registerSW = () => {
         navigator.serviceWorker
           .register("/sw.js", { scope: "/" })
           .then((registration) => {
-            console.info("[PWA] Service Worker enregistré :", registration.scope);
+            console.info("[PWA] Service Worker actif :", registration.scope);
+            if (registration.waiting) {
+              registration.waiting.postMessage({ type: "SKIP_WAITING" });
+            }
           })
           .catch((err) => {
-            console.warn("[PWA] Service Worker non enregistré :", err);
+            console.warn("[PWA] Échec enregistrement SW :", err);
           });
-      });
+      };
+
+      if (document.readyState === "complete") {
+        registerSW();
+      } else {
+        window.addEventListener("load", registerSW);
+      }
     }
   }, []);
+
+  // Préchargement proactif des routes clés pour naviguer sans réseau
+  useEffect(() => {
+    const routesToPreload = [
+      "/dashboard",
+      "/commandes",
+      "/commandes/nouvelle",
+      "/clients",
+      "/mesures",
+      "/catalogue",
+      "/rendez-vous",
+      "/statistiques",
+      "/abonnement",
+      "/atelier",
+    ] as const;
+
+    const preloadAll = async () => {
+      for (const path of routesToPreload) {
+        try {
+          await router.preloadRoute({ to: path });
+        } catch {
+          // ignore
+        }
+      }
+    };
+
+    if (typeof window !== "undefined") {
+      const win = window as unknown as { requestIdleCallback?: (cb: () => void) => void };
+      if (typeof win.requestIdleCallback === "function") {
+        win.requestIdleCallback(() => preloadAll());
+      } else {
+        setTimeout(preloadAll, 1200);
+      }
+    }
+  }, [router]);
 
   return (
     <QueryClientProvider client={queryClient}>

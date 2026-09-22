@@ -61,12 +61,20 @@ function SubscriptionPage() {
     queryKey: ["clients-count", business?.id],
     enabled: Boolean(business?.id),
     queryFn: async () => {
-      const { count, error } = await supabase
-        .from("clients")
-        .select("id", { count: "exact", head: true })
-        .eq("business_id", business!.id);
-      if (error) throw error;
-      return count ?? 0;
+      try {
+        if (typeof navigator === "undefined" || navigator.onLine) {
+          const { count, error } = await supabase
+            .from("clients")
+            .select("id", { count: "exact", head: true })
+            .eq("business_id", business!.id);
+          if (!error && count !== null) return count;
+        }
+      } catch {
+        // Fallback hors-ligne
+      }
+      const { getAllLocalItems } = await import("@/lib/offline-storage");
+      const local = await getAllLocalItems<{ business_id: string }>("clients");
+      return local.filter((c) => c.business_id === business!.id).length;
     },
   });
 
@@ -76,13 +84,23 @@ function SubscriptionPage() {
     enabled: Boolean(business?.id),
     queryFn: async () => {
       const currentMonthStart = new Date().toISOString().slice(0, 7) + "-01";
-      const { count, error } = await supabase
-        .from("orders")
-        .select("id", { count: "exact", head: true })
-        .eq("business_id", business!.id)
-        .gte("ordered_at", currentMonthStart);
-      if (error) throw error;
-      return count ?? 0;
+      try {
+        if (typeof navigator === "undefined" || navigator.onLine) {
+          const { count, error } = await supabase
+            .from("orders")
+            .select("id", { count: "exact", head: true })
+            .eq("business_id", business!.id)
+            .gte("ordered_at", currentMonthStart);
+          if (!error && count !== null) return count;
+        }
+      } catch {
+        // Fallback hors-ligne
+      }
+      const { getAllLocalItems } = await import("@/lib/offline-storage");
+      const local = await getAllLocalItems<{ business_id: string; ordered_at: string | null }>("orders");
+      return local.filter(
+        (o) => o.business_id === business!.id && (o.ordered_at ?? "") >= currentMonthStart,
+      ).length;
     },
   });
 
@@ -91,14 +109,18 @@ function SubscriptionPage() {
     queryKey: ["my-transactions"],
     queryFn: async () => {
       if (!business?.id) return [] as PaymentTransaction[];
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const { data, error } = await (supabase as any)
-        .from("payment_transactions")
-        .select("*")
-        .eq("business_id", business.id)
-        .order("created_at", { ascending: false });
-      if (error) throw error;
-      return (data ?? []) as unknown as PaymentTransaction[];
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const { data, error } = await (supabase as any)
+          .from("payment_transactions")
+          .select("*")
+          .eq("business_id", business.id)
+          .order("created_at", { ascending: false });
+        if (error) throw error;
+        return (data ?? []) as unknown as PaymentTransaction[];
+      } catch {
+        return [] as PaymentTransaction[];
+      }
     },
     enabled: Boolean(business?.id),
   });
