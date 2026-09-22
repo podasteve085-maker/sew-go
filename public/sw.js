@@ -81,8 +81,10 @@ self.addEventListener("fetch", (event) => {
         const cached = await caches.match(request);
         if (cached) return cached;
 
-        // Pour les navigations (HTML), afficher la page de fallback hors-ligne
+        // Pour les navigations (HTML), renvoyer le shell de l'application ("/") ou la page de secours
         if (request.mode === "navigate") {
+          const cachedShell = await caches.match("/");
+          if (cachedShell) return cachedShell;
           const offlinePage = await caches.match(OFFLINE_FALLBACK);
           if (offlinePage) return offlinePage;
         }

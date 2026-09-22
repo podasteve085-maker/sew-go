@@ -42,26 +42,52 @@ export function useBusiness() {
         userId = authData.user.id;
       }
 
-      const { data, error } = await supabase
-        .from("businesses")
-        .select("*")
-        .eq("owner_id", userId)
-        .maybeSingle();
+      try {
+        const { data, error } = await supabase
+          .from("businesses")
+          .select("*")
+          .eq("owner_id", userId)
+          .maybeSingle();
 
-      if (error) {
-        console.error("[useBusiness error]", error);
-        throw new Error(`Impossible de charger votre atelier (${error.message})`);
+        if (error) {
+          throw error;
+        }
+        if (!data) return null;
+
+        const rawData = data as unknown as Record<string, unknown>;
+        const result: Business = {
+          ...data,
+          plan: (rawData["plan"] as SubscriptionPlan) || "free",
+          plan_status: (rawData["plan_status"] as SubscriptionStatus) || "active",
+          plan_expires_at: (rawData["plan_expires_at"] as string) || null,
+          is_admin: Boolean(rawData["is_admin"]),
+        };
+
+        if (typeof window !== "undefined") {
+          try {
+            localStorage.setItem("couturpro_cached_business", JSON.stringify(result));
+            localStorage.setItem("couturpro_current_business_id", result.id);
+          } catch {
+            // ignore
+          }
+        }
+
+        return result;
+      } catch (networkError) {
+        // En cas de coupure de réseau / mode hors-ligne, charger le profil atelier depuis le cache local
+        if (typeof window !== "undefined") {
+          const cached = localStorage.getItem("couturpro_cached_business");
+          if (cached) {
+            try {
+              return JSON.parse(cached) as Business;
+            } catch {
+              // ignore
+            }
+          }
+        }
+        console.error("[useBusiness error]", networkError);
+        throw new Error("Impossible de charger votre atelier hors-ligne.");
       }
-      if (!data) return null;
-
-      const rawData = data as unknown as Record<string, unknown>;
-      return {
-        ...data,
-        plan: (rawData["plan"] as SubscriptionPlan) || "free",
-        plan_status: (rawData["plan_status"] as SubscriptionStatus) || "active",
-        plan_expires_at: (rawData["plan_expires_at"] as string) || null,
-        is_admin: Boolean(rawData["is_admin"]),
-      } as Business;
     },
   });
 }

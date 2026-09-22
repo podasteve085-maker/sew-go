@@ -6,7 +6,7 @@ import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { uploadImage } from "@/hooks/use-signed-url";
 import { GENDERS } from "@/lib/domain";
-import type { ClientRow } from "@/lib/queries";
+import { type ClientRow, saveClientOffline } from "@/lib/queries";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -75,19 +75,8 @@ export function ClientFormDialog({
         notes: values["notes"] || null,
         photo_url: photoPath,
       };
-      if (client) {
-        const { error } = await supabase
-          .from("clients")
-          .update(payload)
-          .eq("id", client.id)
-          .eq("business_id", businessId);
-        if (error) throw error;
-        return client.id;
-      } else {
-        const { data, error } = await supabase.from("clients").insert(payload).select("id").single();
-        if (error) throw error;
-        return (data as { id: string }).id;
-      }
+      const res = await saveClientOffline(payload, !client, client?.id);
+      return res.id;
     },
     onSuccess: (newId) => {
       queryClient.invalidateQueries({ queryKey: ["clients"] });

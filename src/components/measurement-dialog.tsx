@@ -4,7 +4,12 @@ import { Plus, Trash2, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 
 import { supabase } from "@/integrations/supabase/client";
-import { fetchTemplates, fetchClients, type MeasurementSetRow } from "@/lib/queries";
+import {
+  fetchTemplates,
+  fetchClients,
+  type MeasurementSetRow,
+  saveMeasurementSetOffline,
+} from "@/lib/queries";
 import { today, fullName } from "@/lib/format";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -92,62 +97,25 @@ export function MeasurementDialog({
         throw new Error("Veuillez sélectionner un client.");
       }
 
-      let targetSetId = initialSet?.id;
-
-      if (mode === "edit" && targetSetId) {
-        const { error: setErr } = await supabase
-          .from("measurement_sets")
-          .update({
-            template_name: templateName || null,
-            label: templateName || "Relevé",
-            notes: notes || null,
-            recorded_at: recordedAt,
-          })
-          .eq("id", targetSetId)
-          .eq("business_id", businessId);
-        if (setErr) throw setErr;
-
-        const { error: delErr } = await supabase
-          .from("measurement_values")
-          .delete()
-          .eq("set_id", targetSetId)
-          .eq("business_id", businessId);
-        if (delErr) throw delErr;
-      } else {
-        const { data, error } = await supabase
-          .from("measurement_sets")
-          .insert({
-            business_id: businessId,
-            client_id: activeClientId,
-            template_name: templateName || null,
-            label: templateName || "Relevé",
-            notes: notes || null,
-            recorded_at: recordedAt,
-          })
-          .select("id")
-          .single();
-        if (error) throw error;
-        targetSetId = (data as { id: string }).id;
-      }
-
-      const values = fields
+      const formattedValues = fields
         .filter((f) => f.name.trim())
         .map((f, i) => ({
-          business_id: businessId,
-          set_id: targetSetId!,
           name: f.name.trim(),
           value: f.value === "" ? null : Number(f.value.replace(",", ".")),
           unit: "cm",
           position: i,
         }));
-      if (values.length) {
-        const { error: valueError } = await supabase
-          .from("measurement_values")
-          .insert(values);
-        if (valueError) throw valueError;
-      }
 
-      return targetSetId!;
+      const setRes = await saveMeasurementSetOffline({
+        business_id: businessId,
+        client_id: activeClientId,
+        template_name: templateName || null,
+        label: templateName || "Relevé",
+        notes: notes || null,
+        recorded_at: recordedAt,
+      }, formattedValues);
+
+      return setRes.id;
     },
     onSuccess: (savedSetId) => {
       queryClient.invalidateQueries({ queryKey: ["measurements"] });

@@ -17,7 +17,13 @@ import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { useBusiness } from "@/hooks/use-business";
 import { uploadImage } from "@/hooks/use-signed-url";
-import { fetchClients, fetchGarmentTypes, fetchMeasurementSets } from "@/lib/queries";
+import {
+  fetchClients,
+  fetchGarmentTypes,
+  fetchMeasurementSets,
+  saveOrderOffline,
+  savePaymentOffline,
+} from "@/lib/queries";
 import { IMAGE_KINDS, PAYMENT_METHODS } from "@/lib/domain";
 import { addDays, fullName, today, dateFr, fcfa } from "@/lib/format";
 import { Button } from "@/components/ui/button";
@@ -147,48 +153,44 @@ function NewOrder() {
         throw new Error("L'acompte ne peut pas être supérieur au prix total.");
       }
 
-      const { data, error } = await supabase
-        .from("orders")
-        .insert({
-          business_id: business.id,
-          client_id: selectedClientId,
-          garment_type: values["garment_type"] ?? "",
-          fabric: values["fabric"] || null,
-          quantity: Number(values["quantity"] || 1),
-          description: values["description"] || null,
-          price: totalVal,
-          ordered_at: values["ordered_at"] || today(),
-          due_date: values["due_date"] || null,
-          notes: values["notes"] || null,
-          status: "nouvelle",
-        })
-        .select("id")
-        .single();
-      if (error) throw error;
-      const orderId = (data as { id: string }).id;
+      const order = await saveOrderOffline({
+        business_id: business.id,
+        client_id: selectedClientId,
+        garment_type: values["garment_type"] ?? "",
+        fabric: values["fabric"] || null,
+        quantity: Number(values["quantity"] || 1),
+        description: values["description"] || null,
+        price: totalVal,
+        ordered_at: values["ordered_at"] || today(),
+        due_date: values["due_date"] || null,
+        notes: values["notes"] || null,
+        status: "nouvelle",
+      }, true);
+      const orderId = order.id;
 
       if (depositVal > 0) {
-        const { error: payError } = await supabase.from("payments").insert({
-          business_id: business.id,
+        await savePaymentOffline({
           order_id: orderId,
           amount: depositVal,
           method: values["deposit_method"] || "especes",
           paid_at: today(),
           note: "Acompte à la commande",
         });
-        if (payError) throw payError;
       }
 
-      if (images.length) {
-        const { error: imgError } = await supabase.from("order_images").insert(
-          images.map((img) => ({
-            business_id: business.id,
-            order_id: orderId,
-            path: img.path,
-            kind: img.kind,
-          })),
-        );
-        if (imgError) throw imgError;
+      if (images.length && (typeof navigator === "undefined" || navigator.onLine)) {
+        try {
+          await supabase.from("order_images").insert(
+            images.map((img) => ({
+              business_id: business.id,
+              order_id: orderId,
+              path: img.path,
+              kind: img.kind,
+            })),
+          );
+        } catch {
+          // ignore offline image attachment
+        }
       }
       return orderId;
     },

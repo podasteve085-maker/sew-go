@@ -12,6 +12,7 @@ import { useEffect, type ReactNode } from "react";
 import appCss from "../styles.css?url";
 import { Toaster } from "@/components/ui/sonner";
 import { supabase } from "@/integrations/supabase/client";
+import { registerQueryInvalidator, syncPendingMutations } from "@/lib/sync-engine";
 
 function NotFoundComponent() {
   return (
@@ -160,6 +161,16 @@ function RootComponent() {
     });
     return () => data.subscription.unsubscribe();
   }, [router, queryClient]);
+
+  // Initialisation du moteur de synchronisation Offline-First
+  useEffect(() => {
+    registerQueryInvalidator(() => {
+      queryClient.invalidateQueries();
+    });
+    if (typeof navigator !== "undefined" && navigator.onLine) {
+      syncPendingMutations();
+    }
+  }, [queryClient]);
 
   // Enregistrement du Service Worker PWA
   useEffect(() => {

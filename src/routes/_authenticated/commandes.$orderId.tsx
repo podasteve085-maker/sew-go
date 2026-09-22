@@ -40,6 +40,8 @@ import {
   fetchMeasurementSets,
   fetchGarmentTypes,
   deleteOrderCascade,
+  saveOrderOffline,
+  savePaymentOffline,
 } from "@/lib/queries";
 import {
   ORDER_STATUS,
@@ -228,11 +230,7 @@ function OrderDetailPage() {
   // Cancel Order Mutation
   const cancelOrderMutation = useMutation({
     mutationFn: async () => {
-      const { error } = await supabase
-        .from("orders")
-        .update({ status: "annulee" })
-        .eq("id", orderId);
-      if (error) throw error;
+      await saveOrderOffline({ status: "annulee" }, false, orderId);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["order", orderId] });
@@ -267,8 +265,7 @@ function OrderDetailPage() {
         payload.delivered_to = delivered_to || null;
         payload.delivery_note = delivery_note || null;
       }
-      const { error } = await supabase.from("orders").update(payload).eq("id", orderId);
-      if (error) throw error;
+      await saveOrderOffline(payload, false, orderId);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["order", orderId] });
@@ -905,7 +902,7 @@ function OrderDetailPage() {
                 toast.error("Atelier non initialisé");
                 return;
               }
-              const { error } = await supabase.from("payments").insert({
+              await savePaymentOffline({
                 business_id: business.id,
                 order_id: orderId,
                 amount,
@@ -913,10 +910,6 @@ function OrderDetailPage() {
                 paid_at: String(fd.get("paid_at") || today()),
                 note: String(fd.get("note") || ""),
               });
-              if (error) {
-                toast.error("Erreur lors de l'enregistrement du paiement");
-                return;
-              }
               queryClient.invalidateQueries({ queryKey: ["payments", orderId] });
               queryClient.invalidateQueries({ queryKey: ["order", orderId] });
               queryClient.invalidateQueries({ queryKey: ["orders"] });
@@ -1392,20 +1385,17 @@ function EditOrderDialog({
     setSaving(true);
     const fd = new FormData(e.currentTarget);
     try {
-      const { error } = await supabase
-        .from("orders")
-        .update({
-          garment_type: String(fd.get("garment_type") || "").trim(),
-          fabric: String(fd.get("fabric") || "").trim() || null,
-          quantity: Number(fd.get("quantity") || 1),
-          price: Number(fd.get("price") || 0),
-          ordered_at: String(fd.get("ordered_at") || today()),
-          due_date: String(fd.get("due_date") || "") || null,
-          description: String(fd.get("description") || "").trim() || null,
-          notes: String(fd.get("notes") || "").trim() || null,
-        })
-        .eq("id", order.id);
-      if (error) throw error;
+      await saveOrderOffline({
+        business_id: businessId,
+        garment_type: String(fd.get("garment_type") || "").trim(),
+        fabric: String(fd.get("fabric") || "").trim() || null,
+        quantity: Number(fd.get("quantity") || 1),
+        price: Number(fd.get("price") || 0),
+        ordered_at: String(fd.get("ordered_at") || today()),
+        due_date: String(fd.get("due_date") || "") || null,
+        description: String(fd.get("description") || "").trim() || null,
+        notes: String(fd.get("notes") || "").trim() || null,
+      }, false, order.id);
       toast.success("Commande mise à jour");
       onUpdated();
       onOpenChange(false);

@@ -2,6 +2,7 @@ import { Link, useNavigate, useRouterState } from "@tanstack/react-router";
 import { useEffect, useState, useRef, type ReactNode } from "react";
 import { PwaInstallButton } from "@/components/pwa-install-banner";
 import { ThemeToggle, ThemeSegmentedControl } from "@/components/theme-toggle";
+import { SyncStatusBadge } from "@/components/sync-status-badge";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Home,
@@ -191,7 +192,13 @@ export function AppShell({ children }: { children: ReactNode }) {
               </Button>
             </div>
           )}
-          <div className="pt-2">
+          <div className="flex items-center justify-between px-1 pt-2">
+            <span className="text-[10px] font-semibold uppercase tracking-wider text-sidebar-foreground/60">
+              Réseau & Sync
+            </span>
+            <SyncStatusBadge />
+          </div>
+          <div>
             <p className="text-[10px] font-semibold uppercase tracking-wider text-sidebar-foreground/60 mb-1.5 px-1">
               Thème d'affichage
             </p>
@@ -271,6 +278,9 @@ export function AppShell({ children }: { children: ReactNode }) {
                 <Crown className="size-3" /> PRO
               </Link>
             )}
+
+            {/* Indicateur de connectivité & Synchronisation */}
+            <SyncStatusBadge />
 
             {/* Bascule Thème Clair / Sombre / Auto */}
             <ThemeToggle />
@@ -476,8 +486,14 @@ export function AppShell({ children }: { children: ReactNode }) {
             </div>
           </div>
 
-          {/* Pied du tiroir : Thème + Installation PWA + Bouton Se Déconnecter */}
+          {/* Pied du tiroir : Réseau + Thème + Installation PWA + Bouton Se Déconnecter */}
           <div className="p-3 border-t border-sidebar-border space-y-2.5 bg-sidebar/70">
+            <div className="flex items-center justify-between px-1">
+              <span className="text-[10px] font-semibold uppercase tracking-wider text-sidebar-foreground/60">
+                État connexion
+              </span>
+              <SyncStatusBadge />
+            </div>
             <div>
               <p className="text-[10px] font-semibold uppercase tracking-wider text-sidebar-foreground/60 mb-1.5 px-1">
                 Thème d'affichage
