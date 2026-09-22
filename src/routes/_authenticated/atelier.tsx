@@ -220,9 +220,9 @@ function WorkshopPage() {
 function GarmentTypes({ businessId }: { businessId: string }) {
   const queryClient = useQueryClient();
   const list = useQuery({
-    queryKey: ["garment-types", businessId],
-    queryFn: () => fetchGarmentTypes(businessId),
-    enabled: Boolean(businessId),
+    queryKey: ["garment-types"],
+    queryFn: () => fetchGarmentTypes(),
+    enabled: true,
   });
 
   const add = useMutation({
@@ -244,12 +244,12 @@ function GarmentTypes({ businessId }: { businessId: string }) {
 
   const remove = useMutation({
     mutationFn: async (id: string) => {
-      if (!business?.id) throw new Error("Atelier non identifié");
+      if (!businessId) throw new Error("Atelier non identifié");
       const { error } = await supabase
         .from("garment_types")
         .delete()
         .eq("id", id)
-        .eq("business_id", business.id);
+        .eq("business_id", businessId);
       if (error) throw error;
     },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["garment-types"] }),
@@ -310,9 +310,9 @@ function GarmentTypes({ businessId }: { businessId: string }) {
 function Templates({ businessId }: { businessId: string }) {
   const queryClient = useQueryClient();
   const list = useQuery({
-    queryKey: ["templates", businessId],
-    queryFn: () => fetchTemplates(businessId),
-    enabled: Boolean(businessId),
+    queryKey: ["templates"],
+    queryFn: () => fetchTemplates(),
+    enabled: true,
   });
 
   const add = useMutation({
@@ -336,12 +336,12 @@ function Templates({ businessId }: { businessId: string }) {
 
   const remove = useMutation({
     mutationFn: async (id: string) => {
-      if (!business?.id) throw new Error("Atelier non identifié");
+      if (!businessId) throw new Error("Atelier non identifié");
       const { error } = await supabase
         .from("measurement_templates")
         .delete()
         .eq("id", id)
-        .eq("business_id", business.id);
+        .eq("business_id", businessId);
       if (error) throw error;
     },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["templates"] }),

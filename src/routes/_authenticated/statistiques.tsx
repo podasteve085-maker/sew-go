@@ -49,14 +49,14 @@ function StatsPage() {
   const { data: business } = useBusiness();
   const currency = business?.currency ?? "FCFA";
   const orders = useQuery({
-    queryKey: ["orders", business?.id],
-    queryFn: () => fetchOrders(business?.id ?? ""),
-    enabled: Boolean(business?.id),
+    queryKey: ["orders"],
+    queryFn: () => fetchOrders(),
+    enabled: true,
   });
   const clients = useQuery({
-    queryKey: ["clients", business?.id],
-    queryFn: () => fetchClients(business?.id ?? ""),
-    enabled: Boolean(business?.id),
+    queryKey: ["clients"],
+    queryFn: () => fetchClients(),
+    enabled: true,
   });
   const [month, setMonth] = useState(() => new Date().toISOString().slice(0, 7));
 

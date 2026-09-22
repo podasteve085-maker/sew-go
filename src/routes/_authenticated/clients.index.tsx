@@ -56,9 +56,9 @@ function ClientsPage() {
 
   const { data: business } = useBusiness();
   const clients = useQuery({
-    queryKey: ["clients", business?.id, deferredTerm],
-    queryFn: () => fetchClients(business?.id ?? "", deferredTerm),
-    enabled: Boolean(business?.id),
+    queryKey: ["clients", deferredTerm],
+    queryFn: () => fetchClients(deferredTerm),
+    enabled: true,
   });
 
   const deleteMutation = useMutation({

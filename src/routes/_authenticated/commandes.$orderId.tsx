@@ -128,36 +128,36 @@ function OrderDetailPage() {
 
   // Queries
   const orderQuery = useQuery({
-    queryKey: ["order", orderId, business?.id],
-    queryFn: () => fetchOrder(orderId, business?.id),
-    enabled: Boolean(orderId && business?.id),
+    queryKey: ["order", orderId],
+    queryFn: () => fetchOrder(orderId),
+    enabled: Boolean(orderId),
   });
 
   const paymentsQuery = useQuery({
-    queryKey: ["payments", orderId, business?.id],
-    queryFn: () => fetchPayments(orderId, business?.id),
-    enabled: Boolean(orderId && business?.id),
+    queryKey: ["payments", orderId],
+    queryFn: () => fetchPayments(orderId),
+    enabled: Boolean(orderId),
   });
 
   const imagesQuery = useQuery({
-    queryKey: ["order-images", orderId, business?.id],
-    queryFn: () => fetchOrderImages(orderId, business?.id),
-    enabled: Boolean(orderId && business?.id),
+    queryKey: ["order-images", orderId],
+    queryFn: () => fetchOrderImages(orderId),
+    enabled: Boolean(orderId),
   });
 
   const order = orderQuery.data;
   const clientId = order?.client_id;
 
   const clientQuery = useQuery({
-    queryKey: ["client", clientId, business?.id],
-    queryFn: () => fetchClient(clientId!, business?.id),
-    enabled: Boolean(clientId && business?.id),
+    queryKey: ["client", clientId],
+    queryFn: () => fetchClient(clientId!),
+    enabled: Boolean(clientId),
   });
 
   const measuresQuery = useQuery({
-    queryKey: ["measurements", clientId, business?.id],
-    queryFn: () => fetchMeasurementSets(clientId!, business?.id),
-    enabled: Boolean(clientId && business?.id),
+    queryKey: ["measurements", clientId],
+    queryFn: () => fetchMeasurementSets(clientId!),
+    enabled: Boolean(clientId),
   });
 
   // Calculate finances
@@ -1381,9 +1381,9 @@ function EditOrderDialog({
 }) {
   const businessId = order?.business_id;
   const garmentsQuery = useQuery({
-    queryKey: ["garment-types", businessId],
-    queryFn: () => fetchGarmentTypes(businessId),
-    enabled: Boolean(open && businessId),
+    queryKey: ["garment-types"],
+    queryFn: () => fetchGarmentTypes(),
+    enabled: Boolean(open),
   });
   const [saving, setSaving] = useState(false);
 

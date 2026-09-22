@@ -1,5 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useState, useMemo } from "react";
+import { useState, useMemo, useDeferredValue } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   Ruler,
@@ -20,6 +20,7 @@ import { useBusiness } from "@/hooks/use-business";
 import {
   fetchAllMeasurementSets,
   fetchTemplates,
+  deleteMeasurementSetCascade,
   type FullMeasurementSetRow,
 } from "@/lib/queries";
 import { dateFr, fullName, cleanPhone } from "@/lib/format";
@@ -63,6 +64,7 @@ function MeasurementsPage() {
   const { data: business } = useBusiness();
 
   const [term, setTerm] = useState("");
+  const deferredTerm = useDeferredValue(term);
   const [selectedTemplate, setSelectedTemplate] = useState<string>("all");
   const [openModal, setOpenModal] = useState(false);
   const [selectedSet, setSelectedSet] = useState<FullMeasurementSetRow | null>(null);
@@ -81,20 +83,17 @@ function MeasurementsPage() {
 
   const deleteSetMutation = useMutation({
     mutationFn: async (setId: string) => {
-      if (!business?.id) throw new Error("Atelier non identifié");
-      const { error } = await supabase
-        .from("measurement_sets")
-        .delete()
-        .eq("id", setId)
-        .eq("business_id", business.id);
-      if (error) throw error;
+      await deleteMeasurementSetCascade(setId, business?.id);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["measurements"] });
       toast.success("Relevé de mesures supprimé");
       setDeletingId(null);
     },
-    onError: () => toast.error("Impossible de supprimer ce relevé"),
+    onError: (err: unknown) => {
+      const msg = err instanceof Error ? err.message : "Impossible de supprimer ce relevé";
+      toast.error(`Erreur : ${msg}`);
+    },
   });
 
   const filteredSets = useMemo(() => {
@@ -107,8 +106,8 @@ function MeasurementsPage() {
       }
 
       // Filter by search query
-      if (term.trim()) {
-        const q = term.trim().toLowerCase();
+      if (deferredTerm.trim()) {
+        const q = deferredTerm.trim().toLowerCase();
         const clientName = fullName(set.clients).toLowerCase();
         const clientPhone = (set.clients?.phone ?? "").toLowerCase();
         const label = (set.label ?? "").toLowerCase();
@@ -123,7 +122,7 @@ function MeasurementsPage() {
 
       return true;
     });
-  }, [measurementsQuery.data, selectedTemplate, term]);
+  }, [measurementsQuery.data, selectedTemplate, deferredTerm]);
 
   // Génération du texte WhatsApp des mesures
   function shareViaWhatsApp(set: FullMeasurementSetRow) {
@@ -278,7 +277,7 @@ function MeasurementsPage() {
             return (
               <div
                 key={set.id}
-                className="card-soft flex flex-col justify-between p-3.5 sm:p-5 transition-all hover:border-primary/40 hover:shadow-xs"
+                className="card-soft list-card-fast flex flex-col justify-between p-3.5 sm:p-5 transition-all hover:border-primary/40 hover:shadow-xs"
               >
                 <div>
                   {/* Top bar with client info */}

@@ -62,9 +62,9 @@ function AppointmentsPage() {
   const queryClient = useQueryClient();
   const { data: business } = useBusiness();
   const appointments = useQuery({
-    queryKey: ["appointments", business?.id],
-    queryFn: () => fetchAppointments(business?.id ?? ""),
-    enabled: Boolean(business?.id),
+    queryKey: ["appointments"],
+    queryFn: () => fetchAppointments(),
+    enabled: true,
   });
 
   const groups = useMemo(() => {
@@ -332,7 +332,6 @@ function AppointmentsPage() {
           onOpenChange={(v) => !v && setEditingAppointment(null)}
           businessId={business.id}
           appointment={editingAppointment}
-          businessId={business.id}
         />
       )}
     </div>
@@ -357,9 +356,9 @@ function AppointmentDialog({
 }) {
   const queryClient = useQueryClient();
   const clients = useQuery({
-    queryKey: ["clients", businessId, ""],
-    queryFn: () => fetchClients(businessId),
-    enabled: Boolean(open && businessId),
+    queryKey: ["clients", ""],
+    queryFn: () => fetchClients(),
+    enabled: Boolean(open),
   });
 
   const create = useMutation({
@@ -481,9 +480,9 @@ function EditAppointmentDialog({
 }) {
   const queryClient = useQueryClient();
   const clients = useQuery({
-    queryKey: ["clients", businessId, ""],
-    queryFn: () => fetchClients(businessId),
-    enabled: Boolean(open && businessId),
+    queryKey: ["clients", ""],
+    queryFn: () => fetchClients(),
+    enabled: Boolean(open),
   });
 
   const update = useMutation({

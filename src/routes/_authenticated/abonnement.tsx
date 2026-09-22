@@ -26,6 +26,19 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { SectionTitle } from "@/components/bits";
 import { UpgradeDialog } from "@/components/upgrade-dialog";
 
+// Type pour les transactions de paiement d'abonnement
+type PaymentTransaction = {
+  id: string;
+  business_id: string;
+  plan: string;
+  provider: string;
+  customer_phone: string | null;
+  amount: number;
+  currency: string;
+  status: string;
+  created_at: string;
+};
+
 export const Route = createFileRoute("/_authenticated/abonnement")({
   head: () => ({
     meta: [
@@ -77,14 +90,15 @@ function SubscriptionPage() {
   const transactionsQuery = useQuery({
     queryKey: ["my-transactions"],
     queryFn: async () => {
-      if (!business?.id) return [];
-      const { data, error } = await supabase
+      if (!business?.id) return [] as PaymentTransaction[];
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { data, error } = await (supabase as any)
         .from("payment_transactions")
         .select("*")
         .eq("business_id", business.id)
         .order("created_at", { ascending: false });
       if (error) throw error;
-      return data ?? [];
+      return (data ?? []) as unknown as PaymentTransaction[];
     },
     enabled: Boolean(business?.id),
   });

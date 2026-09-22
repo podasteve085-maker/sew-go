@@ -68,9 +68,9 @@ function CataloguePage() {
   const [currentPhotoIndex, setCurrentPhotoIndex] = useState(0);
 
   const modelsQuery = useQuery({
-    queryKey: ["catalog-models", business?.id, selectedCategory],
-    queryFn: () => fetchCatalogModels(business?.id ?? "", selectedCategory),
-    enabled: Boolean(business?.id),
+    queryKey: ["catalog-models", selectedCategory],
+    queryFn: () => fetchCatalogModels(selectedCategory),
+    enabled: true,
   });
 
   const allModels = modelsQuery.data ?? [];
@@ -99,7 +99,7 @@ function CataloguePage() {
   }, [allModels]);
 
   const deleteMutation = useMutation({
-    mutationFn: (id: string) => deleteCatalogModel(id, business?.id),
+    mutationFn: (id: string) => deleteCatalogModel(id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["catalog-models"] });
       toast.success("Modèle retiré du catalogue");

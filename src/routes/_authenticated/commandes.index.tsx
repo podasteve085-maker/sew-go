@@ -48,9 +48,9 @@ function OrdersPage() {
   const [quotaReason, setQuotaReason] = useState("");
 
   const orders = useQuery({
-    queryKey: ["orders", business?.id],
-    queryFn: () => fetchOrders(business?.id ?? ""),
-    enabled: Boolean(business?.id),
+    queryKey: ["orders"],
+    queryFn: () => fetchOrders(),
+    enabled: true,
   });
 
   const isPro = isProOrAdmin(business);

@@ -319,7 +319,7 @@ export async function deleteClientCascade(clientId: string, businessId?: string)
   // 1. Récupère les avatars client
   const { data: clientData } = await supabase
     .from("clients")
-    .select("avatar_url")
+    .select("photo_url")
     .eq("id", clientId)
     .maybeSingle();
 
@@ -342,18 +342,19 @@ export async function deleteClientCascade(clientId: string, businessId?: string)
     photoPaths = (images ?? []).map((img) => img.path).filter(Boolean) as string[];
   }
 
-  // 4. Purge Storage (avatars + photos)
-  const storagePaths = [clientData?.avatar_url, ...photoPaths].filter(Boolean) as string[];
+  // 4. Purge Storage (photo profil + photos commandes)
+  const storagePaths = [clientData?.photo_url, ...photoPaths].filter(Boolean) as string[];
   if (storagePaths.length > 0) {
     await deleteStorageFiles(storagePaths);
   }
 
   // 5. Essaie la suppression via RPC (si disponible en base)
   try {
-    const { error: rpcError } = await supabase.rpc("delete_client_cascade", {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { error: rpcError } = await (supabase.rpc as any)("delete_client_cascade", {
       p_client_id: clientId,
       p_business_id: businessId ?? null,
-    } as never);
+    });
     if (!rpcError) return;
   } catch {
     // RPC non disponible → suppression applicative

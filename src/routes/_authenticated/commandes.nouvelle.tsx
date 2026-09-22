@@ -74,21 +74,21 @@ function NewOrder() {
   const [quotaReason, setQuotaReason] = useState("");
 
   const clients = useQuery({
-    queryKey: ["clients", business?.id, ""],
-    queryFn: () => fetchClients(business?.id ?? ""),
-    enabled: Boolean(business?.id),
+    queryKey: ["clients", ""],
+    queryFn: () => fetchClients(),
+    enabled: true,
   });
   const garments = useQuery({
-    queryKey: ["garment-types", business?.id],
-    queryFn: () => fetchGarmentTypes(business?.id ?? ""),
-    enabled: Boolean(business?.id),
+    queryKey: ["garment-types"],
+    queryFn: () => fetchGarmentTypes(),
+    enabled: true,
   });
 
   // Mesures du client sélectionné
   const clientMeasures = useQuery({
-    queryKey: ["measurements", selectedClientId, business?.id],
-    queryFn: () => fetchMeasurementSets(selectedClientId, business?.id),
-    enabled: Boolean(selectedClientId && business?.id),
+    queryKey: ["measurements", selectedClientId],
+    queryFn: () => fetchMeasurementSets(selectedClientId),
+    enabled: Boolean(selectedClientId),
   });
 
   const latestMeasure = clientMeasures.data?.[0];

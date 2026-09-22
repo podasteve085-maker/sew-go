@@ -74,24 +74,24 @@ function ClientDetail() {
   const [deleteMeasureSetId, setDeleteMeasureSetId] = useState<string | null>(null);
 
   const client = useQuery({
-    queryKey: ["client", clientId, business?.id],
-    queryFn: () => fetchClient(clientId, business?.id),
-    enabled: Boolean(clientId && business?.id),
+    queryKey: ["client", clientId],
+    queryFn: () => fetchClient(clientId),
+    enabled: Boolean(clientId),
   });
   const sets = useQuery({
-    queryKey: ["measurements", clientId, business?.id],
-    queryFn: () => fetchMeasurementSets(clientId, business?.id),
-    enabled: Boolean(clientId && business?.id),
+    queryKey: ["measurements", clientId],
+    queryFn: () => fetchMeasurementSets(clientId),
+    enabled: Boolean(clientId),
   });
   const orders = useQuery({
-    queryKey: ["orders", business?.id, { clientId }],
-    queryFn: () => fetchOrders(business?.id ?? "", { clientId }),
-    enabled: Boolean(business?.id),
+    queryKey: ["orders", { clientId }],
+    queryFn: () => fetchOrders({ clientId }),
+    enabled: Boolean(clientId),
   });
   const appointments = useQuery({
-    queryKey: ["appointments", business?.id, { clientId }],
-    queryFn: () => fetchAppointments(business?.id ?? "", { clientId }),
-    enabled: Boolean(business?.id),
+    queryKey: ["appointments", { clientId }],
+    queryFn: () => fetchAppointments({ clientId }),
+    enabled: Boolean(clientId),
   });
 
   const remove = useMutation({
