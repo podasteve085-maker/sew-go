@@ -2,7 +2,7 @@
   "name": "CouturPro — Gestion d'Atelier de Couture",
   "short_name": "CouturPro",
   "description": "Application professionnelle de gestion pour couturiers : clients, carnet de mesures, commandes, paiements et rendez-vous.",
-  "start_url": "/dashboard",
+  "start_url": "/",
   "scope": "/",
   "display": "standalone",
   "orientation": "portrait-primary",

@@ -73,8 +73,25 @@ function Landing() {
   const [signedIn, setSignedIn] = useState(false);
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data }) => setSignedIn(!!data.session));
+    supabase.auth.getUser().then(({ data }) => setSignedIn(Boolean(data?.user)));
   }, []);
+
+  async function handleSignOut() {
+    if (typeof window !== "undefined") {
+      try {
+        localStorage.clear();
+        sessionStorage.clear();
+      } catch {
+        // ignore
+      }
+    }
+    try {
+      await supabase.auth.signOut({ scope: "global" });
+    } catch {
+      await supabase.auth.signOut();
+    }
+    setSignedIn(false);
+  }
 
   return (
     <div className="min-h-screen bg-background">
@@ -92,10 +109,14 @@ function Landing() {
               <Button asChild variant="secondary" size="sm">
                 <Link to="/dashboard">Mon atelier</Link>
               </Button>
-              <Button asChild variant="ghost" size="sm" className="text-xs text-muted-foreground hover:text-foreground">
-                <Link to="/auth" search={{ reconnect: true }}>
-                  Changer de compte
-                </Link>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={handleSignOut}
+                className="text-xs text-muted-foreground hover:text-destructive cursor-pointer"
+                title="Fermer la session sur cet appareil"
+              >
+                Se déconnecter
               </Button>
             </>
           ) : (
@@ -121,7 +142,7 @@ function Landing() {
             <div className="mt-7 flex flex-wrap gap-3">
               <Button asChild size="lg">
                 <Link to={signedIn ? "/dashboard" : "/auth"}>
-                  Ouvrir mon atelier <ArrowRight className="ml-1 size-4" />
+                  {signedIn ? "Accéder à mon atelier" : "Commencer gratuitement"} <ArrowRight className="ml-1 size-4" />
                 </Link>
               </Button>
               <Button asChild size="lg" variant="outline">

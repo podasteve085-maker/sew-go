@@ -113,17 +113,19 @@ export function AppShell({ children }: { children: ReactNode }) {
     <div className="min-h-screen bg-background">
       {/* Barre latérale — ordinateur / tablette */}
       <aside className="fixed inset-y-0 left-0 z-30 hidden w-64 flex-col bg-sidebar text-sidebar-foreground lg:flex">
-        <div className="flex items-center gap-2 px-5 py-5">
-          <StoredImage
-            path={business?.logo_url}
-            alt="Logo atelier"
-            className="size-9 rounded-xl object-cover shrink-0"
-            fallback={
-              <span className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-sidebar-primary text-sidebar-primary-foreground">
-                <Scissors className="size-5" />
-              </span>
-            }
-          />
+        <div className="flex items-center gap-2.5 px-5 py-5">
+          <div className="size-9 rounded-xl overflow-hidden shrink-0 border border-sidebar-border/60 bg-sidebar-primary/20 flex items-center justify-center shadow-xs">
+            <StoredImage
+              path={business?.logo_url}
+              alt="Logo atelier"
+              className="size-full object-cover"
+              fallback={
+                <span className="flex size-full items-center justify-center bg-sidebar-primary text-sidebar-primary-foreground">
+                  <Scissors className="size-4.5" />
+                </span>
+              }
+            />
+          </div>
           <div className="min-w-0">
             <p className="truncate font-display text-sm font-semibold">
               {business?.name ?? "Mon atelier"}
@@ -211,16 +213,18 @@ export function AppShell({ children }: { children: ReactNode }) {
               className="flex items-center gap-2 lg:hidden shrink-0 text-left cursor-pointer active:opacity-80"
               title="Voir tous les modules"
             >
-              <StoredImage
-                path={business?.logo_url}
-                alt="Logo atelier"
-                className="size-7.5 rounded-lg object-cover shrink-0"
-                fallback={
-                  <span className="flex size-7.5 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground shadow-xs">
-                    <Scissors className="size-3.5" />
-                  </span>
-                }
-              />
+              <div className="size-7.5 rounded-lg overflow-hidden shrink-0 border border-border/70 bg-primary/10 flex items-center justify-center shadow-2xs">
+                <StoredImage
+                  path={business?.logo_url}
+                  alt="Logo atelier"
+                  className="size-full object-cover"
+                  fallback={
+                    <span className="flex size-full items-center justify-center bg-primary text-primary-foreground">
+                      <Scissors className="size-3.5" />
+                    </span>
+                  }
+                />
+              </div>
               <span className="max-w-[6.5rem] xs:max-w-[7.5rem] truncate font-display text-xs font-bold sm:text-sm">
                 {business?.name ?? "Mon atelier"}
               </span>
@@ -344,16 +348,18 @@ export function AppShell({ children }: { children: ReactNode }) {
           {/* En-tête Atelier */}
           <div className="p-4 border-b border-sidebar-border bg-sidebar/50">
             <div className="flex items-center gap-3">
-              <StoredImage
-                path={business?.logo_url}
-                alt="Logo atelier"
-                className="size-11 rounded-xl object-cover ring-2 ring-primary/20 shrink-0"
-                fallback={
-                  <span className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-sidebar-primary text-sidebar-primary-foreground shadow-xs">
-                    <Scissors className="size-5" />
-                  </span>
-                }
-              />
+              <div className="size-11 rounded-xl overflow-hidden shrink-0 border border-sidebar-border/60 bg-sidebar-primary/20 flex items-center justify-center ring-2 ring-primary/20 shadow-xs">
+                <StoredImage
+                  path={business?.logo_url}
+                  alt="Logo atelier"
+                  className="size-full object-cover"
+                  fallback={
+                    <span className="flex size-full items-center justify-center bg-sidebar-primary text-sidebar-primary-foreground">
+                      <Scissors className="size-5" />
+                    </span>
+                  }
+                />
+              </div>
               <div className="min-w-0 flex-1">
                 <p className="truncate font-display text-sm font-bold text-sidebar-foreground">
                   {business?.name ?? "Mon atelier"}
@@ -489,11 +495,27 @@ function SignOutButton({
   async function handleSignOut() {
     onDone?.();
     try {
+      // 1. Annuler toutes les requêtes réseau en vol
       await queryClient.cancelQueries();
+      // 2. Vider l'intégralité du cache TanStack Query
       queryClient.clear();
-      await supabase.auth.signOut();
-      toast.success("Vous avez été déconnecté avec succès.");
+      // 3. Révoquer la session Supabase côté serveur (toutes les sessions de l'utilisateur)
+      try {
+        await supabase.auth.signOut({ scope: "global" });
+      } catch {
+        await supabase.auth.signOut();
+      }
     } finally {
+      // 4. Détruire tous les jetons et données persistés dans le navigateur
+      if (typeof window !== "undefined") {
+        try {
+          localStorage.clear();
+          sessionStorage.clear();
+        } catch {
+          // ignore — certains navigateurs restreignent l'accès en mode privé
+        }
+      }
+      // 5. Rechargement dur pour détruire tout état mémoire React/TanStack
       window.location.href = "/auth";
     }
   }

@@ -10,7 +10,7 @@ const OFFLINE_FALLBACK = "/offline.html";
 /** Ressources pré-mises en cache à l'installation (shell statique) */
 const PRECACHE_ASSETS = [
   "/",
-  "/dashboard",
+  "/offline.html",
   "/manifest.webmanifest",
   "/favicon.svg",
   "/favicon.ico",
@@ -24,7 +24,16 @@ self.addEventListener("install", (event) => {
   event.waitUntil(
     caches
       .open(CACHE_NAME)
-      .then((cache) => cache.addAll(PRECACHE_ASSETS))
+      .then(async (cache) => {
+        // Met en cache chaque ressource individuellement pour qu'une ressource manquante n'annule pas l'installation
+        await Promise.allSettled(
+          PRECACHE_ASSETS.map((url) =>
+            cache.add(url).catch((err) => {
+              console.warn("[PWA SW] Ressource non pré-cachée :", url, err);
+            })
+          )
+        );
+      })
       .then(() => self.skipWaiting())
   );
 });

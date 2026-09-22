@@ -60,8 +60,6 @@ function AuthPage() {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
   const [mode, setMode] = useState<"tabs" | "forgot" | "update_password">("tabs");
-  const [activeSession, setActiveSession] = useState<{ email: string; businessName?: string } | null>(null);
-
   // Champs formulaires
   const [signInEmail, setSignInEmail] = useState("");
   const [resetEmail, setResetEmail] = useState("");
@@ -81,26 +79,17 @@ function AuthPage() {
 
     // 2. Si l'utilisateur demande explicitement une déconnexion pour changer de compte
     if (logout || reconnect) {
-      supabase.auth.signOut().then(() => {
-        setActiveSession(null);
-      });
+      if (typeof window !== "undefined") {
+        try {
+          localStorage.clear();
+          sessionStorage.clear();
+        } catch {
+          // ignore
+        }
+      }
+      supabase.auth.signOut({ scope: "local" }).catch(() => {});
       return;
     }
-
-    // 3. Vérification de session active existante
-    supabase.auth.getSession().then(async ({ data }) => {
-      if (data.session?.user) {
-        const email = data.session.user.email ?? "";
-        // Récupérer le nom de l'atelier pour l'affichage de garde
-        const { data: b } = await supabase
-          .from("businesses")
-          .select("name")
-          .eq("owner_id", data.session.user.id)
-          .maybeSingle();
-
-        setActiveSession({ email, ...(b?.name ? { businessName: b.name } : {}) });
-      }
-    });
 
     // 4. Écoute des événements de récupération de mot de passe
     const {
@@ -451,60 +440,9 @@ function AuthPage() {
               </div>
             )}
 
-            {/* MODE 3 : ONGLETS NORMAUX OU SESSION ACTIVE */}
+            {/* MODE 3 : FORMULAIRE DE CONNEXION / CRÉATION D'ATELIER SÉCURISÉ */}
             {mode === "tabs" && (
-              activeSession ? (
-                <div className="rounded-2xl border border-border bg-card p-6 sm:p-7 shadow-xs space-y-5">
-                  <div className="flex items-center gap-3">
-                    <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-amber-500/15 text-amber-600">
-                      <ShieldCheck className="size-5" />
-                    </span>
-                    <div>
-                      <h2 className="font-display text-base font-bold text-foreground">Session active détectée</h2>
-                      <p className="text-xs text-muted-foreground">
-                        Cet appareil est déjà connecté à un atelier.
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="rounded-xl border border-border bg-muted/40 p-4 space-y-1">
-                    <p className="font-display text-sm font-bold text-foreground">
-                      {activeSession.businessName || "Mon atelier"}
-                    </p>
-                    <p className="text-xs text-muted-foreground">
-                      Compte connecté : <strong className="text-foreground">{activeSession.email}</strong>
-                    </p>
-                  </div>
-
-                  <p className="text-xs text-muted-foreground leading-relaxed">
-                    Pour garantir la confidentialité de votre atelier, confirmez si vous souhaitez accéder à cet atelier ou vous déconnecter pour changer de compte.
-                  </p>
-
-                  <div className="space-y-2 pt-1">
-                    <Button
-                      className="w-full font-bold shadow-xs cursor-pointer h-10"
-                      onClick={() => navigate({ to: "/dashboard", replace: true })}
-                    >
-                      Continuer vers mon atelier →
-                    </Button>
-
-                    <Button
-                      variant="outline"
-                      className="w-full text-xs font-semibold text-destructive hover:bg-destructive/10 hover:text-destructive cursor-pointer h-10"
-                      onClick={async () => {
-                        setLoading(true);
-                        await supabase.auth.signOut();
-                        setActiveSession(null);
-                        setLoading(false);
-                        toast.info("Session fermée. Vous pouvez saisir vos identifiants.");
-                      }}
-                    >
-                      <LogOut className="mr-2 size-3.5" /> Se déconnecter / Utiliser un autre compte
-                    </Button>
-                  </div>
-                </div>
-              ) : (
-                <div className="rounded-2xl border border-border/80 bg-card p-6 sm:p-8 shadow-sm space-y-6">
+              <div className="rounded-2xl border border-border/80 bg-card p-6 sm:p-8 shadow-sm space-y-6">
                   <Tabs defaultValue="signin" className="w-full">
                     <TabsList className="grid w-full grid-cols-2 p-1 bg-muted/70 rounded-xl h-11">
                       <TabsTrigger value="signin" className="rounded-lg font-bold text-xs sm:text-sm">
@@ -693,7 +631,6 @@ function AuthPage() {
                     </TabsContent>
                   </Tabs>
                 </div>
-              )
             )}
           </div>
 

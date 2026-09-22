@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { useState, useEffect, type ReactNode } from "react";
 import { Link } from "@tanstack/react-router";
 import {
   AlertTriangle,
@@ -175,6 +175,9 @@ export function StoredImage({
   fallback?: ReactNode;
 }) {
   const [loadError, setLoadError] = useState(false);
+  useEffect(() => {
+    setLoadError(false);
+  }, [path]);
   const isDirect = Boolean(
     path &&
       (path.startsWith("http://") ||

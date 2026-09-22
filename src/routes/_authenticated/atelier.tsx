@@ -130,28 +130,64 @@ function WorkshopPage() {
           save.mutate(values);
         }}
       >
-        <div className="flex items-center gap-4">
-          {logoPath || business.logo_url ? (
-            <StoredImage
-              path={logoPath ?? business.logo_url}
-              alt="Logo de l'atelier"
-              className="size-20 rounded-2xl object-cover"
-            />
-          ) : (
-            <span className="flex size-20 items-center justify-center rounded-2xl bg-muted text-muted-foreground">
-              <ImageIcon className="size-6" />
-            </span>
-          )}
-          <div className="flex-1">
-            <Label htmlFor="logo">Logo (apparaît sur les reçus)</Label>
+        <div className="flex flex-col sm:flex-row sm:items-center gap-4">
+          <div className="relative size-20 min-w-20 min-h-20 shrink-0 rounded-2xl border-2 border-border/80 bg-muted/20 overflow-hidden flex items-center justify-center shadow-xs">
+            {logoPath || business.logo_url ? (
+              <StoredImage
+                path={logoPath ?? business.logo_url}
+                alt="Logo de l'atelier"
+                className="w-full h-full object-cover"
+                fallback={
+                  <span className="flex size-full items-center justify-center text-muted-foreground">
+                    <ImageIcon className="size-8" />
+                  </span>
+                }
+              />
+            ) : (
+              <span className="flex size-full items-center justify-center text-muted-foreground">
+                <ImageIcon className="size-8" />
+              </span>
+            )}
+            {uploading && (
+              <div className="absolute inset-0 bg-background/80 flex items-center justify-center backdrop-blur-xs">
+                <Loader2 className="size-5 animate-spin text-primary" />
+              </div>
+            )}
+          </div>
+          <div className="flex-1 space-y-1.5">
+            <Label htmlFor="logo" className="font-semibold text-sm">
+              Logo de votre atelier (apparaît sur les reçus et la barre latérale)
+            </Label>
             <Input
               id="logo"
               type="file"
               accept="image/*"
               onChange={onLogo}
               disabled={uploading}
-              className="mt-1.5"
+              className="mt-1 cursor-pointer file:cursor-pointer"
             />
+            <div className="flex items-center justify-between gap-3 pt-0.5">
+              <p className="text-[11px] text-muted-foreground">
+                Format carré recommandé (PNG, JPG, WebP). Automatiquement optimisé.
+              </p>
+              {(logoPath || business.logo_url) && (
+                <button
+                  type="button"
+                  onClick={async () => {
+                    if (business.logo_url) {
+                      await deleteStorageFile(business.logo_url);
+                      await supabase.from("businesses").update({ logo_url: null }).eq("id", business.id);
+                      queryClient.invalidateQueries({ queryKey: ["business"] });
+                    }
+                    setLogoPath(null);
+                    toast.success("Logo retiré");
+                  }}
+                  className="text-xs text-destructive hover:underline font-semibold cursor-pointer shrink-0"
+                >
+                  Supprimer le logo
+                </button>
+              )}
+            </div>
           </div>
         </div>
 
