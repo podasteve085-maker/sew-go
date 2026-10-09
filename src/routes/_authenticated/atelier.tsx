@@ -195,15 +195,32 @@ function WorkshopPage() {
         <div className="grid gap-3 sm:grid-cols-2">
           <div className="space-y-1.5">
             <Label htmlFor="name">Nom de l'atelier *</Label>
-            <Input id="name" name="name" required defaultValue={business.name} />
+            <Input
+              id="name"
+              name="name"
+              required
+              defaultValue={business.name}
+              className="h-11 text-base sm:text-sm rounded-xl font-medium"
+            />
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="owner_name">Nom du couturier</Label>
-            <Input id="owner_name" name="owner_name" defaultValue={business.owner_name ?? ""} />
+            <Input
+              id="owner_name"
+              name="owner_name"
+              defaultValue={business.owner_name ?? ""}
+              className="h-11 text-base sm:text-sm rounded-xl"
+            />
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="phone">Téléphone</Label>
-            <Input id="phone" name="phone" inputMode="tel" defaultValue={business.phone ?? ""} />
+            <Input
+              id="phone"
+              name="phone"
+              inputMode="tel"
+              defaultValue={business.phone ?? ""}
+              className="h-11 text-base sm:text-sm rounded-xl"
+            />
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="whatsapp">WhatsApp</Label>
@@ -212,19 +229,35 @@ function WorkshopPage() {
               name="whatsapp"
               inputMode="tel"
               defaultValue={business.whatsapp ?? ""}
+              className="h-11 text-base sm:text-sm rounded-xl"
             />
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="city">Ville</Label>
-            <Input id="city" name="city" defaultValue={business.city ?? ""} />
+            <Input
+              id="city"
+              name="city"
+              defaultValue={business.city ?? ""}
+              className="h-11 text-base sm:text-sm rounded-xl"
+            />
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="address">Adresse</Label>
-            <Input id="address" name="address" defaultValue={business.address ?? ""} />
+            <Input
+              id="address"
+              name="address"
+              defaultValue={business.address ?? ""}
+              className="h-11 text-base sm:text-sm rounded-xl"
+            />
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="currency">Monnaie</Label>
-            <Input id="currency" name="currency" defaultValue={business.currency} />
+            <Input
+              id="currency"
+              name="currency"
+              defaultValue={business.currency}
+              className="h-11 text-base sm:text-sm rounded-xl"
+            />
           </div>
         </div>
 
@@ -236,6 +269,7 @@ function WorkshopPage() {
             rows={2}
             defaultValue={business.receipt_note ?? ""}
             placeholder="Merci de votre confiance. Aucun remboursement après retrait."
+            className="text-base sm:text-sm rounded-xl"
           />
         </div>
 
@@ -266,10 +300,13 @@ function GarmentTypes({ businessId }: { businessId: string }) {
   const add = useMutation({
     mutationFn: async (values: { name: string; price: string }) => {
       if (!businessId) throw new Error("Atelier non identifié");
+      const parsedPrice = values.price ? Number(values.price) : null;
+      const defaultPrice =
+        parsedPrice !== null && !isNaN(parsedPrice) && parsedPrice >= 0 ? parsedPrice : null;
       const { error } = await supabase.from("garment_types").insert({
         business_id: businessId,
         name: values.name,
-        default_price: values.price ? Number(values.price) : null,
+        default_price: defaultPrice,
       });
       if (error) throw error;
     },
@@ -308,15 +345,26 @@ function GarmentTypes({ businessId }: { businessId: string }) {
           form.reset();
         }}
       >
-        <div className="flex-1 space-y-1.5">
+        <div className="flex-1 space-y-1.5 min-w-[140px]">
           <Label htmlFor="garment-name">Nom</Label>
-          <Input id="garment-name" name="name" placeholder="Boubou brodé" />
+          <Input
+            id="garment-name"
+            name="name"
+            placeholder="Boubou brodé"
+            className="h-11 text-base sm:text-sm rounded-xl"
+          />
         </div>
         <div className="w-36 space-y-1.5">
           <Label htmlFor="garment-price">Prix de base</Label>
-          <Input id="garment-price" name="price" type="number" min={0} />
+          <Input
+            id="garment-price"
+            name="price"
+            type="number"
+            min={0}
+            className="h-11 text-base sm:text-sm rounded-xl font-medium"
+          />
         </div>
-        <Button type="submit" disabled={add.isPending}>
+        <Button type="submit" disabled={add.isPending} className="h-11 rounded-xl shrink-0">
           <Plus className="size-4" /> Ajouter
         </Button>
       </form>
@@ -406,7 +454,12 @@ function Templates({ businessId }: { businessId: string }) {
         <div className="grid gap-3 sm:grid-cols-[1fr_2fr_auto] sm:items-end">
           <div className="space-y-1.5">
             <Label htmlFor="tpl-name">Nom du modèle</Label>
-            <Input id="tpl-name" name="name" placeholder="Femme — robe" />
+            <Input
+              id="tpl-name"
+              name="name"
+              placeholder="Femme — robe"
+              className="h-11 text-base sm:text-sm rounded-xl"
+            />
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="tpl-fields">Mesures</Label>
@@ -414,9 +467,10 @@ function Templates({ businessId }: { businessId: string }) {
               id="tpl-fields"
               name="fields"
               placeholder="Épaule, Poitrine, Taille, Hanche, Longueur"
+              className="h-11 text-base sm:text-sm rounded-xl"
             />
           </div>
-          <Button type="submit" disabled={add.isPending}>
+          <Button type="submit" disabled={add.isPending} className="h-11 rounded-xl shrink-0">
             <Plus className="size-4" /> Ajouter
           </Button>
         </div>

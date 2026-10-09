@@ -15,6 +15,9 @@ import {
   ChevronRight,
   X,
   Crown,
+  Lock,
+  Sparkles,
+  Check,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -55,13 +58,12 @@ function CataloguePage() {
   const { data: business } = useBusiness();
 
   const isPro = isProOrAdmin(business);
-
+  const [upgradeOpen, setUpgradeOpen] = useState(false);
+  const [quotaReason, setQuotaReason] = useState("");
   const [selectedCategory, setSelectedCategory] = useState<string>("all");
   const [searchQuery, setSearchQuery] = useState("");
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingModel, setEditingModel] = useState<CatalogModelRow | null>(null);
-  const [upgradeOpen, setUpgradeOpen] = useState(false);
-  const [quotaReason, setQuotaReason] = useState("");
 
   // Mode Présentation Plein Écran pour le client
   const [presentationModel, setPresentationModel] = useState<CatalogModelRow | null>(null);
@@ -111,11 +113,21 @@ function CataloguePage() {
   });
 
   function handleEdit(model: CatalogModelRow) {
+    if (!isPro) {
+      setQuotaReason("Mode Consultation Lookbook : Vous pouvez librement parcourir et présenter ce modèle à vos clients. Pour modifier vos fiches de modèles, activez CouturPro Pro (dès 2 000 FCFA).");
+      setUpgradeOpen(true);
+      return;
+    }
     setEditingModel(model);
     setDialogOpen(true);
   }
 
   function handleCreate() {
+    if (!isPro) {
+      setQuotaReason("Mode Consultation Lookbook : Vous pouvez librement parcourir et présenter les modèles à vos clients. Pour ajouter vos propres créations dans votre Lookbook, activez CouturPro Pro (dès 2 000 FCFA).");
+      setUpgradeOpen(true);
+      return;
+    }
     setEditingModel(null);
     setDialogOpen(true);
   }
@@ -199,6 +211,29 @@ function CataloguePage() {
         </div>
       </div>
 
+      {/* Bannière Mode Consultation Lookbook — Reassuring & never aggressive */}
+      {!isPro && (
+        <div className="rounded-xl border border-primary/20 bg-primary/5 p-3 sm:p-3.5 text-xs flex flex-wrap items-center justify-between gap-2.5">
+          <div className="flex items-center gap-2 text-foreground">
+            <Sparkles className="size-4 shrink-0 text-primary" />
+            <span>
+              <strong>Mode Consultation Lookbook :</strong> Vous pouvez librement parcourir, présenter en plein écran et partager vos modèles avec vos clients.
+              Passez à Pro pour ajouter vos propres créations.
+            </span>
+          </div>
+          <Button
+            size="sm"
+            onClick={() => {
+              setQuotaReason("Ajoutez et personnalisez les modèles de votre atelier dans votre Lookbook avec CouturPro Pro (dès 2 000 FCFA).");
+              setUpgradeOpen(true);
+            }}
+            className="h-7 text-xs font-bold shadow-xs ml-auto"
+          >
+            <Crown className="mr-1 size-3.5" /> Passer à Pro
+          </Button>
+        </div>
+      )}
+
       {/* Barre de recherche et filtres */}
       <div className="space-y-2.5">
         <div className="relative">
@@ -207,7 +242,7 @@ function CataloguePage() {
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder="Rechercher par nom, tissu (ex: Bazin, Faso Dan Fani, Robe)..."
-            className="h-10 pl-9 pr-8 text-xs sm:text-sm"
+            className="h-11 pl-9 pr-8 text-base sm:text-sm rounded-xl"
           />
           {searchQuery && (
             <button
@@ -401,6 +436,11 @@ function CataloguePage() {
                     <button
                       type="button"
                       onClick={() => {
+                        if (!isPro) {
+                          setQuotaReason("Mode Consultation Lookbook actif. Vos modèles sont protégés contre toute suppression. Passez à Pro pour gérer votre catalogue.");
+                          setUpgradeOpen(true);
+                          return;
+                        }
                         if (confirm(`Voulez-vous retirer le modèle "${model.name}" ?`)) {
                           deleteMutation.mutate(model.id);
                         }
@@ -561,6 +601,7 @@ function CataloguePage() {
           </DialogContent>
         </Dialog>
       )}
+      <UpgradeDialog open={upgradeOpen} onOpenChange={setUpgradeOpen} triggerReason={quotaReason} />
     </div>
   );
 }

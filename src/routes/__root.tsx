@@ -94,9 +94,10 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
         content: "Gérez vos clients, mesures et commandes depuis votre atelier.",
       },
       { name: "twitter:card", content: "summary_large_image" },
-      // PWA — thème et couleurs
-      { name: "theme-color", content: "#b0592c" },
-      { name: "background-color", content: "#fbf9f5" },
+      // PWA — thème et couleurs coordonnées avec le fond de l'application
+      { name: "theme-color", content: "#faf8f5", media: "(prefers-color-scheme: light)" },
+      { name: "theme-color", content: "#1c1917", media: "(prefers-color-scheme: dark)" },
+      { name: "background-color", content: "#faf8f5" },
       // PWA — iOS Safari
       { name: "apple-mobile-web-app-capable", content: "yes" },
       { name: "apple-mobile-web-app-status-bar-style", content: "default" },

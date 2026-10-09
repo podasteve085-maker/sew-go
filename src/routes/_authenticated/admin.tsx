@@ -3,24 +3,20 @@ import { useState, useMemo, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   ShieldAlert,
-  ShieldCheck,
-  Crown,
-  Users,
-  Scissors,
-  Wallet,
   Search,
-  CheckCircle2,
-  Calendar,
-  Sparkles,
   RefreshCw,
   Phone,
+  Crown,
+  Sparkles,
+  Flame,
+  Award,
 } from "lucide-react";
 import { toast } from "sonner";
 
 import { supabase } from "@/integrations/supabase/client";
-import { useBusiness, type SubscriptionPlan } from "@/hooks/use-business";
-import { PLAN_CONFIG } from "@/lib/quotas";
-import { dateFr, fcfa } from "@/lib/format";
+import { useBusiness } from "@/hooks/use-business";
+import { dateFr } from "@/lib/format";
+import { PLAN_CONFIG, type SubscriptionPlan } from "@/lib/quotas";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -56,19 +52,6 @@ type BusinessRow = {
   created_at: string;
 };
 
-type TransactionRow = {
-  id: string;
-  business_id: string;
-  plan: string;
-  amount: number;
-  currency: string;
-  provider: string;
-  customer_phone: string | null;
-  status: string;
-  created_at: string;
-  businesses?: { name: string } | null;
-};
-
 function AdminPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -78,8 +61,7 @@ function AdminPage() {
 
   const isAdmin = currentBusiness?.is_admin === true;
 
-  // 1. Liste de tous les ateliers
-  // 1. Liste de tous les ateliers
+  // 1. Liste de tous les ateliers de la plateforme
   const businessesQuery = useQuery({
     queryKey: ["admin", "businesses"],
     queryFn: async (): Promise<BusinessRow[]> => {
@@ -88,7 +70,11 @@ function AdminPage() {
         .order("created_at", { ascending: false });
 
       if (error) throw error;
-      return (data ?? []) as unknown as BusinessRow[];
+      return (data ?? []).map((row: any) => ({
+        ...row,
+        plan: (row.plan as SubscriptionPlan) || "free",
+        plan_status: row.plan_status || "active",
+      })) as BusinessRow[];
     },
     enabled: isAdmin,
   });
@@ -97,95 +83,71 @@ function AdminPage() {
   const statsQuery = useQuery({
     queryKey: ["admin", "stats"],
     queryFn: async () => {
-      // Tenter d'abord la fonction RPC sécurisée
       try {
         const { data: rpcStats, error: rpcError } = await (supabase.rpc as any)("get_admin_platform_stats");
         if (!rpcError && rpcStats) {
           const parsed = (typeof rpcStats === "string" ? JSON.parse(rpcStats) : rpcStats) as Record<string, number>;
           return {
-            totalClients: Number(parsed["total_clients"] || 0),
-            totalOrders: Number(parsed["total_orders"] || 0),
-            totalRevenue: Number(parsed["total_revenue"] || 0),
+            totalClients: (() => { const v = Number(parsed["total_clients"] || 0); return isNaN(v) ? 0 : v; })(),
+            totalOrders: (() => { const v = Number(parsed["total_orders"] || 0); return isNaN(v) ? 0 : v; })(),
           };
         }
       } catch {
-        // Fallback en cas de fonction non encore déployée
+        // Fallback si la fonction RPC n'est pas disponible
       }
 
-      const [clientsRes, ordersRes, transactionsRes] = await Promise.all([
+      const [clientsRes, ordersRes] = await Promise.all([
         supabase.from("clients").select("id", { count: "exact", head: true }),
         supabase.from("orders").select("id", { count: "exact", head: true }),
-        (supabase as any).from("payment_transactions").select("amount, status"),
       ]);
-
-      const txList = (transactionsRes.data ?? []) as { amount: number; status: string }[];
-      const totalRevenue = txList
-        .filter((t) => t.status === "completed")
-        .reduce((sum, t) => sum + Number(t.amount || 0), 0);
 
       return {
         totalClients: clientsRes.count ?? 0,
         totalOrders: ordersRes.count ?? 0,
-        totalRevenue,
       };
     },
     enabled: isAdmin,
   });
 
-  // 3. Transactions récentes
-  const transactionsQuery = useQuery({
-    queryKey: ["admin", "transactions"],
-    queryFn: async (): Promise<TransactionRow[]> => {
-      const { data, error } = await (supabase as any)
-        .from("payment_transactions")
-        .select("id, business_id, plan, amount, currency, provider, customer_phone, status, created_at, businesses(name)")
-        .order("created_at", { ascending: false })
-        .limit(10);
-
-      if (error) throw error;
-      return (data ?? []) as unknown as TransactionRow[];
-    },
-    enabled: isAdmin,
-  });
-
-  // 4. Mutation pour changer le plan ou les droits d'un atelier en 1 clic
+  // 3. Mutation pour mettre à jour les droits ou le forfait d'un atelier
   const updateBusinessMutation = useMutation({
     mutationFn: async ({
       businessId,
       plan,
-      isAdmin,
+      isAdmin: newIsAdmin,
     }: {
       businessId: string;
       plan?: SubscriptionPlan;
       isAdmin?: boolean;
     }) => {
-      const updates: {
-        plan?: SubscriptionPlan;
-        plan_status?: string;
-        plan_expires_at?: string | null;
-        is_admin?: boolean;
-      } = {};
+      const updates: Record<string, unknown> = {};
 
       if (plan !== undefined) {
-        updates.plan = plan;
-        updates.plan_status = "active";
+        updates["plan"] = plan;
+        updates["plan_status"] = "active";
         const expires = new Date();
-        if (plan === "pro_monthly") {
-          expires.setMonth(expires.getMonth() + 1);
-          updates.plan_expires_at = expires.toISOString();
-        } else if (plan === "pro_yearly") {
-          expires.setFullYear(expires.getFullYear() + 1);
-          updates.plan_expires_at = expires.toISOString();
+        if (plan === "monthly") {
+          expires.setDate(expires.getDate() + 30);
+          updates["plan_expires_at"] = expires.toISOString();
+        } else if (plan === "quarterly") {
+          expires.setDate(expires.getDate() + 90);
+          updates["plan_expires_at"] = expires.toISOString();
+        } else if (plan === "yearly") {
+          expires.setDate(expires.getDate() + 365);
+          updates["plan_expires_at"] = expires.toISOString();
         } else {
-          updates.plan_expires_at = null;
+          updates["plan_expires_at"] = null;
         }
       }
 
-      if (isAdmin !== undefined) {
-        updates.is_admin = isAdmin;
+      if (newIsAdmin !== undefined) {
+        updates["is_admin"] = newIsAdmin;
       }
 
-      const { error } = await (supabase.from("businesses") as any).update(updates).eq("id", businessId);
+      const { error } = await (supabase.from("businesses") as any)
+        .update(updates)
+        .eq("id", businessId);
+
       if (error) throw error;
     },
     onSuccess: () => {
@@ -226,7 +188,9 @@ function AdminPage() {
     });
   }, [businesses, term, filterPlan]);
 
-  const proCount = businesses.filter((b) => b.plan === "pro_monthly" || b.plan === "pro_yearly" || b.plan === "unlimited").length;
+  const proCount = businesses.filter(
+    (b) => (b.plan === "monthly" || b.plan === "quarterly" || b.plan === "yearly") && !b.is_admin
+  ).length;
 
   return (
     <div className="mx-auto max-w-6xl space-y-6 pb-12">
@@ -244,7 +208,7 @@ function AdminPage() {
               </span>
             </div>
             <p className="text-xs text-muted-foreground">
-              Gestion des ateliers, des droits VIP et des flux d'abonnements CouturPro.
+              Supervision des ateliers, gestion des forfaits et des exemptions administrateurs.
             </p>
           </div>
         </div>
@@ -255,7 +219,6 @@ function AdminPage() {
           onClick={() => {
             businessesQuery.refetch();
             statsQuery.refetch();
-            transactionsQuery.refetch();
           }}
         >
           <RefreshCw className="mr-1.5 size-3.5" /> Actualiser
@@ -269,11 +232,11 @@ function AdminPage() {
           <p className="mt-1 font-display text-2xl font-bold text-foreground">
             {businessesQuery.isLoading ? "…" : businesses.length}
           </p>
-          <p className="mt-1 text-[11px] text-muted-foreground">{proCount} abonnés Pro / VIP</p>
+          <p className="mt-1 text-[11px] text-muted-foreground">ateliers enregistrés</p>
         </div>
 
         <div className="card-soft p-4">
-          <p className="text-[11px] font-bold uppercase text-muted-foreground">Abonnés Payants</p>
+          <p className="text-[11px] font-bold uppercase text-muted-foreground">Abonnés Pro Actifs</p>
           <p className="mt-1 font-display text-2xl font-bold text-primary">
             {proCount}
           </p>
@@ -299,7 +262,7 @@ function AdminPage() {
         </div>
       </div>
 
-      {/* Barre de filtre et recherche ateliers */}
+      {/* Barre de recherche et filtrage */}
       <div className="card-soft p-4 space-y-4">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="relative flex-1 max-w-md">
@@ -308,13 +271,13 @@ function AdminPage() {
               placeholder="Rechercher par nom d'atelier, couturier, ville, téléphone..."
               value={term}
               onChange={(e) => setTerm(e.target.value)}
-              className="pl-9 h-9 text-sm"
+              className="pl-9 h-11 text-base sm:text-sm rounded-xl"
             />
           </div>
 
           <div className="flex flex-wrap items-center gap-1.5 text-xs">
-            <span className="font-semibold text-muted-foreground mr-1">Filtrer par plan :</span>
-            {(["all", "free", "pro_monthly", "pro_yearly", "unlimited"] as const).map((p) => (
+            <span className="font-semibold text-muted-foreground mr-1">Filtrer par formule :</span>
+            {(["all", "free", "monthly", "quarterly", "yearly"] as const).map((p) => (
               <button
                 key={p}
                 type="button"
@@ -325,7 +288,7 @@ function AdminPage() {
                     : "bg-muted text-muted-foreground hover:text-foreground"
                 }`}
               >
-                {p === "all" ? "Tous" : PLAN_CONFIG[p]?.label ?? p}
+                {p === "all" ? "Tous" : PLAN_CONFIG[p]?.name ?? p}
               </button>
             ))}
           </div>
@@ -338,9 +301,9 @@ function AdminPage() {
               <tr>
                 <th className="p-3 font-semibold">Atelier & Responsable</th>
                 <th className="p-3 font-semibold">Contact & Ville</th>
-                <th className="p-3 font-semibold">Formule Actuelle</th>
+                <th className="p-3 font-semibold">Formule / Statut</th>
                 <th className="p-3 font-semibold">Expiration</th>
-                <th className="p-3 font-semibold text-right">Action Rapide</th>
+                <th className="p-3 font-semibold text-right">Action</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
@@ -357,123 +320,126 @@ function AdminPage() {
                   </td>
                 </tr>
               ) : (
-                filteredBusinesses.map((b) => (
-                  <tr key={b.id} className="hover:bg-muted/30 transition-colors">
-                    <td className="p-3 font-medium">
-                      <div className="flex items-center gap-2">
-                        <span className="font-bold text-foreground text-sm">{b.name}</span>
-                        {b.is_admin && (
-                          <span className="rounded bg-purple-500/20 px-1.5 py-0.2 text-[10px] font-extrabold text-purple-700 dark:text-purple-300">
-                            ADMIN
+                filteredBusinesses.map((b) => {
+                  const planItem = PLAN_CONFIG[b.plan] ?? PLAN_CONFIG.free;
+                  return (
+                    <tr key={b.id} className="hover:bg-muted/30 transition-colors">
+                      <td className="p-3 font-medium">
+                        <div className="flex items-center gap-2">
+                          <span className="font-bold text-foreground text-sm">{b.name}</span>
+                          {b.is_admin && (
+                            <span className="rounded bg-purple-500/20 px-1.5 py-0.2 text-[10px] font-extrabold text-purple-700 dark:text-purple-300">
+                              ADMIN
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-muted-foreground text-[11px]">{b.owner_name || "Non renseigné"}</p>
+                      </td>
+
+                      <td className="p-3 text-muted-foreground">
+                        <div className="flex items-center gap-1">
+                          <Phone className="size-3" /> {b.phone || "—"}
+                        </div>
+                        <p className="text-[11px]">{b.city || "—"}</p>
+                      </td>
+
+                      <td className="p-3">
+                        {b.is_admin ? (
+                          <span className="inline-flex items-center gap-1 rounded bg-purple-500/15 text-purple-700 dark:text-purple-300 px-2 py-0.5 font-bold">
+                            <Crown className="size-3" /> Exonéré (Admin)
+                          </span>
+                        ) : (
+                          <span
+                            className={`inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-[11px] font-bold ${planItem.badgeColor}`}
+                          >
+                            {b.plan === "yearly" && <Sparkles className="size-3" />}
+                            {b.plan === "quarterly" && <Flame className="size-3" />}
+                            {planItem.badge}
                           </span>
                         )}
-                      </div>
-                      <p className="text-muted-foreground text-[11px]">{b.owner_name || "Non renseigné"}</p>
-                    </td>
+                      </td>
 
-                    <td className="p-3 text-muted-foreground">
-                      <div className="flex items-center gap-1">
-                        <Phone className="size-3" /> {b.phone || "—"}
-                      </div>
-                      <p className="text-[11px]">{b.city || "—"}</p>
-                    </td>
+                      <td className="p-3 text-muted-foreground">
+                        {b.is_admin
+                          ? "Permanent"
+                          : b.plan_expires_at
+                          ? dateFr(b.plan_expires_at)
+                          : "Illimité"}
+                      </td>
 
-                    <td className="p-3">
-                      <span
-                        className={`inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-[11px] font-bold ${
-                          PLAN_CONFIG[b.plan]?.badge ?? "bg-muted"
-                        }`}
-                      >
-                        {b.plan === "unlimited" && <Crown className="size-3 text-purple-600" />}
-                        {b.plan === "pro_yearly" && <Sparkles className="size-3 text-emerald-600" />}
-                        {PLAN_CONFIG[b.plan]?.label ?? b.plan}
-                      </span>
-                    </td>
+                      <td className="p-3 text-right">
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button size="sm" variant="outline" className="h-7 text-xs font-semibold">
+                              Gérer ▾
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end" className="w-56 text-xs">
+                            <DropdownMenuLabel>Gestion du Forfait</DropdownMenuLabel>
+                            <DropdownMenuItem
+                              onClick={() =>
+                                updateBusinessMutation.mutate({
+                                  businessId: b.id,
+                                  plan: "monthly",
+                                })
+                              }
+                            >
+                              ⭐ Activer Pro Mensuel (+30j)
+                            </DropdownMenuItem>
+                            <DropdownMenuItem
+                              onClick={() =>
+                                updateBusinessMutation.mutate({
+                                  businessId: b.id,
+                                  plan: "quarterly",
+                                })
+                              }
+                            >
+                              🔥 Activer Pro Trimestriel (+90j)
+                            </DropdownMenuItem>
+                            <DropdownMenuItem
+                              onClick={() =>
+                                updateBusinessMutation.mutate({
+                                  businessId: b.id,
+                                  plan: "yearly",
+                                })
+                              }
+                            >
+                              ✨ Activer Pro Annuel (+365j)
+                            </DropdownMenuItem>
+                            <DropdownMenuItem
+                              onClick={() =>
+                                updateBusinessMutation.mutate({
+                                  businessId: b.id,
+                                  plan: "free",
+                                })
+                              }
+                              className="text-muted-foreground"
+                            >
+                              🔄 Rétablir en Découverte (Gratuit)
+                            </DropdownMenuItem>
 
-                    <td className="p-3 text-muted-foreground">
-                      {b.plan_expires_at ? dateFr(b.plan_expires_at) : b.plan === "unlimited" ? "À vie" : "Illimité"}
-                    </td>
-
-                    <td className="p-3 text-right">
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <Button size="sm" variant="outline" className="h-7 text-xs font-semibold">
-                            Gérer ▾
-                          </Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end" className="w-56 text-xs">
-                          <DropdownMenuLabel>Abonnement Atelier</DropdownMenuLabel>
-                          <DropdownMenuItem
-                            onClick={() => updateBusinessMutation.mutate({ businessId: b.id, plan: "pro_monthly" })}
-                          >
-                            ⭐ Passer en Pro Mensuel (+30j)
-                          </DropdownMenuItem>
-                          <DropdownMenuItem
-                            onClick={() => updateBusinessMutation.mutate({ businessId: b.id, plan: "pro_yearly" })}
-                          >
-                            ✨ Passer en Pro Annuel (+365j)
-                          </DropdownMenuItem>
-                          <DropdownMenuItem
-                            onClick={() => updateBusinessMutation.mutate({ businessId: b.id, plan: "unlimited" })}
-                            className="text-purple-700 dark:text-purple-300 font-semibold"
-                          >
-                            👑 Accorder VIP Illimité à vie
-                          </DropdownMenuItem>
-                          <DropdownMenuItem
-                            onClick={() => updateBusinessMutation.mutate({ businessId: b.id, plan: "free" })}
-                            className="text-muted-foreground"
-                          >
-                            🔄 Rétablir en Plan Gratuit
-                          </DropdownMenuItem>
-
-                          <DropdownMenuSeparator />
-                          <DropdownMenuLabel>Sécurité & Droits</DropdownMenuLabel>
-                          <DropdownMenuItem
-                            onClick={() => updateBusinessMutation.mutate({ businessId: b.id, isAdmin: !b.is_admin })}
-                            className="text-destructive font-semibold"
-                          >
-                            {b.is_admin ? "Retirer droits Administrateur" : "Nommer Administrateur"}
-                          </DropdownMenuItem>
-                        </DropdownMenuContent>
-                      </DropdownMenu>
-                    </td>
-                  </tr>
-                ))
+                            <DropdownMenuSeparator />
+                            <DropdownMenuLabel>Sécurité & Droits Admin</DropdownMenuLabel>
+                            <DropdownMenuItem
+                              onClick={() =>
+                                updateBusinessMutation.mutate({
+                                  businessId: b.id,
+                                  isAdmin: !b.is_admin,
+                                })
+                              }
+                              className={b.is_admin ? "text-destructive font-semibold" : "font-semibold text-purple-700 dark:text-purple-300"}
+                            >
+                              {b.is_admin ? "Retirer droits Administrateur" : "👑 Nommer Administrateur (Exemption)"}
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      </td>
+                    </tr>
+                  );
+                })
               )}
             </tbody>
           </table>
-        </div>
-      </div>
-
-      {/* Dernières transactions */}
-      <div className="card-soft p-4 space-y-3">
-        <h2 className="font-display text-sm font-bold flex items-center gap-1.5">
-          <Wallet className="size-4 text-primary" /> Derniers flux de paiement reçus
-        </h2>
-
-        <div className="divide-y divide-border/60 text-xs">
-          {transactionsQuery.isLoading ? (
-            <p className="text-muted-foreground py-2">Chargement des transactions…</p>
-          ) : (transactionsQuery.data ?? []).length === 0 ? (
-            <p className="text-muted-foreground py-2">Aucune transaction enregistrée pour l'instant.</p>
-          ) : (
-            (transactionsQuery.data ?? []).map((t) => (
-              <div key={t.id} className="flex items-center justify-between py-2.5">
-                <div>
-                  <p className="font-semibold text-foreground">
-                    {t.businesses?.name || "Atelier"} · <span className="uppercase text-[11px]">{t.plan}</span>
-                  </p>
-                  <p className="text-[11px] text-muted-foreground">
-                    Par {t.provider} {t.customer_phone ? `(${t.customer_phone})` : ""} · {dateFr(t.created_at)}
-                  </p>
-                </div>
-                <div className="text-right">
-                  <span className="font-bold text-foreground">{fcfa(t.amount, t.currency)}</span>
-                  <span className="block text-[10px] text-emerald-600 font-semibold uppercase">{t.status}</span>
-                </div>
-              </div>
-            ))
-          )}
         </div>
       </div>
     </div>

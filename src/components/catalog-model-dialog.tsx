@@ -19,7 +19,7 @@ import { uploadImage } from "@/hooks/use-signed-url";
 import { CATALOG_CATEGORIES, type CatalogCategory } from "@/lib/domain";
 import type { CatalogModelRow } from "@/lib/queries";
 import { StoredImage } from "@/components/bits";
-import { checkCatalogQuota } from "@/lib/quotas";
+import { isProOrAdmin } from "@/lib/quotas";
 import { UpgradeDialog } from "@/components/upgrade-dialog";
 
 const SUGGESTED_TAGS = [
@@ -122,29 +122,23 @@ export function CatalogModelDialog({ open, onOpenChange, model }: CatalogModelDi
       if (!business) throw new Error("Atelier non identifié");
       if (!name.trim()) throw new Error("Le nom du modèle est obligatoire");
 
-      if (!isEdit) {
-        // Contrôle strict du quota de modèles du catalogue pour le plan Gratuit
-        const { count, error: countErr } = await supabase
-          .from("catalog_models")
-          .select("id", { count: "exact", head: true })
-          .eq("business_id", business.id);
-
-        if (!countErr && typeof count === "number") {
-          const quota = checkCatalogQuota(business, count);
-          if (!quota.allowed) {
-            setQuotaReason(quota.message || "Limite de modèles atteinte.");
-            setUpgradeOpen(true);
-            throw new Error(quota.message || "Limite de modèles atteinte.");
-          }
-        }
+      if (!isProOrAdmin(business)) {
+        const msg = "Mode Consultation Lookbook actif. Vous pouvez librement parcourir et présenter vos modèles. Passez à CouturPro Pro pour ajouter ou modifier vos créations dans votre Lookbook.";
+        setQuotaReason(msg);
+        setUpgradeOpen(true);
+        throw new Error(msg);
       }
+
+      const parsedPrice = defaultPrice ? Number(defaultPrice) : null;
+      const validPrice =
+        parsedPrice !== null && !isNaN(parsedPrice) && parsedPrice >= 0 ? parsedPrice : null;
 
       const payload = {
         business_id: business.id,
         name: name.trim(),
         category,
         description: description.trim() || null,
-        default_price: defaultPrice ? Number(defaultPrice) : null,
+        default_price: validPrice,
         fabric_needed: fabricNeeded.trim() || null,
         photo_paths: photoPaths,
         tags,
@@ -217,7 +211,7 @@ export function CatalogModelDialog({ open, onOpenChange, model }: CatalogModelDi
               placeholder="Ex: Boubou 3 pièces broderie royale, Robe sirène..."
               value={name}
               onChange={(e) => setName(e.target.value)}
-              className="h-10 text-sm"
+              className="h-11 text-base sm:text-sm rounded-xl font-medium"
             />
           </div>
 
@@ -260,7 +254,7 @@ export function CatalogModelDialog({ open, onOpenChange, model }: CatalogModelDi
                 placeholder="Ex: 35000"
                 value={defaultPrice}
                 onChange={(e) => setDefaultPrice(e.target.value)}
-                className="h-10 text-sm font-semibold"
+                className="h-11 text-base sm:text-sm rounded-xl font-semibold"
               />
             </div>
             <div className="space-y-1.5">
@@ -272,7 +266,7 @@ export function CatalogModelDialog({ open, onOpenChange, model }: CatalogModelDi
                 placeholder="Ex: 3 pagnes ou 4m Bazin"
                 value={fabricNeeded}
                 onChange={(e) => setFabricNeeded(e.target.value)}
-                className="h-10 text-sm"
+                className="h-11 text-base sm:text-sm rounded-xl"
               />
             </div>
           </div>
@@ -452,7 +446,6 @@ export function CatalogModelDialog({ open, onOpenChange, model }: CatalogModelDi
         </form>
       </DialogContent>
     </Dialog>
-
     <UpgradeDialog
       open={upgradeOpen}
       onOpenChange={setUpgradeOpen}

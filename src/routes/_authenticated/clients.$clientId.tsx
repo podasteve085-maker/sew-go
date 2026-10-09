@@ -1,11 +1,13 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useState, useEffect } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Pencil, Plus, Ruler, Trash2, Loader2, Copy, MessageCircle } from "lucide-react";
+import { ArrowLeft, Pencil, Plus, Ruler, Trash2, Loader2, Copy, MessageCircle, Crown, Eye } from "lucide-react";
 import { toast } from "sonner";
 
 import { supabase } from "@/integrations/supabase/client";
 import { useBusiness } from "@/hooks/use-business";
+import { isProOrAdmin, isSubscriptionExpired } from "@/lib/quotas";
+import { UpgradeDialog } from "@/components/upgrade-dialog";
 import {
   fetchClient,
   fetchMeasurementSets,
@@ -72,6 +74,11 @@ function ClientDetail() {
   const [selectedMeasureSet, setSelectedMeasureSet] = useState<MeasurementSetRow | null>(null);
   const [measureMode, setMeasureMode] = useState<"create" | "edit" | "copy">("create");
   const [deleteMeasureSetId, setDeleteMeasureSetId] = useState<string | null>(null);
+  const [upgradeOpen, setUpgradeOpen] = useState(false);
+  const [quotaReason, setQuotaReason] = useState("");
+
+  const isPro = isProOrAdmin(business);
+  const isExpired = isSubscriptionExpired(business);
 
   const client = useQuery({
     queryKey: ["client", clientId],
@@ -164,6 +171,29 @@ function ClientDetail() {
         <ArrowLeft className="size-4" /> Clients
       </Link>
 
+      {/* Bannière Mode Consultation (abonnement expiré) — Jamais agressive */}
+      {isExpired && !isPro && (
+        <div className="rounded-xl border border-amber-500/40 bg-amber-500/10 p-3.5 text-xs flex flex-wrap items-center justify-between gap-2.5">
+          <div className="flex items-center gap-2">
+            <Eye className="size-4 shrink-0 text-amber-600" />
+            <span className="text-amber-800 dark:text-amber-300">
+              <strong>Mode Consultation :</strong> Les mesures, commandes et coordonnées de ce client restent 100 % accessibles.
+              Réactivez votre Pass Atelier pour enregistrer de nouvelles confections ou modifier des fiches.
+            </span>
+          </div>
+          <Button
+            size="sm"
+            onClick={() => {
+              setQuotaReason("Réactivez votre Pass Atelier pour modifier vos clients et ajouter de nouvelles mesures.");
+              setUpgradeOpen(true);
+            }}
+            className="h-7 text-xs font-bold shadow-xs ml-auto"
+          >
+            <Crown className="mr-1 size-3.5" /> Réactiver mon Pass
+          </Button>
+        </div>
+      )}
+
       <header className="card-soft p-4 sm:p-5">
         <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3 sm:gap-4">
           <div className="flex items-start gap-3 min-w-0">
@@ -201,7 +231,19 @@ function ClientDetail() {
             </div>
           </div>
           <div className="flex items-center gap-2 self-end sm:self-start">
-            <Button variant="outline" size="sm" onClick={() => setEdit(true)} className="h-8 text-xs font-semibold">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                if (isExpired && !isPro) {
+                  setQuotaReason("Mode Consultation actif. Les coordonnées de votre client restent sauvegardées. Réactivez votre Pass Atelier pour modifier cette fiche.");
+                  setUpgradeOpen(true);
+                  return;
+                }
+                setEdit(true);
+              }}
+              className="h-8 text-xs font-semibold"
+            >
               <Pencil className="mr-1 size-3.5" /> Modifier
             </Button>
           </div>
@@ -229,6 +271,11 @@ function ClientDetail() {
               <Button
                 size="sm"
                 onClick={() => {
+                  if (isExpired && !isPro) {
+                    setQuotaReason("Mode Consultation actif. Vos mesures restent consultables et partageables par WhatsApp. Réactivez votre Pass Atelier pour enregistrer de nouvelles mensurations.");
+                    setUpgradeOpen(true);
+                    return;
+                  }
                   setSelectedMeasureSet(null);
                   setMeasureMode("create");
                   setNewMeasure(true);
@@ -249,6 +296,13 @@ function ClientDetail() {
               action={
                 <Button
                   onClick={() => {
+                    if (isExpired && !isPro) {
+                      setQuotaReason(
+                        "Mode Consultation actif. Vos mesures restent consultables et sauvegardées. Réactivez votre Pass Atelier pour enregistrer de nouvelles mensurations."
+                      );
+                      setUpgradeOpen(true);
+                      return;
+                    }
                     setSelectedMeasureSet(null);
                     setMeasureMode("create");
                     setNewMeasure(true);
@@ -287,6 +341,11 @@ function ClientDetail() {
                         className="h-8 px-2 text-xs text-muted-foreground hover:text-foreground"
                         title="Reprendre ce relevé comme base pour de nouvelles mesures"
                         onClick={() => {
+                          if (isExpired && !isPro) {
+                            setQuotaReason("Mode Consultation actif. Vos mesures restent consultables et sauvegardées en sécurité. Réactivez votre Pass Atelier pour reprendre et créer de nouvelles fiches.");
+                            setUpgradeOpen(true);
+                            return;
+                          }
                           setSelectedMeasureSet(set);
                           setMeasureMode("copy");
                           setNewMeasure(true);
@@ -300,6 +359,11 @@ function ClientDetail() {
                         className="h-8 w-8 p-0 text-muted-foreground hover:text-foreground"
                         title="Modifier ce relevé"
                         onClick={() => {
+                          if (isExpired && !isPro) {
+                            setQuotaReason("Mode Consultation actif. Vos mesures restent consultables et sauvegardées en sécurité. Réactivez votre Pass Atelier pour modifier vos fiches.");
+                            setUpgradeOpen(true);
+                            return;
+                          }
                           setSelectedMeasureSet(set);
                           setMeasureMode("edit");
                           setNewMeasure(true);
@@ -312,7 +376,14 @@ function ClientDetail() {
                         size="sm"
                         className="h-8 w-8 p-0 text-muted-foreground hover:text-destructive"
                         title="Supprimer ce relevé"
-                        onClick={() => setDeleteMeasureSetId(set.id)}
+                        onClick={() => {
+                          if (isExpired && !isPro) {
+                            setQuotaReason("Mode Consultation actif. Vos mesures sont protégées contre toute suppression.");
+                            setUpgradeOpen(true);
+                            return;
+                          }
+                          setDeleteMeasureSetId(set.id);
+                        }}
                       >
                         <Trash2 className="size-3.5" />
                       </Button>
@@ -422,7 +493,14 @@ function ClientDetail() {
           <Button
             variant="ghost"
             className="text-destructive hover:bg-destructive/10"
-            onClick={() => setDeleteClientOpen(true)}
+            onClick={() => {
+              if (isExpired && !isPro) {
+                setQuotaReason("Mode Consultation actif. Vos fiches clients et leurs historiques sont protégés contre toute suppression.");
+                setUpgradeOpen(true);
+                return;
+              }
+              setDeleteClientOpen(true);
+            }}
           >
             <Trash2 className="size-4" /> Supprimer le client
           </Button>
@@ -496,6 +574,12 @@ function ClientDetail() {
           />
         </>
       )}
+
+      <UpgradeDialog
+        open={upgradeOpen}
+        onOpenChange={setUpgradeOpen}
+        triggerReason={quotaReason}
+      />
     </div>
   );
 }

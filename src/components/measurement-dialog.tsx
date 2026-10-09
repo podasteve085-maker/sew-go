@@ -23,6 +23,9 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { useBusiness } from "@/hooks/use-business";
+import { checkMeasurementQuota, isSubscriptionExpired } from "@/lib/quotas";
+import { UpgradeDialog } from "@/components/upgrade-dialog";
 
 export function MeasurementDialog({
   open,
@@ -53,12 +56,15 @@ export function MeasurementDialog({
   });
 
   const queryClient = useQueryClient();
+  const { data: business } = useBusiness();
   const [selectedClientId, setSelectedClientId] = useState<string>(initialClientId ?? "");
   const [templateName, setTemplateName] = useState("");
   const [fields, setFields] = useState<{ name: string; value: string }[]>([]);
   const [extraName, setExtraName] = useState("");
   const [notes, setNotes] = useState("");
   const [recordedAt, setRecordedAt] = useState(today());
+  const [upgradeOpen, setUpgradeOpen] = useState(false);
+  const [quotaReason, setQuotaReason] = useState("");
 
   useEffect(() => {
     if (!open) return;
@@ -97,14 +103,41 @@ export function MeasurementDialog({
         throw new Error("Veuillez sélectionner un client.");
       }
 
+      if (mode === "edit") {
+        if (isSubscriptionExpired(business)) {
+          const msg = "Votre atelier est en mode Consultation. Vos mesures restent consultables et sauvegardées en sécurité. Réactivez votre Pass Atelier pour modifier vos fiches existantes.";
+          setQuotaReason(msg);
+          setUpgradeOpen(true);
+          throw new Error(msg);
+        }
+      } else {
+        const { count, error: countErr } = await supabase
+          .from("measurement_sets")
+          .select("id", { count: "exact", head: true })
+          .eq("business_id", businessId);
+
+        if (!countErr && typeof count === "number") {
+          const quota = checkMeasurementQuota(business, count);
+          if (!quota.allowed) {
+            setQuotaReason(quota.message || "Quota de fiches de mesures atteint.");
+            setUpgradeOpen(true);
+            throw new Error(quota.message || "Quota de fiches de mesures atteint.");
+          }
+        }
+      }
+
       const formattedValues = fields
         .filter((f) => f.name.trim())
-        .map((f, i) => ({
-          name: f.name.trim(),
-          value: f.value === "" ? null : Number(f.value.replace(",", ".")),
-          unit: "cm",
-          position: i,
-        }));
+        .map((f, i) => {
+          const raw = f.value.trim().replace(",", ".");
+          const num = raw === "" ? null : Number(raw);
+          return {
+            name: f.name.trim(),
+            value: num !== null && !isNaN(num) ? num : null,
+            unit: "cm",
+            position: i,
+          };
+        });
 
       const setRes = await saveMeasurementSetOffline({
         business_id: businessId,
@@ -170,7 +203,7 @@ export function MeasurementDialog({
                 required
                 value={selectedClientId}
                 onChange={(e) => setSelectedClientId(e.target.value)}
-                className="h-9 w-full rounded-md border border-input bg-card px-3 text-sm"
+                className="h-11 w-full rounded-xl border border-input bg-card px-3 text-base sm:text-sm font-medium focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
               >
                 <option value="">Sélectionner un client…</option>
                 {(clients.data ?? []).map((c) => (
@@ -272,10 +305,12 @@ export function MeasurementDialog({
                 value={extraName}
                 onChange={(e) => setExtraName(e.target.value)}
                 placeholder="Ajouter une mesure libre (ex: Tour de bras, Carrure...)"
+                className="h-11 text-base sm:text-sm rounded-xl"
               />
               <Button
                 type="button"
                 variant="outline"
+                className="h-11 w-11 shrink-0 rounded-xl"
                 onClick={() => {
                   if (!extraName.trim()) return;
                   setFields((prev) => [...prev, { name: extraName.trim(), value: "" }]);
@@ -309,6 +344,12 @@ export function MeasurementDialog({
           </DialogFooter>
         </form>
       </DialogContent>
+
+      <UpgradeDialog
+        open={upgradeOpen}
+        onOpenChange={setUpgradeOpen}
+        triggerReason={quotaReason}
+      />
     </Dialog>
   );
 }

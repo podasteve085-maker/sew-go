@@ -12,6 +12,8 @@ import {
   Printer,
   User,
   Scissors,
+  Crown,
+  Eye,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -24,6 +26,8 @@ import {
   type FullMeasurementSetRow,
 } from "@/lib/queries";
 import { dateFr, fullName, cleanPhone } from "@/lib/format";
+import { isProOrAdmin, checkMeasurementQuota, isSubscriptionExpired, FREE_LIMITS } from "@/lib/quotas";
+import { UpgradeDialog } from "@/components/upgrade-dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -70,6 +74,11 @@ function MeasurementsPage() {
   const [selectedSet, setSelectedSet] = useState<FullMeasurementSetRow | null>(null);
   const [modalMode, setModalMode] = useState<"create" | "edit" | "copy">("create");
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [upgradeOpen, setUpgradeOpen] = useState(false);
+  const [quotaReason, setQuotaReason] = useState("");
+
+  const isPro = isProOrAdmin(business);
+  const isExpired = isSubscriptionExpired(business);
 
   const measurementsQuery = useQuery({
     queryKey: ["measurements"],
@@ -143,6 +152,9 @@ function MeasurementsPage() {
     window.open(url, "_blank");
   }
 
+  const totalMeasurements = (measurementsQuery.data ?? []).length;
+  const measurementQuota = checkMeasurementQuota(business, totalMeasurements);
+
   return (
     <div className="mx-auto max-w-5xl space-y-4 sm:space-y-6">
       {/* Header */}
@@ -155,7 +167,7 @@ function MeasurementsPage() {
             <div className="flex items-center gap-2">
               <h1 className="page-title text-lg sm:text-2xl">Carnet de mesures</h1>
               <span className="rounded-full bg-primary/10 px-2 py-0.5 text-xs font-bold text-primary">
-                {measurementsQuery.data?.length ?? 0}
+                {totalMeasurements}
               </span>
             </div>
           </div>
@@ -166,15 +178,85 @@ function MeasurementsPage() {
 
         <Button
           onClick={() => {
+            if (!measurementQuota.allowed) {
+              setQuotaReason(measurementQuota.message || "Quota de fiches de mesures atteint pour votre formule.");
+              setUpgradeOpen(true);
+              return;
+            }
             setSelectedSet(null);
             setModalMode("create");
             setOpenModal(true);
           }}
           className="h-9 font-bold text-xs sm:h-10 sm:text-sm shadow-xs"
         >
-          <Plus className="mr-1 size-4" /> Nouveau relevé
+          {isExpired && !isPro ? (
+            <><Eye className="mr-1 size-4" /> Mode Consultation</>
+          ) : (
+            <><Plus className="mr-1 size-4" /> Nouveau relevé</>
+          )}
         </Button>
       </header>
+
+      {/* Bannière Mode Consultation (abonnement expiré) — Jamais agressive */}
+      {isExpired && !isPro && (
+        <div className="rounded-xl border border-amber-500/40 bg-amber-500/10 p-3.5 text-xs flex flex-wrap items-center justify-between gap-2.5">
+          <div className="flex items-center gap-2">
+            <Eye className="size-4 shrink-0 text-amber-600" />
+            <span className="text-amber-800 dark:text-amber-300">
+              <strong>Mode Consultation :</strong> Votre carnet de mesures reste 100 % accessible et protégé.
+              Vous pouvez consulter, copier et envoyer toutes vos mesures par WhatsApp.
+              Réactivez votre Pass Atelier pour enregistrer ou modifier des fiches.
+            </span>
+          </div>
+          <Button
+            size="sm"
+            onClick={() => {
+              setQuotaReason("Réactivez votre Pass Atelier pour enregistrer ou modifier de nouvelles fiches de mesures.");
+              setUpgradeOpen(true);
+            }}
+            className="h-7 text-xs font-bold shadow-xs ml-auto"
+          >
+            <Crown className="mr-1 size-3.5" /> Réactiver mon Pass
+          </Button>
+        </div>
+      )}
+
+      {/* Jauge Quota pour la Formule Découverte */}
+      {!isPro && !isExpired && (
+        <div
+          className={`rounded-xl border p-3 text-xs flex flex-wrap items-center justify-between gap-2.5 ${
+            !measurementQuota.allowed
+              ? "border-amber-500/40 bg-amber-500/10 text-amber-800 dark:text-amber-300"
+              : totalMeasurements >= 8
+              ? "border-amber-500/30 bg-amber-50/50 dark:bg-amber-500/5 text-amber-800 dark:text-amber-300"
+              : "border-border bg-card text-muted-foreground"
+          }`}
+        >
+          <div className="flex items-center gap-2">
+            <Ruler className="size-4 shrink-0 text-primary" />
+            <span>
+              Formule Découverte :{" "}
+              <strong className="text-foreground">
+                {totalMeasurements} / {FREE_LIMITS.maxMeasurements} fiches de mesures
+              </strong>
+              {!measurementQuota.allowed
+                ? " — Quota atteint. Vos mesures restent consultables. Passez à Pro pour en ajouter."
+                : ` (${measurementQuota.remaining} restante${measurementQuota.remaining > 1 ? "s" : ""})`}
+            </span>
+          </div>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => {
+              setQuotaReason("Passez à CouturPro Pro pour un carnet de mesures illimité.");
+              setUpgradeOpen(true);
+            }}
+            className="h-7 text-xs font-bold text-primary border-primary/30 hover:bg-primary/10 ml-auto"
+          >
+            <Crown className="mr-1 size-3.5" /> Passer à Pro (Illimité)
+          </Button>
+        </div>
+      )}
 
       {/* Barre de recherche et filtres */}
       <div className="space-y-2.5">
@@ -184,7 +266,7 @@ function MeasurementsPage() {
             value={term}
             onChange={(e) => setTerm(e.target.value)}
             placeholder="Rechercher un client, téléphone ou modèle…"
-            className="h-10 pl-9 pr-8 text-xs sm:text-sm"
+            className="h-11 pl-9 pr-8 text-base sm:text-sm rounded-xl"
           />
           {term && (
             <button
@@ -376,6 +458,11 @@ function MeasurementsPage() {
                       size="sm"
                       className="size-7 sm:size-8 p-0 text-muted-foreground hover:bg-accent hover:text-foreground"
                       onClick={() => {
+                        if (isExpired && !isPro) {
+                          setQuotaReason("Mode Consultation actif. Vos mesures restent consultables et sauvegardées en sécurité. Réactivez votre Pass Atelier pour modifier vos fiches.");
+                          setUpgradeOpen(true);
+                          return;
+                        }
                         setSelectedSet(set);
                         setModalMode("edit");
                         setOpenModal(true);
@@ -388,7 +475,14 @@ function MeasurementsPage() {
                       variant="ghost"
                       size="sm"
                       className="size-7 sm:size-8 p-0 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
-                      onClick={() => setDeletingId(set.id)}
+                      onClick={() => {
+                        if (isExpired && !isPro) {
+                          setQuotaReason("Mode Consultation actif. Vos mesures sont protégées contre toute suppression.");
+                          setUpgradeOpen(true);
+                          return;
+                        }
+                        setDeletingId(set.id);
+                      }}
                       title="Supprimer ce relevé"
                     >
                       <Trash2 className="size-3.5" />
@@ -434,6 +528,12 @@ function MeasurementsPage() {
           mode={modalMode}
         />
       )}
+
+      <UpgradeDialog
+        open={upgradeOpen}
+        onOpenChange={setUpgradeOpen}
+        triggerReason={quotaReason}
+      />
     </div>
   );
 }

@@ -1,8 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
-
-export type SubscriptionPlan = "free" | "pro_monthly" | "pro_yearly" | "unlimited";
-export type SubscriptionStatus = "active" | "past_due" | "canceled" | "trialing";
+import type { SubscriptionPlan, SubscriptionStatus } from "@/lib/quotas";
 
 export type Business = {
   id: string;
@@ -16,9 +14,9 @@ export type Business = {
   currency: string;
   logo_url: string | null;
   receipt_note: string | null;
-  plan: SubscriptionPlan;
-  plan_status: SubscriptionStatus;
-  plan_expires_at: string | null;
+  plan?: SubscriptionPlan;
+  plan_status?: SubscriptionStatus;
+  plan_expires_at?: string | null;
   is_admin: boolean;
 };
 
@@ -80,11 +78,33 @@ export function useBusiness() {
         }
 
         const rawData = data as unknown as Record<string, unknown>;
+
+        // Récupérer le plan depuis Supabase ou le cache local
+        let localSub: { plan?: SubscriptionPlan; expires_at?: string | null } | null = null;
+        if (typeof window !== "undefined") {
+          try {
+            const rawSub = localStorage.getItem(`couturpro_sub_${data.id}`);
+            if (rawSub) localSub = JSON.parse(rawSub);
+          } catch {
+            // ignore
+          }
+        }
+
+        const plan = (rawData["plan"] as SubscriptionPlan) || localSub?.plan || "free";
+        const planExpiresAt = (rawData["plan_expires_at"] as string) || localSub?.expires_at || null;
+
+        let planStatus: SubscriptionStatus = "active";
+        if (rawData["is_admin"]) {
+          planStatus = "admin";
+        } else if (plan !== "free" && planExpiresAt && new Date(planExpiresAt).getTime() <= Date.now()) {
+          planStatus = "expired";
+        }
+
         const result: Business = {
           ...data,
-          plan: (rawData["plan"] as SubscriptionPlan) || "free",
-          plan_status: (rawData["plan_status"] as SubscriptionStatus) || "active",
-          plan_expires_at: (rawData["plan_expires_at"] as string) || null,
+          plan,
+          plan_status: planStatus,
+          plan_expires_at: planExpiresAt,
           is_admin: Boolean(rawData["is_admin"]),
         };
 

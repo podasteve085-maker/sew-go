@@ -70,7 +70,7 @@ function StatsPage() {
   const stats = useMemo(() => {
     const all: OrderRow[] = orders.data ?? [];
     const inMonth = all.filter((o) => monthKey(o.ordered_at) === month);
-    const revenue = inMonth.reduce((s, o) => s + Number(o.price), 0);
+    const revenue = inMonth.reduce((s, o) => { const v = Number(o.price); return s + (isNaN(v) ? 0 : v); }, 0);
     const collected = inMonth.reduce((s, o) => s + paidTotal(o), 0);
     const unpaid = all.reduce((s, o) => s + Math.max(0, balance(o)), 0);
     const delivered = inMonth.filter((o) => o.status === "livree").length;
@@ -87,7 +87,7 @@ function StatsPage() {
     const byClient = new Map<string, number>();
     for (const o of all) {
       const name = o.clients ? `${o.clients.first_name} ${o.clients.last_name}`.trim() : "—";
-      byClient.set(name, (byClient.get(name) ?? 0) + Number(o.price));
+      byClient.set(name, (byClient.get(name) ?? 0) + (isNaN(Number(o.price)) ? 0 : Number(o.price)));
     }
     const topClients = [...byClient.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5);
 
@@ -112,7 +112,7 @@ function StatsPage() {
     const sortedChronological = [...months].sort().slice(-6);
     return sortedChronological.map((m) => {
       const inM = all.filter((o) => monthKey(o.ordered_at) === m);
-      const rev = inM.reduce((s, o) => s + Number(o.price), 0);
+      const rev = inM.reduce((s, o) => { const v = Number(o.price); return s + (isNaN(v) ? 0 : v); }, 0);
       const col = inM.reduce((s, o) => s + paidTotal(o), 0);
       const [y, mm] = m.split("-");
       const d = new Date(Number(y), Number(mm) - 1, 1);
@@ -140,7 +140,7 @@ function StatsPage() {
             value={month}
             onChange={(e) => setMonth(e.target.value)}
             aria-label="Mois"
-            className="h-9 rounded-md border border-input bg-card px-3 text-sm"
+            className="h-11 rounded-xl border border-input bg-card px-3 text-base sm:text-sm font-medium focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
           >
             {months.map((m) => (
               <option key={m} value={m}>
@@ -172,7 +172,7 @@ function StatsPage() {
         </h2>
         <p className="text-xs text-muted-foreground">Historique des 6 derniers mois d'activité.</p>
 
-        <div className="mt-4 h-64 w-full">
+        <div className="mt-4 h-64 w-full min-w-0">
           <ResponsiveContainer width="100%" height="100%">
             <BarChart data={monthlyEvolution} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
               <CartesianGrid strokeDasharray="3 3" opacity={0.2} />

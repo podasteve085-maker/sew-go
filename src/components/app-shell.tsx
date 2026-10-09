@@ -16,9 +16,11 @@ import {
   LogOut,
   Plus,
   BookOpen,
-  Crown,
   ShieldAlert,
   Menu,
+  Crown,
+  Sparkles,
+  Eye,
 } from "lucide-react";
 
 import { supabase } from "@/integrations/supabase/client";
@@ -29,7 +31,7 @@ import { ORDER_STATUS, type OrderStatus } from "@/lib/domain";
 import { Button } from "@/components/ui/button";
 import { StoredImage } from "@/components/bits";
 import { UpgradeDialog } from "@/components/upgrade-dialog";
-import { isProOrAdmin } from "@/lib/quotas";
+import { isProOrAdmin, getSubscriptionStatus, isSubscriptionExpired } from "@/lib/quotas";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { toast } from "sonner";
 import {
@@ -65,6 +67,8 @@ export function AppShell({ children }: { children: ReactNode }) {
   const { data: business } = useBusiness();
   const queryClient = useQueryClient();
   const isPro = isProOrAdmin(business);
+  const isExpired = isSubscriptionExpired(business);
+  const subStatus = getSubscriptionStatus(business);
   const [searchOpen, setSearchOpen] = useState(false);
   const [upgradeOpen, setUpgradeOpen] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -173,13 +177,13 @@ export function AppShell({ children }: { children: ReactNode }) {
           )}
         </nav>
         <div className="space-y-2 p-3">
-          {!isPro && (
-            <div className="rounded-xl border border-primary/20 bg-primary/10 p-3 space-y-1.5">
-              <div className="flex items-center gap-1.5 text-xs font-bold text-primary">
-                <Crown className="size-3.5" /> Plan Gratuit
+          {isExpired && !isPro ? (
+            <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 space-y-1.5">
+              <div className="flex items-center gap-1.5 text-xs font-bold text-amber-800 dark:text-amber-300">
+                <Eye className="size-3.5" /> Mode Consultation
               </div>
               <p className="text-[11px] text-muted-foreground leading-tight">
-                Clients et commandes illimités dès 2 500 F/mois.
+                Toutes vos données restent sauvegardées. Réactivez votre Pass pour créer ou modifier.
               </p>
               <Button
                 asChild
@@ -187,11 +191,29 @@ export function AppShell({ children }: { children: ReactNode }) {
                 className="w-full text-xs h-7 font-bold shadow-xs mt-1"
               >
                 <Link to="/abonnement">
-                  Voir l'abonnement ⭐
+                  Réactiver mon Pass ⭐
                 </Link>
               </Button>
             </div>
-          )}
+          ) : !isPro ? (
+            <div className="rounded-xl border border-primary/20 bg-primary/10 p-3 space-y-1.5">
+              <div className="flex items-center gap-1.5 text-xs font-bold text-primary">
+                <Crown className="size-3.5" /> Formule Découverte
+              </div>
+              <p className="text-[11px] text-muted-foreground leading-tight">
+                Débloquez le Lookbook, clients et commandes illimités dès 2 000 F/mois.
+              </p>
+              <Button
+                asChild
+                size="sm"
+                className="w-full text-xs h-7 font-bold shadow-xs mt-1"
+              >
+                <Link to="/abonnement">
+                  Voir les formules ⭐
+                </Link>
+              </Button>
+            </div>
+          ) : null}
           <div className="flex items-center justify-between px-1 pt-2">
             <span className="text-[10px] font-semibold uppercase tracking-wider text-sidebar-foreground/60">
               Réseau & Sync
@@ -245,42 +267,63 @@ export function AppShell({ children }: { children: ReactNode }) {
               </span>
             </button>
 
-            {/* Barre de recherche responsive */}
+            {/* Recherche : bouton compact sur mobile (<sm), barre complète sur tablette/bureau (>=sm) */}
             <button
               onClick={() => setSearchOpen(true)}
-              className="flex flex-1 items-center gap-2 rounded-full border border-border/80 bg-card/90 px-2.5 py-1.5 text-xs text-muted-foreground transition-all hover:border-primary/40 hover:bg-card sm:px-4 sm:py-2 sm:text-sm lg:max-w-sm cursor-pointer shadow-2xs min-w-0"
-              aria-label="Rechercher"
+              className="hidden sm:flex flex-1 items-center gap-2 rounded-full border border-border/80 bg-card/90 px-3.5 py-1.5 text-xs text-muted-foreground transition-all hover:border-primary/40 hover:bg-card lg:max-w-sm cursor-pointer shadow-2xs min-w-0"
+              aria-label="Rechercher (Ctrl K)"
             >
               <Search className="size-3.5 shrink-0 text-muted-foreground" />
-              <span className="truncate hidden xs:inline">Rechercher…</span>
+              <span className="truncate">Rechercher…</span>
               <kbd className="ml-auto hidden rounded bg-muted px-1.5 py-0.5 text-[0.65rem] font-mono font-medium text-muted-foreground sm:inline-block">
                 Ctrl K
               </kbd>
             </button>
 
-            {/* Badge Pro ou Admin dans l'en-tête */}
-            {business?.is_admin ? (
-              <Link
-                to="/admin"
-                className="rounded-md bg-purple-600 px-1.5 py-0.5 text-[9px] font-extrabold text-white shrink-0"
-              >
-                ADMIN
-              </Link>
-            ) : isPro ? (
-              <Link
-                to="/abonnement"
-                className="inline-flex items-center gap-1 rounded-full bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 border border-emerald-500/30 px-2 py-0.5 text-[10px] font-extrabold shrink-0 active:scale-95"
-              >
-                <Crown className="size-3" /> PRO
-              </Link>
-            ) : (
-              <Link
-                to="/abonnement"
-                className="inline-flex items-center gap-1 rounded-full bg-primary/15 text-primary border border-primary/30 px-2 py-0.5 text-[10px] font-extrabold shrink-0 active:scale-95"
-              >
-                <Crown className="size-3" /> PRO
-              </Link>
-            )}
+            {/* Bouton recherche icône seule sur mobile (<sm) */}
+            <button
+              onClick={() => setSearchOpen(true)}
+              className="sm:hidden flex size-8.5 items-center justify-center rounded-xl border border-border/80 bg-card text-muted-foreground hover:text-foreground active:scale-95 shrink-0 cursor-pointer shadow-2xs ml-auto"
+              aria-label="Rechercher"
+            >
+              <Search className="size-4" />
+            </button>
+
+            {/* Spacer flexible sur mobile pour aérer la barre */}
+            <div className="flex-1 sm:hidden" />
+
+            {/* Badge Pro, Consultation ou Admin dans l'en-tête */}
+            <div className="shrink-0 flex items-center">
+              {business?.is_admin ? (
+                <Link
+                  to="/admin"
+                  className="rounded-md bg-purple-600 px-2 py-0.5 text-[9px] font-extrabold text-white"
+                >
+                  ADMIN
+                </Link>
+              ) : isPro ? (
+                <Link
+                  to="/abonnement"
+                  className="inline-flex items-center gap-1 rounded-full bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 border border-emerald-500/30 px-2 py-0.5 text-[10px] font-extrabold active:scale-95"
+                >
+                  <Crown className="size-3" /> PRO
+                </Link>
+              ) : isExpired ? (
+                <Link
+                  to="/abonnement"
+                  className="inline-flex items-center gap-1 rounded-full bg-amber-500/15 text-amber-800 dark:text-amber-300 border border-amber-500/40 px-2 py-0.5 text-[10px] font-extrabold active:scale-95"
+                >
+                  <Eye className="size-3" /> CONSULTATION
+                </Link>
+              ) : (
+                <Link
+                  to="/abonnement"
+                  className="inline-flex items-center gap-1 rounded-full bg-primary/15 text-primary border border-primary/30 px-2 py-0.5 text-[10px] font-extrabold active:scale-95"
+                >
+                  <Crown className="size-3" /> DÉCOUVERTE
+                </Link>
+              )}
+            </div>
 
             {/* Indicateur de connectivité & Synchronisation compact sur mobile */}
             <div className="shrink-0">
@@ -293,7 +336,8 @@ export function AppShell({ children }: { children: ReactNode }) {
               <ThemeToggle align="end" />
             </div>
 
-            <Button asChild size="sm" className="hidden sm:inline-flex shrink-0 shadow-xs">
+            {/* Bouton Nouvelle Commande visible UNIQUEMENT sur grand écran (md+) pour ne jamais surcharger le mobile */}
+            <Button asChild size="sm" className="hidden md:inline-flex shrink-0 shadow-xs font-semibold">
               <Link to="/commandes/nouvelle">
                 <Plus className="size-4" /> Commande
               </Link>
@@ -343,7 +387,6 @@ export function AppShell({ children }: { children: ReactNode }) {
               pathname.startsWith("/catalogue") ||
               pathname.startsWith("/rendez-vous") ||
               pathname.startsWith("/statistiques") ||
-              pathname.startsWith("/abonnement") ||
               pathname.startsWith("/atelier") ||
               pathname.startsWith("/admin")
                 ? "font-bold text-primary"
@@ -356,7 +399,6 @@ export function AppShell({ children }: { children: ReactNode }) {
                 pathname.startsWith("/catalogue") ||
                 pathname.startsWith("/rendez-vous") ||
                 pathname.startsWith("/statistiques") ||
-                pathname.startsWith("/abonnement") ||
                 pathname.startsWith("/atelier") ||
                 pathname.startsWith("/admin")
                   ? "bg-primary/15 text-primary scale-105"
@@ -404,9 +446,13 @@ export function AppShell({ children }: { children: ReactNode }) {
                     <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 px-2 py-0.5 text-[9px] font-bold">
                       <Crown className="size-2.5" /> PRO ACTIF
                     </span>
+                  ) : isExpired ? (
+                    <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/20 text-amber-800 dark:text-amber-300 border border-amber-500/30 px-2 py-0.5 text-[9px] font-bold">
+                      <Eye className="size-2.5" /> MODE CONSULTATION
+                    </span>
                   ) : (
                     <span className="inline-flex items-center gap-1 rounded-full bg-primary/20 text-primary border border-primary/30 px-2 py-0.5 text-[9px] font-bold">
-                      <Crown className="size-2.5" /> PLAN GRATUIT
+                      <Crown className="size-2.5" /> FORMULE DÉCOUVERTE
                     </span>
                   )}
                 </div>
@@ -466,7 +512,7 @@ export function AppShell({ children }: { children: ReactNode }) {
               </p>
               {[
                 { to: "/statistiques", label: "Statistiques & Finances", icon: BarChart3 },
-                { to: "/abonnement", label: "Mon Abonnement & Quotas", icon: Crown },
+                { to: "/abonnement", label: "Mon Forfait & Quotas", icon: Crown },
                 { to: "/atelier", label: "Mon atelier (Paramètres)", icon: Settings },
               ].map((item) => {
                 const active = pathname.startsWith(item.to);
@@ -588,6 +634,18 @@ function SignOutButton({
 
 function DraggableFab() {
   const navigate = useNavigate();
+  const pathname = useRouterState({ select: (s) => s.location.pathname });
+
+  // Ne JAMAIS afficher le FAB sur les pages de formulaire, de saisie ou de détails
+  // pour garantir une saisie fluide à 100% sans aucun bouton masquant les champs.
+  const isFormOrDetailPage =
+    pathname.includes("/nouvelle") ||
+    pathname.includes("/nouveau") ||
+    pathname === "/abonnement" ||
+    pathname === "/admin" ||
+    pathname.startsWith("/clients/") ||
+    pathname.startsWith("/commandes/");
+
   const [pos, setPos] = useState<{ x: number; y: number } | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const dragInfo = useRef<{
@@ -601,7 +659,7 @@ function DraggableFab() {
   const BUTTON_SIZE = 52;
 
   useEffect(() => {
-    if (typeof window === "undefined") return;
+    if (typeof window === "undefined" || isFormOrDetailPage) return;
 
     const calcDefault = () => {
       const saved = localStorage.getItem("couturpro_fab_pos");
@@ -703,7 +761,7 @@ function DraggableFab() {
     }
   };
 
-  if (!pos) return null;
+  if (isFormOrDetailPage || !pos) return null;
 
   return (
     <button

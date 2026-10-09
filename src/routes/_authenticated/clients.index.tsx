@@ -1,12 +1,12 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useState, useMemo, useDeferredValue } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Plus, Search, MapPin, Phone, MessageCircle, Crown, AlertCircle, Users, Trash2 } from "lucide-react";
+import { Plus, Search, MapPin, Phone, MessageCircle, AlertCircle, Users, Trash2, Crown, Eye } from "lucide-react";
 
 import { fetchClients, deleteClientCascade, type ClientRow } from "@/lib/queries";
 import { useBusiness } from "@/hooks/use-business";
 import { fullName, initials, dateFr, cleanPhone } from "@/lib/format";
-import { isProOrAdmin, checkClientQuota } from "@/lib/quotas";
+import { isProOrAdmin, checkClientQuota, isSubscriptionExpired, FREE_LIMITS } from "@/lib/quotas";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -50,8 +50,6 @@ function ClientsPage() {
   const deferredTerm = useDeferredValue(term);
   const [openNew, setOpenNew] = useState(Boolean(nouveau));
   const [genderFilter, setGenderFilter] = useState<string>("all");
-  const [upgradeOpen, setUpgradeOpen] = useState(false);
-  const [quotaReason, setQuotaReason] = useState("");
   const [clientToDelete, setClientToDelete] = useState<ClientRow | null>(null);
 
   const { data: business } = useBusiness();
@@ -80,7 +78,10 @@ function ClientsPage() {
     },
   });
 
+  const [upgradeOpen, setUpgradeOpen] = useState(false);
+  const [quotaReason, setQuotaReason] = useState("");
   const isPro = isProOrAdmin(business);
+  const isExpired = isSubscriptionExpired(business);
   const totalClients = (clients.data ?? []).length;
   const clientQuota = checkClientQuota(business, totalClients);
 
@@ -91,12 +92,17 @@ function ClientsPage() {
   }, [clients.data, genderFilter]);
 
   function handleOpenNew() {
-    if (!clientQuota.allowed) {
-      setQuotaReason(clientQuota.message || "Limite de 10 clients atteinte.");
+    if (isExpired && !isPro) {
+      setQuotaReason("Mode Consultation actif. Votre carnet de clients reste sécurisé et consultable. Réactivez votre Pass Atelier pour enregistrer de nouveaux clients.");
       setUpgradeOpen(true);
-    } else {
-      setOpenNew(true);
+      return;
     }
+    if (!clientQuota.allowed) {
+      setQuotaReason(clientQuota.message || "Limite atteinte pour la formule actuelle.");
+      setUpgradeOpen(true);
+      return;
+    }
+    setOpenNew(true);
   }
 
   return (
@@ -104,60 +110,87 @@ function ClientsPage() {
       <header className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-2">
           <h1 className="page-title">Clients</h1>
-          <span className="rounded-full bg-primary/10 px-2 py-0.5 text-xs font-bold text-primary">
+          <span className="rounded-full bg-primary/10 px-2.5 py-0.5 text-xs font-bold text-primary">
             {filteredClients.length}
           </span>
         </div>
-        <Button size="sm" onClick={handleOpenNew} className="shadow-xs">
-          <Plus className="size-4" /> Nouveau
+        <Button onClick={handleOpenNew} className="h-10 px-4 rounded-xl font-bold shadow-xs">
+          {isExpired && !isPro ? (
+            <><Eye className="size-4" /> Mode Consultation</>
+          ) : (
+            <><Plus className="size-4" /> Nouveau</>
+          )}
         </Button>
       </header>
 
-      {/* Jauge Quota pour le Plan Gratuit */}
-      {!isPro && (
+      {/* Bannière Mode Consultation (abonnement expiré) — Bienveillante, jamais agressive */}
+      {isExpired && !isPro && (
+        <div className="rounded-2xl border border-amber-500/40 bg-amber-500/10 p-4 text-xs flex flex-wrap items-center justify-between gap-3 shadow-2xs">
+          <div className="flex items-center gap-2.5">
+            <Eye className="size-4.5 shrink-0 text-amber-600" />
+            <span className="text-amber-800 dark:text-amber-300">
+              <strong>Mode Consultation :</strong> Toutes vos fiches clients restent accessibles et consultables.
+              Réactivez votre Pass Atelier pour créer ou modifier des fiches.
+            </span>
+          </div>
+          <Button
+            size="sm"
+            onClick={() => {
+              setQuotaReason("Réactivez votre Pass Atelier pour enregistrer de nouveaux clients et modifier vos fiches existantes.");
+              setUpgradeOpen(true);
+            }}
+            className="h-8 px-3 rounded-lg text-xs font-bold shadow-xs ml-auto"
+          >
+            <Crown className="mr-1 size-3.5" /> Réactiver mon Pass
+          </Button>
+        </div>
+      )}
+
+      {/* Jauge Quota pour la Formule Découverte — Informative, jamais bloquante sur la consultation */}
+      {!isPro && !isExpired && (
         <div
-          className={`rounded-xl border p-3 text-xs flex flex-wrap items-center justify-between gap-2.5 ${
+          className={`rounded-2xl border p-3.5 text-xs flex flex-wrap items-center justify-between gap-3 shadow-2xs ${
             !clientQuota.allowed
-              ? "border-destructive/40 bg-destructive/10 text-destructive"
-              : totalClients >= 8
               ? "border-amber-500/40 bg-amber-500/10 text-amber-800 dark:text-amber-300"
+              : totalClients >= 8
+              ? "border-amber-500/30 bg-amber-50/50 dark:bg-amber-500/5 text-amber-800 dark:text-amber-300"
               : "border-border bg-card text-muted-foreground"
           }`}
         >
           <div className="flex items-center gap-2">
             <Users className="size-4 shrink-0 text-primary" />
             <span>
-              Quota formule Gratuite :{" "}
+              Formule Découverte :{" "}
               <strong className="text-foreground">
-                {totalClients} / 10 clients
+                {totalClients} / {FREE_LIMITS.maxClients} clients
               </strong>
               {!clientQuota.allowed
-                ? " — Limite atteinte ! Passez à Pro pour continuer."
-                : ` (${10 - totalClients} restants)`}
+                ? " — Quota atteint. Vos clients restent consultables. Passez à Pro pour en ajouter."
+                : ` (${clientQuota.remaining} restant${clientQuota.remaining > 1 ? "s" : ""})`}
             </span>
           </div>
           <Button
             size="sm"
             variant="outline"
             onClick={() => {
-              setQuotaReason("Passez à CouturPro pour enregistrer un nombre illimité de clients.");
+              setQuotaReason("Passez à CouturPro Pro pour enregistrer des clients en illimité.");
               setUpgradeOpen(true);
             }}
-            className="h-7 text-xs font-bold text-primary border-primary/30 hover:bg-primary/10 ml-auto"
+            className="h-8 px-3 rounded-lg text-xs font-bold text-primary border-primary/30 hover:bg-primary/10 ml-auto"
           >
             <Crown className="mr-1 size-3.5" /> Passer à Pro (Illimité)
           </Button>
         </div>
       )}
 
-      <div className="flex flex-col gap-2.5 sm:flex-row sm:items-center">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
         <div className="relative flex-1">
-          <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+          <Search className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
           <Input
             value={term}
             onChange={(e) => setTerm(e.target.value)}
             placeholder="Rechercher nom ou téléphone…"
-            className="pl-9 h-9 text-xs sm:text-sm"
+            className="pl-10 h-11 sm:h-12 text-base sm:text-sm rounded-xl bg-card border-border/80 shadow-2xs"
           />
         </div>
 
@@ -283,6 +316,11 @@ function ClientsPage() {
                   type="button"
                   onClick={(e) => {
                     e.stopPropagation();
+                    if (isExpired && !isPro) {
+                      setQuotaReason("Mode Consultation actif. Vos fiches clients et leurs données sont protégées contre toute suppression.");
+                      setUpgradeOpen(true);
+                      return;
+                    }
                     setClientToDelete(c);
                   }}
                   className="inline-flex size-7.5 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-destructive/15 hover:text-destructive active:scale-95 cursor-pointer"

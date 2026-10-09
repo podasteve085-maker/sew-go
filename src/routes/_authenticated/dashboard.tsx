@@ -26,7 +26,7 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { StatCard, EmptyState, SectionTitle, OrderCard, LateBadge } from "@/components/bits";
 import { UpgradeDialog } from "@/components/upgrade-dialog";
-import { isProOrAdmin } from "@/lib/quotas";
+import { isProOrAdmin, isSubscriptionExpired, FREE_LIMITS } from "@/lib/quotas";
 
 export const Route = createFileRoute("/_authenticated/dashboard")({
   head: () => ({
@@ -51,12 +51,13 @@ function Dashboard() {
     queryKey: ["clients-count", business?.id],
     enabled: Boolean(business?.id),
     queryFn: async () => {
+      if (!business?.id) return 0;
       try {
         if (typeof navigator === "undefined" || navigator.onLine) {
           const { count, error } = await supabase
             .from("clients")
             .select("id", { count: "exact", head: true })
-            .eq("business_id", business!.id);
+            .eq("business_id", business.id);
           if (!error && count !== null) return count;
         }
       } catch {
@@ -64,7 +65,7 @@ function Dashboard() {
       }
       const { getAllLocalItems } = await import("@/lib/offline-storage");
       const local = await getAllLocalItems<{ business_id: string }>("clients");
-      return local.filter((c) => c.business_id === business!.id).length;
+      return local.filter((c) => c.business_id === business.id).length;
     },
   });
 
@@ -98,8 +99,10 @@ function Dashboard() {
     .slice(0, 5);
 
   const [upgradeOpen, setUpgradeOpen] = useState(false);
-  const currentMonthStr = new Date().toISOString().slice(0, 7);
-  const ordersThisMonth = all.filter((o) => (o.ordered_at ?? "").startsWith(currentMonthStr)).length;
+  const isPro = isProOrAdmin(business);
+  const isExpired = isSubscriptionExpired(business);
+  const currentClients = clientsCount.data ?? 0;
+  const currentOrders = all.length;
 
   const rawName = (business?.owner_name ?? "").split(" ")[0];
   const firstName = rawName ? rawName.charAt(0).toUpperCase() + rawName.slice(1) : "";
@@ -113,28 +116,54 @@ function Dashboard() {
         </p>
       </header>
 
-      {/* Jauge des quotas pour le Plan Gratuit */}
-      {!isProOrAdmin(business) && (
-        <div className="rounded-2xl border border-primary/20 bg-gradient-to-r from-primary/10 via-primary/5 to-transparent p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-xs">
+      {/* Mode Consultation (Abonnement expiré) — Rassurant, bienveillant, jamais brutal */}
+      {isExpired && !isPro && (
+        <div className="rounded-2xl border border-amber-500/40 bg-gradient-to-r from-amber-500/15 via-amber-500/5 to-transparent p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-xs">
           <div className="space-y-1">
             <div className="flex items-center gap-2">
-              <span className="rounded-full bg-primary px-2.5 py-0.5 text-[10px] font-extrabold text-primary-foreground">
-                PLAN GRATUIT
+              <span className="rounded-full bg-amber-600 px-2.5 py-0.5 text-[10px] font-extrabold text-white">
+                MODE CONSULTATION
               </span>
-              <span className="text-xs text-muted-foreground font-medium">Formule d'essai atelier</span>
+              <span className="text-xs text-amber-800 dark:text-amber-300 font-medium">Toutes vos données restent 100 % sécurisées et consultables</span>
             </div>
             <p className="font-display text-sm font-bold text-foreground">
-              {clientsCount.data ?? 0} / 10 clients enregistrés · {ordersThisMonth} / 10 commandes ce mois
+              Vos {currentClients} clients, {currentOrders} commandes et fiches de mesures sont entièrement sauvegardés.
             </p>
             <p className="text-xs text-muted-foreground">
-              Passez à CouturPro pour débloquer l'illimité, les statistiques financières et les reçus WhatsApp.
+              Vous pouvez librement consulter, imprimer vos reçus et contacter vos clients. Réactivez votre Pass Atelier pour lancer de nouvelles confections.
             </p>
           </div>
           <Button
             onClick={() => setUpgradeOpen(true)}
-            className="font-bold shrink-0 shadow-xs h-9 text-xs sm:text-sm"
+            className="font-bold shrink-0 shadow-xs h-9 text-xs sm:text-sm bg-primary text-primary-foreground hover:bg-primary/90"
           >
-            <Crown className="mr-1.5 size-4" /> Passer à Pro (dès 2 500 F)
+            <Crown className="mr-1.5 size-4" /> Réactiver mon Pass (dès 2 000 F)
+          </Button>
+        </div>
+      )}
+
+      {/* Jauge des quotas pour la Formule Découverte */}
+      {!isPro && !isExpired && (
+        <div className="rounded-2xl border border-primary/25 bg-gradient-to-r from-primary/10 via-primary/5 to-transparent p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-xs">
+          <div className="space-y-1">
+            <div className="flex items-center gap-2">
+              <span className="rounded-full bg-primary px-2.5 py-0.5 text-[10px] font-extrabold text-primary-foreground">
+                FORMULE DÉCOUVERTE
+              </span>
+              <span className="text-xs text-muted-foreground font-medium">Atelier limité à 10 clients et 10 commandes</span>
+            </div>
+            <p className="font-display text-sm font-bold text-foreground">
+              {currentClients} / {FREE_LIMITS.maxClients} clients · {currentOrders} / {FREE_LIMITS.maxOrders} commandes
+            </p>
+            <p className="text-xs text-muted-foreground">
+              Passez à CouturPro Pro pour débloquer le Lookbook, clients et commandes illimités, et les reçus WhatsApp personnalisés.
+            </p>
+          </div>
+          <Button
+            onClick={() => setUpgradeOpen(true)}
+            className="font-bold shrink-0 shadow-xs h-9 text-xs sm:text-sm bg-primary text-primary-foreground hover:bg-primary/90"
+          >
+            <Crown className="mr-1.5 size-4" /> Passer à Pro (dès 2 000 F)
           </Button>
         </div>
       )}
@@ -376,8 +405,6 @@ function Dashboard() {
           </div>
         </section>
       )}
-
-      {/* Modale d'abonnement / passage à Pro */}
       <UpgradeDialog open={upgradeOpen} onOpenChange={setUpgradeOpen} />
     </div>
   );

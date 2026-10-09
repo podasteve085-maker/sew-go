@@ -1,5 +1,5 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowLeft,
@@ -11,6 +11,13 @@ import {
   CheckCircle2,
   Coins,
   Sparkles,
+  Camera,
+  Trash2,
+  Upload,
+  X,
+  ChevronDown,
+  Calendar,
+  Check,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -33,7 +40,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { StoredImage } from "@/components/bits";
 import { ClientFormDialog } from "@/components/client-form-dialog";
 import { MeasurementDialog } from "@/components/measurement-dialog";
-import { checkOrderQuota } from "@/lib/quotas";
+import { checkOrderQuota, isSubscriptionExpired } from "@/lib/quotas";
 import { UpgradeDialog } from "@/components/upgrade-dialog";
 
 export const Route = createFileRoute("/_authenticated/commandes/nouvelle")({
@@ -106,6 +113,11 @@ function NewOrder() {
   const [images, setImages] = useState<{ path: string; kind: string }[]>([]);
   const [uploading, setUploading] = useState(false);
   const [imageKind, setImageKind] = useState<string>("modele");
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  function removeImage(indexToRemove: number) {
+    setImages((prev) => prev.filter((_, idx) => idx !== indexToRemove));
+  }
 
   const PRESET_GARMENTS = [
     { name: "Boubou", icon: "👔" },
@@ -129,36 +141,45 @@ function NewOrder() {
     mutationFn: async (values: Record<string, string>) => {
       if (!business) throw new Error("no business");
 
-      // Contrôle du quota de commandes du mois en cours pour le plan Gratuit
-      const currentMonthStart = new Date().toISOString().slice(0, 7) + "-01";
+      // Mode Consultation : vérifier si l'abonnement est expiré
+      if (isSubscriptionExpired(business)) {
+        const msg = "Votre atelier est en mode Consultation bienveillant. Vos commandes restent sécurisées et consultables. Réactivez votre Pass Atelier pour lancer de nouvelles confections.";
+        setQuotaReason(msg);
+        setUpgradeOpen(true);
+        throw new Error(msg);
+      }
+
+      // Contrôle strict du quota de commandes pour la formule Découverte
       const { count, error: countErr } = await supabase
         .from("orders")
         .select("id", { count: "exact", head: true })
-        .eq("business_id", business.id)
-        .gte("ordered_at", currentMonthStart);
+        .eq("business_id", business.id);
 
       if (!countErr && typeof count === "number") {
         const quota = checkOrderQuota(business, count);
         if (!quota.allowed) {
-          setQuotaReason(quota.message || "Limite mensuelle de commandes atteinte.");
+          setQuotaReason(quota.message || "Limite de 10 commandes atteinte.");
           setUpgradeOpen(true);
-          throw new Error(quota.message || "Limite mensuelle de commandes atteinte.");
+          throw new Error(quota.message || "Limite de 10 commandes atteinte.");
         }
       }
 
-      const totalVal = Number(values["price"] || 0);
-      const depositVal = Number(values["deposit"] || 0);
+      const rawTotal = Number(values["price"] || 0);
+      const totalVal = isNaN(rawTotal) || rawTotal < 0 ? 0 : rawTotal;
+      const rawDeposit = Number(values["deposit"] || 0);
+      const depositVal = isNaN(rawDeposit) || rawDeposit < 0 ? 0 : rawDeposit;
 
       if (depositVal > totalVal) {
         throw new Error("L'acompte ne peut pas être supérieur au prix total.");
       }
 
+      const rawQty = Number(values["quantity"] || 1);
       const order = await saveOrderOffline({
         business_id: business.id,
         client_id: selectedClientId,
         garment_type: values["garment_type"] ?? "",
         fabric: values["fabric"] || null,
-        quantity: Number(values["quantity"] || 1),
+        quantity: isNaN(rawQty) || rawQty < 1 ? 1 : Math.round(rawQty),
         description: values["description"] || null,
         price: totalVal,
         ordered_at: values["ordered_at"] || today(),
@@ -221,17 +242,25 @@ function NewOrder() {
   }
 
   return (
-    <div className="mx-auto max-w-2xl space-y-6">
-      <Link
-        to="/commandes"
-        className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground"
-      >
-        <ArrowLeft className="size-4" /> Commandes
-      </Link>
-      <h1 className="font-display text-xl font-bold">Nouvelle commande</h1>
+    <div className="mx-auto max-w-3xl space-y-6 pb-16">
+      {/* En-tête aéré et clair */}
+      <div className="space-y-1.5">
+        <Link
+          to="/commandes"
+          className="inline-flex items-center gap-1.5 text-xs sm:text-sm font-semibold text-muted-foreground hover:text-foreground transition-colors py-1"
+        >
+          <ArrowLeft className="size-4" /> Retour aux commandes
+        </Link>
+        <h1 className="font-display text-2xl sm:text-3xl font-extrabold tracking-tight text-foreground">
+          Nouvelle commande
+        </h1>
+        <p className="text-xs sm:text-sm text-muted-foreground">
+          Enregistrez une confection d'atelier, planifiez la date de livraison et suivez l'acompte.
+        </p>
+      </div>
 
       <form
-        className="card-soft space-y-5 p-5"
+        className="space-y-6"
         onSubmit={(e) => {
           e.preventDefault();
           const fd = new FormData(e.currentTarget);
@@ -240,314 +269,526 @@ function NewOrder() {
             values[k] = String(v).trim();
           });
           if (!selectedClientId) {
-            toast.error("Choisissez un client ou créez-en un");
+            toast.error("Veuillez sélectionner un client ou en créer un nouveau");
             return;
           }
           create.mutate(values);
         }}
       >
         {search.model && (
-          <div className="flex items-center justify-between rounded-lg border border-primary/20 bg-primary/10 px-3.5 py-2 text-xs font-semibold text-primary">
-            <span className="flex items-center gap-1.5">
-              <Sparkles className="size-4" /> Modèle Lookbook : <strong>{search.garment || "Sélectionné"}</strong>
+          <div className="flex items-center justify-between rounded-2xl border border-primary/25 bg-gradient-to-r from-primary/15 via-primary/5 to-transparent p-4 text-xs font-semibold text-primary shadow-2xs">
+            <span className="flex items-center gap-2">
+              <Sparkles className="size-4.5 shrink-0" />
+              <span>Modèle sélectionné depuis le Lookbook : <strong>{search.garment || "Modèle"}</strong></span>
             </span>
-            <Link to="/catalogue" className="underline hover:opacity-80">
+            <Link to="/catalogue" className="underline font-bold hover:opacity-80 shrink-0 ml-2">
               Changer
             </Link>
           </div>
         )}
-        {/* Client Selector with inline Create button */}
-        <div className="space-y-1.5">
-          <div className="flex items-center justify-between">
-            <Label htmlFor="client_id">Client *</Label>
-            <button
-              type="button"
-              onClick={() => setOpenNewClient(true)}
-              className="inline-flex items-center gap-1 text-xs font-semibold text-primary hover:underline"
-            >
-              <UserPlus className="size-3.5" /> + Nouveau client
-            </button>
-          </div>
-          <select
-            id="client_id"
-            name="client_id"
-            required
-            value={selectedClientId}
-            onChange={(e) => setSelectedClientId(e.target.value)}
-            className="h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm"
-          >
-            <option value="">Choisir un client…</option>
-            {(clients.data ?? []).map((c) => (
-              <option key={c.id} value={c.id}>
-                {fullName(c)} {c.phone ? `— ${c.phone}` : ""}
-              </option>
-            ))}
-          </select>
-        </div>
 
-        {/* Aperçu des mesures du client sélectionné */}
-        {selectedClientId && (
-          <div className="rounded-xl border border-border bg-surface p-3.5">
+        {/* ── SECTION 1 : Client & Choix du modèle ── */}
+        <section className="rounded-2xl border border-border/80 bg-card p-5 sm:p-6 shadow-xs space-y-5">
+          <div className="flex items-center gap-2.5 border-b border-border/70 pb-3.5">
+            <span className="flex size-7 items-center justify-center rounded-xl bg-primary/10 text-primary font-display font-bold text-xs">
+              1
+            </span>
+            <div>
+              <h2 className="font-display text-base font-bold text-foreground">
+                Client & Vêtement
+              </h2>
+              <p className="text-[11px] text-muted-foreground">
+                Associez cette confection au client et précisez le modèle.
+              </p>
+            </div>
+          </div>
+
+          {/* Sélecteur de client */}
+          <div className="space-y-2">
             <div className="flex items-center justify-between">
-              <span className="flex items-center gap-1.5 font-display text-xs font-bold text-foreground">
-                <Ruler className="size-4 text-primary" /> Carnet de mesures du client
-              </span>
+              <Label htmlFor="client_id" className="text-xs sm:text-sm font-semibold">
+                Client de la commande <span className="text-destructive">*</span>
+              </Label>
               <button
                 type="button"
-                onClick={() => setOpenNewMeasure(true)}
-                className="text-xs font-semibold text-primary hover:underline"
+                onClick={() => setOpenNewClient(true)}
+                className="inline-flex items-center gap-1.5 text-xs font-bold text-primary hover:underline cursor-pointer"
               >
-                {latestMeasure ? "+ Nouveau relevé" : "+ Prendre les mesures"}
+                <UserPlus className="size-3.5" /> + Nouveau client
               </button>
             </div>
+            <div className="relative">
+              <select
+                id="client_id"
+                name="client_id"
+                required
+                value={selectedClientId}
+                onChange={(e) => setSelectedClientId(e.target.value)}
+                className="h-11 sm:h-12 w-full appearance-none rounded-xl border border-border/80 bg-background px-3.5 pr-10 text-base sm:text-sm font-medium transition-colors focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20 shadow-2xs"
+              >
+                <option value="">Sélectionnez un client dans votre carnet…</option>
+                {(clients.data ?? []).map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {fullName(c)} {c.phone ? `(${c.phone})` : ""}
+                  </option>
+                ))}
+              </select>
+              <ChevronDown className="pointer-events-none absolute right-3.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+            </div>
+          </div>
 
-            {latestMeasure ? (
-              <div className="mt-2.5 space-y-2">
-                <p className="text-[0.7rem] text-muted-foreground">
-                  Dernier relevé : <strong>{latestMeasure.template_name || latestMeasure.label || "Mesures"}</strong> du {dateFr(latestMeasure.recorded_at)}
-                </p>
-                <div className="grid grid-cols-2 gap-x-3 gap-y-1 sm:grid-cols-3">
-                  {(latestMeasure.measurement_values ?? []).slice(0, 6).map((v) => (
-                    <div key={v.id} className="flex justify-between border-b border-dashed border-border/60 text-xs">
-                      <span className="text-muted-foreground truncate">{v.name}</span>
-                      <span className="font-semibold">{v.value ?? "—"} {v.unit}</span>
-                    </div>
-                  ))}
-                </div>
+          {/* Aperçu des mesures du client sélectionné */}
+          {selectedClientId && (
+            <div className="rounded-xl border border-border/80 bg-muted/30 p-4 space-y-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <span className="flex items-center gap-1.5 font-display text-xs font-bold text-foreground">
+                  <Ruler className="size-4 text-primary" /> Fiche de mesures du client
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setOpenNewMeasure(true)}
+                  className="text-xs font-bold text-primary hover:underline cursor-pointer"
+                >
+                  {latestMeasure ? "+ Nouveau relevé" : "+ Prendre les mesures"}
+                </button>
               </div>
-            ) : (
-              <p className="mt-1.5 text-xs text-muted-foreground">
-                Ce client n'a pas encore de mesures enregistrées. Vous pouvez les saisir maintenant.
+
+              {latestMeasure ? (
+                <div className="space-y-2">
+                  <p className="text-[11px] text-muted-foreground">
+                    Dernière prise de mesure : <strong className="text-foreground">{latestMeasure.template_name || latestMeasure.label || "Mesures"}</strong> du {dateFr(latestMeasure.recorded_at)}
+                  </p>
+                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                    {(latestMeasure.measurement_values ?? []).slice(0, 6).map((v) => (
+                      <div key={v.id} className="flex justify-between items-center rounded-lg bg-card/80 px-2.5 py-1.5 border border-border/60 text-xs">
+                        <span className="text-muted-foreground truncate">{v.name}</span>
+                        <span className="font-bold text-foreground ml-1">{v.value ?? "—"} {v.unit}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : (
+                <p className="text-xs text-muted-foreground">
+                  Aucune mesure enregistrée pour ce client. Cliquez sur <strong>+ Prendre les mesures</strong> pour les enregistrer immédiatement.
+                </p>
+              )}
+            </div>
+          )}
+
+          {/* Modèles fréquents (chips tactiles 1-clic) */}
+          <div className="space-y-2 pt-1">
+            <Label className="text-xs text-muted-foreground font-medium">
+              Modèles fréquents (toucher pour remplir automatiquement) :
+            </Label>
+            <div className="flex flex-wrap gap-2">
+              {PRESET_GARMENTS.map((g) => {
+                const isSelected = garmentType.toLowerCase() === g.name.toLowerCase();
+                return (
+                  <button
+                    key={g.name}
+                    type="button"
+                    onClick={() => onGarmentChange(g.name)}
+                    className={`inline-flex items-center gap-1.5 rounded-full px-3.5 py-2 text-xs font-semibold transition-all active:scale-95 cursor-pointer ${
+                      isSelected
+                        ? "bg-primary text-primary-foreground border border-primary shadow-xs"
+                        : "bg-background text-foreground border border-border hover:bg-muted/60"
+                    }`}
+                  >
+                    <span>{g.icon}</span>
+                    <span>{g.name}</span>
+                    {isSelected && <Check className="size-3.5 ml-0.5" />}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Vêtement, Tissu et Quantité */}
+          <div className="grid gap-4 sm:grid-cols-2 pt-1">
+            <div className="space-y-1.5">
+              <Label htmlFor="garment_type" className="text-xs sm:text-sm font-semibold">
+                Type de vêtement <span className="text-destructive">*</span>
+              </Label>
+              <input
+                id="garment_type"
+                name="garment_type"
+                required
+                value={garmentType}
+                onChange={(e) => onGarmentChange(e.target.value)}
+                list="garment-list"
+                className="h-11 sm:h-12 w-full rounded-xl border border-border/80 bg-background px-3.5 text-base sm:text-sm transition-colors focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20 shadow-2xs"
+                placeholder="Ex : Boubou 3 pièces, Robe cocktail…"
+              />
+              <datalist id="garment-list">
+                {(garments.data ?? []).map((g) => (
+                  <option key={g.id} value={g.name}>
+                    {g.default_price ? `${g.default_price} FCFA` : ""}
+                  </option>
+                ))}
+              </datalist>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="fabric" className="text-xs sm:text-sm font-semibold">
+                Tissu / Pagne
+              </Label>
+              <Input
+                id="fabric"
+                name="fabric"
+                placeholder="Ex : Faso Dan Fani, Bazin riche, Wax hollandais…"
+                value={fabric}
+                onChange={(e) => setFabric(e.target.value)}
+                className="h-11 sm:h-12 rounded-xl text-base sm:text-sm bg-background shadow-2xs"
+              />
+            </div>
+
+            <div className="space-y-1.5 sm:col-span-2">
+              <Label htmlFor="quantity" className="text-xs sm:text-sm font-semibold">
+                Nombre de pièces (quantité)
+              </Label>
+              <Input
+                id="quantity"
+                name="quantity"
+                type="number"
+                min={1}
+                defaultValue={1}
+                className="h-11 sm:h-12 rounded-xl text-base sm:text-sm bg-background max-w-xs shadow-2xs"
+              />
+            </div>
+          </div>
+        </section>
+
+        {/* ── SECTION 2 : Tarification, Délais & Règlement ── */}
+        <section className="rounded-2xl border border-border/80 bg-card p-5 sm:p-6 shadow-xs space-y-5">
+          <div className="flex items-center gap-2.5 border-b border-border/70 pb-3.5">
+            <span className="flex size-7 items-center justify-center rounded-xl bg-primary/10 text-primary font-display font-bold text-xs">
+              2
+            </span>
+            <div>
+              <h2 className="font-display text-base font-bold text-foreground">
+                Prix, Délais & Acompte
+              </h2>
+              <p className="text-[11px] text-muted-foreground">
+                Fixez le tarif de couture, le délai promis et enregistrez l'avance.
+              </p>
+            </div>
+          </div>
+
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div className="space-y-1.5">
+              <Label htmlFor="price" className="text-xs sm:text-sm font-semibold">
+                Prix total de la commande (FCFA) <span className="text-destructive">*</span>
+              </Label>
+              <Input
+                id="price"
+                name="price"
+                type="number"
+                min={0}
+                required
+                inputMode="numeric"
+                value={price}
+                onChange={(e) => setPrice(e.target.value)}
+                placeholder="Ex : 25 000"
+                className="h-11 sm:h-12 rounded-xl text-base sm:text-sm font-extrabold bg-background shadow-2xs"
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="deposit" className="text-xs sm:text-sm font-semibold">
+                Acompte versé à la commande (FCFA)
+              </Label>
+              <Input
+                id="deposit"
+                name="deposit"
+                type="number"
+                min={0}
+                inputMode="numeric"
+                value={deposit}
+                onChange={(e) => setDeposit(e.target.value)}
+                placeholder="Ex : 10 000"
+                className="h-11 sm:h-12 rounded-xl text-base sm:text-sm font-bold bg-background shadow-2xs"
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="deposit_method" className="text-xs sm:text-sm font-semibold">
+                Mode de paiement de l'acompte
+              </Label>
+              <div className="relative">
+                <select
+                  id="deposit_method"
+                  name="deposit_method"
+                  className="h-11 sm:h-12 w-full appearance-none rounded-xl border border-border/80 bg-background px-3.5 pr-10 text-base sm:text-sm font-medium transition-colors focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20 shadow-2xs"
+                >
+                  {PAYMENT_METHODS.map((m) => (
+                    <option key={m.value} value={m.value}>
+                      {m.label}
+                    </option>
+                  ))}
+                </select>
+                <ChevronDown className="pointer-events-none absolute right-3.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+              </div>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="due_date" className="text-xs sm:text-sm font-semibold">
+                Date de livraison prévue
+              </Label>
+              <Input
+                id="due_date"
+                name="due_date"
+                type="date"
+                defaultValue={addDays(7)}
+                className="h-11 sm:h-12 rounded-xl text-base sm:text-sm bg-background shadow-2xs"
+              />
+            </div>
+
+            <div className="space-y-1.5 sm:col-span-2">
+              <Label htmlFor="ordered_at" className="text-xs sm:text-sm font-semibold">
+                Date de prise de commande
+              </Label>
+              <Input
+                id="ordered_at"
+                name="ordered_at"
+                type="date"
+                defaultValue={today()}
+                className="h-11 sm:h-12 rounded-xl text-base sm:text-sm bg-background max-w-xs shadow-2xs"
+              />
+            </div>
+          </div>
+
+          {/* Synthèse financière intelligente en temps réel */}
+          <div className="rounded-2xl border border-primary/25 bg-gradient-to-br from-primary/10 via-card to-card p-4 sm:p-5 shadow-xs space-y-3">
+            <div className="flex items-center justify-between text-xs font-bold uppercase tracking-wider text-muted-foreground">
+              <span className="flex items-center gap-1.5">
+                <Coins className="size-4 text-primary" /> Synthèse financière en direct
+              </span>
+              {Number(price || 0) > 0 && Number(deposit || 0) >= Number(price || 0) ? (
+                <span className="rounded-full bg-emerald-500/20 text-emerald-700 dark:text-emerald-400 border border-emerald-500/30 px-2 py-0.5 text-[10px] font-bold">
+                  Totalement Réglé
+                </span>
+              ) : Number(deposit || 0) > 0 ? (
+                <span className="rounded-full bg-primary/15 text-primary border border-primary/30 px-2 py-0.5 text-[10px] font-bold">
+                  Acompte versé
+                </span>
+              ) : (
+                <span className="rounded-full bg-muted text-muted-foreground px-2 py-0.5 text-[10px] font-bold">
+                  En attente de paiement
+                </span>
+              )}
+            </div>
+
+            <div className="grid grid-cols-3 gap-2 sm:gap-3 text-center">
+              <div className="rounded-xl bg-card p-3 border border-border/80 shadow-2xs">
+                <p className="text-[10px] uppercase font-bold tracking-wider text-muted-foreground">Prix Total</p>
+                <p className="mt-1 font-display text-sm sm:text-lg font-extrabold text-foreground">
+                  {fcfa(Number(price || 0))}
+                </p>
+              </div>
+
+              <div className="rounded-xl bg-card p-3 border border-border/80 shadow-2xs">
+                <p className="text-[10px] uppercase font-bold tracking-wider text-muted-foreground">Acompte</p>
+                <p className="mt-1 font-display text-sm sm:text-lg font-extrabold text-primary">
+                  {fcfa(Number(deposit || 0))}
+                </p>
+              </div>
+
+              <div
+                className={`rounded-xl p-3 border shadow-2xs ${
+                  Number(deposit || 0) > Number(price || 0)
+                    ? "border-destructive/40 bg-destructive/15 text-destructive"
+                    : Number(price || 0) > 0 && Number(deposit || 0) >= Number(price || 0)
+                    ? "border-emerald-500/40 bg-emerald-500/15 text-emerald-800 dark:text-emerald-300"
+                    : "border-border/80 bg-card text-foreground"
+                }`}
+              >
+                <p className="text-[10px] uppercase font-bold tracking-wider">
+                  {Number(deposit || 0) > Number(price || 0) ? "Dépassement" : "Reste à payer"}
+                </p>
+                <p className="mt-1 font-display text-sm sm:text-lg font-extrabold">
+                  {Number(deposit || 0) > Number(price || 0)
+                    ? "Erreur montant"
+                    : fcfa(Math.max(0, Number(price || 0) - Number(deposit || 0)))}
+                </p>
+              </div>
+            </div>
+
+            {Number(deposit || 0) > Number(price || 0) && (
+              <p className="text-center text-xs font-bold text-destructive">
+                ⚠️ Attention : l'acompte saisi ({fcfa(Number(deposit))}) dépasse le montant total ({fcfa(Number(price))}).
               </p>
             )}
           </div>
-        )}
+        </section>
 
-        {/* Raccourcis visuels rapides vêtements */}
-        <div className="space-y-1.5">
-          <Label className="text-xs text-muted-foreground">Modèles fréquents (1-clic pour choisir) :</Label>
-          <div className="flex flex-wrap gap-1.5">
-            {PRESET_GARMENTS.map((g) => (
-              <button
-                key={g.name}
-                type="button"
-                onClick={() => onGarmentChange(g.name)}
-                className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-semibold transition-all active:scale-95 ${
-                  garmentType.toLowerCase() === g.name.toLowerCase()
-                    ? "border-primary bg-primary text-primary-foreground shadow-xs"
-                    : "border-border bg-card text-foreground hover:bg-muted"
-                }`}
-              >
-                <span>{g.icon}</span>
-                <span>{g.name}</span>
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <div className="grid gap-3 sm:grid-cols-2">
-          <div className="space-y-1.5">
-            <Label htmlFor="garment_type">Vêtement *</Label>
-            <input
-              id="garment_type"
-              name="garment_type"
-              required
-              value={garmentType}
-              onChange={(e) => onGarmentChange(e.target.value)}
-              list="garment-list"
-              className="h-10 w-full rounded-md border border-input bg-transparent px-3 text-base sm:text-sm"
-              placeholder="Boubou, Faso Dan Fani, Robe…"
-            />
-            <datalist id="garment-list">
-              {(garments.data ?? []).map((g) => (
-                <option key={g.id} value={g.name}>
-                  {g.default_price ? `${g.default_price} FCFA` : ""}
-                </option>
-              ))}
-            </datalist>
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="fabric">Tissu</Label>
-            <Input
-              id="fabric"
-              name="fabric"
-              placeholder="Faso Dan Fani, Bazin, Wax…"
-              value={fabric}
-              onChange={(e) => setFabric(e.target.value)}
-              className="h-10 text-base sm:text-sm"
-            />
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="quantity">Quantité</Label>
-            <Input id="quantity" name="quantity" type="number" min={1} defaultValue={1} className="h-10 text-base sm:text-sm" />
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="price">Prix total (FCFA) *</Label>
-            <Input
-              id="price"
-              name="price"
-              type="number"
-              min={0}
-              required
-              inputMode="numeric"
-              value={price}
-              onChange={(e) => setPrice(e.target.value)}
-              placeholder="ex: 35000"
-              className="h-10 text-base font-bold sm:text-sm"
-            />
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="ordered_at">Date de commande</Label>
-            <Input id="ordered_at" name="ordered_at" type="date" defaultValue={today()} className="h-10 text-base sm:text-sm" />
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="due_date">Date de livraison prévue</Label>
-            <Input id="due_date" name="due_date" type="date" defaultValue={addDays(7)} className="h-10 text-base sm:text-sm" />
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="deposit">Acompte versé (FCFA)</Label>
-            <Input
-              id="deposit"
-              name="deposit"
-              type="number"
-              min={0}
-              inputMode="numeric"
-              value={deposit}
-              onChange={(e) => setDeposit(e.target.value)}
-              placeholder="ex: 15000"
-              className="h-10 text-base font-bold sm:text-sm"
-            />
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="deposit_method">Moyen de paiement de l'acompte</Label>
-            <select
-              id="deposit_method"
-              name="deposit_method"
-              className="h-10 w-full rounded-md border border-input bg-card px-3 text-base sm:text-sm"
-            >
-              {PAYMENT_METHODS.map((m) => (
-                <option key={m.value} value={m.value}>
-                  {m.label}
-                </option>
-              ))}
-            </select>
-          </div>
-        </div>
-
-        {/* Calculateur financier visuel en direct */}
-        <div className="rounded-xl border border-border bg-surface p-3.5 sm:p-4">
-          <div className="flex items-center justify-between text-xs font-bold uppercase tracking-wide text-muted-foreground">
-            <span>Synthèse financière</span>
-            <Coins className="size-4 text-primary" />
-          </div>
-          <div className="mt-2.5 grid grid-cols-3 gap-2 text-center">
-            <div className="rounded-lg bg-card p-2 border border-border/60">
-              <p className="text-[0.65rem] uppercase font-semibold text-muted-foreground">Prix total</p>
-              <p className="mt-0.5 font-display text-sm sm:text-base font-bold text-foreground">
-                {fcfa(Number(price || 0))}
-              </p>
-            </div>
-            <div className="rounded-lg bg-card p-2 border border-border/60">
-              <p className="text-[0.65rem] uppercase font-semibold text-muted-foreground">Acompte</p>
-              <p className="mt-0.5 font-display text-sm sm:text-base font-bold text-primary">
-                {fcfa(Number(deposit || 0))}
-              </p>
-            </div>
-            <div
-              className={`rounded-lg p-2 border ${
-                Number(deposit || 0) > Number(price || 0)
-                  ? "border-destructive/40 bg-destructive/15 text-destructive"
-                  : Number(price || 0) > 0 && Number(price || 0) <= Number(deposit || 0)
-                  ? "border-success/40 bg-success/15 text-success"
-                  : "border-border/60 bg-card text-foreground"
-              }`}
-            >
-              <p className="text-[0.65rem] uppercase font-semibold">
-                {Number(deposit || 0) > Number(price || 0) ? "Alerte !" : "Reste à payer"}
-              </p>
-              <p className="mt-0.5 font-display text-sm sm:text-base font-bold">
-                {Number(deposit || 0) > Number(price || 0)
-                  ? "Dépassement"
-                  : fcfa(Math.max(0, Number(price || 0) - Number(deposit || 0)))}
+        {/* ── SECTION 3 : Détails de coupe & Photos du modèle ── */}
+        <section className="rounded-2xl border border-border/80 bg-card p-5 sm:p-6 shadow-xs space-y-5">
+          <div className="flex items-center gap-2.5 border-b border-border/70 pb-3.5">
+            <span className="flex size-7 items-center justify-center rounded-xl bg-primary/10 text-primary font-display font-bold text-xs">
+              3
+            </span>
+            <div>
+              <h2 className="font-display text-base font-bold text-foreground">
+                Consignes d'atelier & Photos
+              </h2>
+              <p className="text-[11px] text-muted-foreground">
+                Instructions particulières pour le coupeur et photos de référence.
               </p>
             </div>
           </div>
-          {Number(deposit || 0) > Number(price || 0) && (
-            <p className="mt-2 text-center text-xs font-bold text-destructive">
-              ⚠️ Attention : l'acompte saisi ({fcfa(Number(deposit))}) est supérieur au prix total ({fcfa(Number(price))}).
-            </p>
-          )}
-        </div>
 
-        <div className="space-y-1.5">
-          <Label htmlFor="description">Description & Style du modèle</Label>
-          <Textarea
-            id="description"
-            name="description"
-            rows={3}
-            placeholder="Détails : manches longues, col rond brodé, doublure coton, poches passepoilées…"
-          />
-        </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="description" className="text-xs sm:text-sm font-semibold">
+              Description & Style souhaité par le client
+            </Label>
+            <Textarea
+              id="description"
+              name="description"
+              rows={3}
+              placeholder="Ex : Col officier brodé fil doré, manches 3/4, poches passepoilées, fentes latérales…"
+              className="rounded-xl text-base sm:text-sm bg-background"
+            />
+          </div>
 
-        <div className="space-y-1.5">
-          <Label htmlFor="notes">Notes d'atelier (internes)</Label>
-          <Textarea
-            id="notes"
-            name="notes"
-            rows={2}
-            placeholder="Observations pour le tailleur ou le coupeur..."
-          />
-        </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="notes" className="text-xs sm:text-sm font-semibold">
+              Notes d'atelier internes (visibles uniquement par votre équipe)
+            </Label>
+            <Textarea
+              id="notes"
+              name="notes"
+              rows={2}
+              placeholder="Ex : Tissu fragile à repasser à basse température, boutonnière contrastée..."
+              className="rounded-xl text-base sm:text-sm bg-background"
+            />
+          </div>
 
-        <div className="space-y-2">
-          <Label>Photos (modèle souhaité, tissu, croquis)</Label>
-          <div className="flex flex-wrap items-center gap-2">
-            <select
-              value={imageKind}
-              onChange={(e) => setImageKind(e.target.value)}
-              className="h-9 rounded-md border border-input bg-transparent px-3 text-sm"
-              aria-label="Type de photo"
-            >
+          {/* Zone Photo Moderne (Zéro input moche par défaut) */}
+          <div className="space-y-3 pt-1">
+            <Label className="text-xs sm:text-sm font-semibold">
+              Photos du modèle, tissu ou croquis (recommandé)
+            </Label>
+
+            {/* Sélecteur de type de photo en pilules */}
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-xs text-muted-foreground">Type :</span>
               {IMAGE_KINDS.map((k) => (
-                <option key={k.value} value={k.value}>
+                <button
+                  key={k.value}
+                  type="button"
+                  onClick={() => setImageKind(k.value)}
+                  className={`rounded-full px-3 py-1 text-xs font-semibold transition-all cursor-pointer ${
+                    imageKind === k.value
+                      ? "bg-primary text-primary-foreground shadow-2xs"
+                      : "bg-muted text-muted-foreground hover:bg-muted/80"
+                  }`}
+                >
                   {k.label}
-                </option>
+                </button>
               ))}
-            </select>
-            <Input
+            </div>
+
+            {/* Input fichier masqué pour déclenchement tactile propre */}
+            <input
+              ref={fileInputRef}
               type="file"
               accept="image/*"
               onChange={onFile}
               disabled={uploading}
-              className="max-w-xs"
+              className="hidden"
             />
-            {uploading && <Loader2 className="size-4 animate-spin text-muted-foreground" />}
-          </div>
-          {images.length > 0 && (
-            <div className="flex flex-wrap gap-2 pt-1">
-              {images.map((img) => (
-                <StoredImage
-                  key={img.path}
-                  path={img.path}
-                  alt="Photo de la commande"
-                  className="size-20 rounded-lg object-cover"
-                />
-              ))}
-            </div>
-          )}
-          {images.length === 0 && (
-            <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
-              <ImageIcon className="size-3.5" /> Optionnel, mais recommandé pour éviter les erreurs de style.
-            </p>
-          )}
-        </div>
 
-        <div className="flex justify-end gap-2">
-          <Button type="button" variant="ghost" asChild>
+            {/* Zone de déclenchement tactile et visuelle */}
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={uploading}
+              className="w-full flex flex-col items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-primary/35 bg-primary/5 hover:bg-primary/10 active:scale-[0.99] p-5 text-center transition-all cursor-pointer disabled:opacity-50"
+            >
+              {uploading ? (
+                <>
+                  <Loader2 className="size-6 animate-spin text-primary" />
+                  <span className="text-xs font-bold text-foreground">Envoi de la photo en cours…</span>
+                </>
+              ) : (
+                <>
+                  <div className="flex size-11 items-center justify-center rounded-2xl bg-primary/15 text-primary shadow-2xs">
+                    <Camera className="size-5.5" />
+                  </div>
+                  <div>
+                    <p className="text-xs sm:text-sm font-bold text-foreground">
+                      Prendre une photo ou importer un fichier
+                    </p>
+                    <p className="text-[11px] text-muted-foreground mt-0.5">
+                      Caméra smartphone, galerie de photos ou documents de patron (PNG, JPG)
+                    </p>
+                  </div>
+                </>
+              )}
+            </button>
+
+            {/* Galerie des photos ajoutées avec bouton de suppression */}
+            {images.length > 0 && (
+              <div className="space-y-1.5 pt-1">
+                <p className="text-xs font-semibold text-muted-foreground">
+                  {images.length} photo(s) attachée(s) :
+                </p>
+                <div className="grid grid-cols-3 gap-2.5 sm:grid-cols-4 md:grid-cols-5">
+                  {images.map((img, idx) => (
+                    <div
+                      key={img.path}
+                      className="group relative rounded-xl overflow-hidden border border-border bg-card shadow-2xs aspect-square"
+                    >
+                      <StoredImage
+                        path={img.path}
+                        alt="Photo de confection"
+                        className="size-full object-cover"
+                      />
+                      <span className="absolute bottom-1 left-1 rounded bg-black/70 px-1 py-0.5 text-[9px] font-extrabold text-white uppercase tracking-wider">
+                        {img.kind}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => removeImage(idx)}
+                        className="absolute top-1 right-1 flex size-6 items-center justify-center rounded-full bg-destructive text-destructive-foreground shadow-xs active:scale-90"
+                        title="Supprimer la photo"
+                        aria-label="Supprimer la photo"
+                      >
+                        <X className="size-3.5" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        </section>
+
+        {/* ── BARRE D'ACTIONS DE SOUMISSION ── */}
+        <div className="flex flex-col-reverse sm:flex-row items-center justify-end gap-3 pt-2">
+          <Button
+            type="button"
+            variant="ghost"
+            asChild
+            className="w-full sm:w-auto h-11 text-muted-foreground hover:text-foreground font-semibold"
+          >
             <Link to="/commandes">Annuler</Link>
           </Button>
-          <Button type="submit" disabled={create.isPending || uploading}>
-            {create.isPending && <Loader2 className="mr-2 size-4 animate-spin" />} Enregistrer la commande
+
+          <Button
+            type="submit"
+            disabled={create.isPending || uploading}
+            className="w-full sm:w-auto h-12 px-8 rounded-xl font-extrabold text-base shadow-md bg-primary hover:bg-primary/90 text-primary-foreground active:scale-95 transition-all"
+          >
+            {create.isPending ? (
+              <>
+                <Loader2 className="mr-2 size-5 animate-spin" /> Enregistrement de la commande…
+              </>
+            ) : (
+              <>
+                <Check className="mr-2 size-5" /> Enregistrer la commande
+              </>
+            )}
           </Button>
         </div>
       </form>
@@ -577,7 +818,7 @@ function NewOrder() {
           }}
         />
       )}
-      {/* Modale d'abonnement / passage à Pro */}
+
       <UpgradeDialog
         open={upgradeOpen}
         onOpenChange={setUpgradeOpen}

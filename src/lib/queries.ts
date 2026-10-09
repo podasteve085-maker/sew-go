@@ -141,11 +141,15 @@ const ORDER_SELECT =
   "*, clients(first_name, last_name, phone, whatsapp), payments(amount)";
 
 export function paidTotal(order: OrderRow) {
-  return (order.payments ?? []).reduce((sum, p) => sum + Number(p.amount), 0);
+  return (order.payments ?? []).reduce((sum, p) => {
+    const val = Number(p.amount);
+    return sum + (isNaN(val) ? 0 : val);
+  }, 0);
 }
 
 export function balance(order: OrderRow) {
-  return Number(order.price) - paidTotal(order);
+  const price = Number(order.price);
+  return (isNaN(price) ? 0 : price) - paidTotal(order);
 }
 
 export async function fetchOrders(opts?: { clientId?: string }): Promise<OrderRow[]> {
@@ -636,9 +640,9 @@ export async function saveOrderOffline(
     reference: (oData["reference"] as string) || `CMD-${Date.now().toString().slice(-4)}`,
     garment_type: (oData["garment_type"] as string) || "",
     fabric: (oData["fabric"] as string) || null,
-    quantity: Number(oData["quantity"] || 1),
+    quantity: (() => { const v = Number(oData["quantity"] || 1); return isNaN(v) || v < 1 ? 1 : Math.round(v); })(),
     description: (oData["description"] as string) || null,
-    price: Number(oData["price"] || 0),
+    price: (() => { const v = Number(oData["price"] || 0); return isNaN(v) || v < 0 ? 0 : v; })(),
     ordered_at: (oData["ordered_at"] as string) || (new Date().toISOString().split("T")[0] as string),
     due_date: (oData["due_date"] as string) || null,
     status: (oData["status"] as OrderStatus) || "nouvelle",
@@ -680,7 +684,7 @@ export async function savePaymentOffline(paymentData: Record<string, unknown>): 
   const localPayment: PaymentRow = {
     id: tempId,
     order_id: (paymentData["order_id"] as string) || "",
-    amount: Number(paymentData["amount"] || 0),
+    amount: (() => { const v = Number(paymentData["amount"] || 0); return isNaN(v) || v < 0 ? 0 : v; })(),
     method: (paymentData["method"] as string) || "especes",
     paid_at: (paymentData["paid_at"] as string) || (new Date().toISOString().split("T")[0] as string),
     note: (paymentData["note"] as string) || null,

@@ -1,13 +1,13 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useMemo, useState, useDeferredValue } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Plus, Search, Crown, Scissors, AlertCircle } from "lucide-react";
+import { Plus, Search, Scissors, AlertCircle, Crown, Eye } from "lucide-react";
 
 import { useBusiness } from "@/hooks/use-business";
 import { fetchOrders } from "@/lib/queries";
 import { ORDER_STATUS, isLate, isActive, type OrderStatus } from "@/lib/domain";
 import { fullName } from "@/lib/format";
-import { isProOrAdmin, checkOrderQuota } from "@/lib/quotas";
+import { isProOrAdmin, checkOrderQuota, isSubscriptionExpired, FREE_LIMITS } from "@/lib/quotas";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -44,8 +44,6 @@ function OrdersPage() {
   const [filter, setFilter] = useState<string>("actives");
   const [term, setTerm] = useState("");
   const deferredTerm = useDeferredValue(term);
-  const [upgradeOpen, setUpgradeOpen] = useState(false);
-  const [quotaReason, setQuotaReason] = useState("");
 
   const orders = useQuery({
     queryKey: ["orders"],
@@ -53,16 +51,21 @@ function OrdersPage() {
     enabled: true,
   });
 
+  const [upgradeOpen, setUpgradeOpen] = useState(false);
+  const [quotaReason, setQuotaReason] = useState("");
   const isPro = isProOrAdmin(business);
-  const currentMonthStart = new Date().toISOString().slice(0, 7);
-  const monthlyOrdersCount = (orders.data ?? []).filter((o) =>
-    (o.ordered_at ?? "").startsWith(currentMonthStart),
-  ).length;
-  const orderQuota = checkOrderQuota(business, monthlyOrdersCount);
+  const isExpired = isSubscriptionExpired(business);
+  const totalOrders = (orders.data ?? []).length;
+  const orderQuota = checkOrderQuota(business, totalOrders);
 
   function handleNewOrder() {
+    if (isExpired && !isPro) {
+      setQuotaReason("Mode Consultation actif. Vos confections restent sécurisées et consultables. Réactivez votre Pass Atelier pour lancer de nouvelles confections.");
+      setUpgradeOpen(true);
+      return;
+    }
     if (!orderQuota.allowed) {
-      setQuotaReason(orderQuota.message || "Limite mensuelle de commandes atteinte.");
+      setQuotaReason(orderQuota.message || "Limite de commandes atteinte pour la formule actuelle.");
       setUpgradeOpen(true);
     } else {
       navigate({ to: "/commandes/nouvelle" });
@@ -101,58 +104,85 @@ function OrdersPage() {
       <SectionTitle
         action={
           <Button onClick={handleNewOrder} className="h-10 text-sm font-bold shadow-xs">
-            <Plus className="mr-1 size-4.5" /> Nouvelle commande
+            {isExpired && !isPro ? (
+              <><Eye className="mr-1 size-4.5" /> Mode Consultation</>
+            ) : (
+              <><Plus className="mr-1 size-4.5" /> Nouvelle commande</>
+            )}
           </Button>
         }
       >
         Commandes
       </SectionTitle>
 
-      {/* Jauge Quota pour le Plan Gratuit */}
-      {!isPro && (
+      {/* Bannière Mode Consultation (abonnement expiré) — Reassuring & jamais bloquante sur la lecture */}
+      {isExpired && !isPro && (
+        <div className="rounded-2xl border border-amber-500/40 bg-amber-500/10 p-4 text-xs flex flex-wrap items-center justify-between gap-3 shadow-2xs">
+          <div className="flex items-center gap-2.5">
+            <Eye className="size-4.5 shrink-0 text-amber-600" />
+            <span className="text-amber-800 dark:text-amber-300">
+              <strong>Mode Consultation :</strong> Toutes vos confections, acomptes et reçus restent sauvegardés et accessibles.
+              Réactivez votre Pass Atelier pour lancer de nouvelles confections.
+            </span>
+          </div>
+          <Button
+            size="sm"
+            onClick={() => {
+              setQuotaReason("Réactivez votre Pass Atelier pour lancer de nouvelles confections et enregistrer de nouveaux paiements.");
+              setUpgradeOpen(true);
+            }}
+            className="h-8 px-3 rounded-lg text-xs font-bold shadow-xs ml-auto"
+          >
+            <Crown className="mr-1 size-3.5" /> Réactiver mon Pass
+          </Button>
+        </div>
+      )}
+
+      {/* Jauge Quota pour la Formule Découverte */}
+      {!isPro && !isExpired && (
         <div
-          className={`rounded-xl border p-3 text-xs flex flex-wrap items-center justify-between gap-2.5 ${
+          className={`rounded-2xl border p-3.5 text-xs flex flex-wrap items-center justify-between gap-3 shadow-2xs ${
             !orderQuota.allowed
-              ? "border-destructive/40 bg-destructive/10 text-destructive"
-              : monthlyOrdersCount >= 8
               ? "border-amber-500/40 bg-amber-500/10 text-amber-800 dark:text-amber-300"
+              : totalOrders >= 8
+              ? "border-amber-500/30 bg-amber-50/50 dark:bg-amber-500/5 text-amber-800 dark:text-amber-300"
               : "border-border bg-card text-muted-foreground"
           }`}
         >
           <div className="flex items-center gap-2">
             <Scissors className="size-4 shrink-0 text-primary" />
             <span>
-              Quota commandes du mois :{" "}
+              Formule Découverte :{" "}
               <strong className="text-foreground">
-                {monthlyOrdersCount} / 10 commandes
+                {totalOrders} / {FREE_LIMITS.maxOrders} commandes
               </strong>
               {!orderQuota.allowed
-                ? " — Limite mensuelle atteinte ! Passez à Pro pour continuer."
-                : ` (${10 - monthlyOrdersCount} restantes ce mois)`}
+                ? " — Quota atteint. Vos commandes restent consultables. Passez à Pro pour en ajouter."
+                : ` (${orderQuota.remaining} restante${orderQuota.remaining > 1 ? "s" : ""})`}
             </span>
           </div>
           <Button
             size="sm"
             variant="outline"
             onClick={() => {
-              setQuotaReason("Passez à CouturPro pour enregistrer des commandes en illimité chaque mois.");
+              setQuotaReason("Passez à CouturPro Pro pour enregistrer des commandes en illimité.");
               setUpgradeOpen(true);
             }}
-            className="h-7 text-xs font-bold text-primary border-primary/30 hover:bg-primary/10 ml-auto"
+            className="h-8 px-3 rounded-lg text-xs font-bold text-primary border-primary/30 hover:bg-primary/10 ml-auto"
           >
             <Crown className="mr-1 size-3.5" /> Passer à Pro (Illimité)
           </Button>
         </div>
       )}
 
-      <div className="flex flex-col gap-2.5 sm:flex-row sm:items-center">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
         <div className="relative flex-1">
-          <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+          <Search className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
           <Input
             value={term}
             onChange={(e) => setTerm(e.target.value)}
             placeholder="Rechercher référence, client ou habit…"
-            className="pl-9 h-9 text-xs sm:text-sm"
+            className="pl-10 h-11 sm:h-12 text-base sm:text-sm rounded-xl bg-card border-border/80 shadow-2xs"
           />
         </div>
         <div className="flex gap-1.5 overflow-x-auto pb-1 no-scrollbar">

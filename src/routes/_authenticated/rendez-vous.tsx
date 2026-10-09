@@ -1,11 +1,13 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { CalendarPlus, Check, Loader2, Pencil, Trash2, X } from "lucide-react";
+import { CalendarPlus, Check, Loader2, Pencil, Trash2, X, Crown, Eye } from "lucide-react";
 import { toast } from "sonner";
 
 import { supabase } from "@/integrations/supabase/client";
 import { useBusiness } from "@/hooks/use-business";
+import { isProOrAdmin, isSubscriptionExpired } from "@/lib/quotas";
+import { UpgradeDialog } from "@/components/upgrade-dialog";
 import { fetchAppointments, fetchClients, type AppointmentRow } from "@/lib/queries";
 import { APPOINTMENT_TYPES, APPOINTMENT_STATUS, appointmentLabel } from "@/lib/domain";
 import { dateLongFr, fullName, today } from "@/lib/format";
@@ -58,9 +60,13 @@ function AppointmentsPage() {
   const [editingAppointment, setEditingAppointment] = useState<AppointmentRow | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [filter, setFilter] = useState<"prevu" | "honore" | "annule" | "tous">("prevu");
+  const [upgradeOpen, setUpgradeOpen] = useState(false);
+  const [quotaReason, setQuotaReason] = useState("");
 
   const queryClient = useQueryClient();
   const { data: business } = useBusiness();
+  const isPro = isProOrAdmin(business);
+  const isExpired = isSubscriptionExpired(business);
   const appointments = useQuery({
     queryKey: ["appointments"],
     queryFn: () => fetchAppointments(),
@@ -128,10 +134,46 @@ function AppointmentsPage() {
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <SectionTitle>Rendez-vous</SectionTitle>
-        <Button onClick={() => setOpen(true)}>
-          <CalendarPlus className="size-4" /> Nouveau rendez-vous
+        <Button
+          onClick={() => {
+            if (isExpired && !isPro) {
+              setQuotaReason("Mode Consultation actif. Votre planning de rendez-vous reste consultable. Réactivez votre Pass Atelier pour planifier de nouveaux rendez-vous d'essayage.");
+              setUpgradeOpen(true);
+              return;
+            }
+            setOpen(true);
+          }}
+        >
+          {isExpired && !isPro ? (
+            <><Eye className="size-4" /> Mode Consultation</>
+          ) : (
+            <><CalendarPlus className="size-4" /> Nouveau rendez-vous</>
+          )}
         </Button>
       </div>
+
+      {/* Bannière Mode Consultation (abonnement expiré) — Jamais agressive */}
+      {isExpired && !isPro && (
+        <div className="rounded-xl border border-amber-500/40 bg-amber-500/10 p-3.5 text-xs flex flex-wrap items-center justify-between gap-2.5">
+          <div className="flex items-center gap-2">
+            <Eye className="size-4 shrink-0 text-amber-600" />
+            <span className="text-amber-800 dark:text-amber-300">
+              <strong>Mode Consultation :</strong> Votre planning de rendez-vous et vos essayages restent consultables.
+              Réactivez votre Pass Atelier pour planifier de nouveaux rendez-vous.
+            </span>
+          </div>
+          <Button
+            size="sm"
+            onClick={() => {
+              setQuotaReason("Réactivez votre Pass Atelier pour planifier de nouveaux rendez-vous.");
+              setUpgradeOpen(true);
+            }}
+            className="h-7 text-xs font-bold shadow-xs ml-auto"
+          >
+            <Crown className="mr-1 size-3.5" /> Réactiver mon Pass
+          </Button>
+        </div>
+      )}
 
       {/* Filter Chips */}
       <div className="flex flex-wrap gap-2">
@@ -242,7 +284,14 @@ function AppointmentsPage() {
                         <Button
                           variant="outline"
                           size="sm"
-                          onClick={() => update.mutate({ id: a.id, status: "honore" })}
+                          onClick={() => {
+                            if (isExpired && !isPro) {
+                              setQuotaReason("Mode Consultation actif. Votre planning reste consultable en sécurité. Réactivez votre Pass Atelier pour mettre à jour vos rendez-vous.");
+                              setUpgradeOpen(true);
+                              return;
+                            }
+                            update.mutate({ id: a.id, status: "honore" });
+                          }}
                         >
                           <Check className="mr-1 size-3.5" /> Honoré
                         </Button>
@@ -250,7 +299,14 @@ function AppointmentsPage() {
                         <Button
                           variant="ghost"
                           size="sm"
-                          onClick={() => update.mutate({ id: a.id, status: "prevu" })}
+                          onClick={() => {
+                            if (isExpired && !isPro) {
+                              setQuotaReason("Mode Consultation actif. Votre planning reste consultable en sécurité. Réactivez votre Pass Atelier pour mettre à jour vos rendez-vous.");
+                              setUpgradeOpen(true);
+                              return;
+                            }
+                            update.mutate({ id: a.id, status: "prevu" });
+                          }}
                         >
                           Repasser en prévu
                         </Button>
@@ -260,7 +316,14 @@ function AppointmentsPage() {
                         <Button
                           variant="ghost"
                           size="sm"
-                          onClick={() => update.mutate({ id: a.id, status: "annule" })}
+                          onClick={() => {
+                            if (isExpired && !isPro) {
+                              setQuotaReason("Mode Consultation actif. Vos rendez-vous restent protégés. Réactivez votre Pass Atelier pour modifier vos rendez-vous.");
+                              setUpgradeOpen(true);
+                              return;
+                            }
+                            update.mutate({ id: a.id, status: "annule" });
+                          }}
                           aria-label="Annuler le rendez-vous"
                           title="Marquer comme annulé"
                         >
@@ -271,7 +334,14 @@ function AppointmentsPage() {
                       <Button
                         variant="ghost"
                         size="sm"
-                        onClick={() => setEditingAppointment(a)}
+                        onClick={() => {
+                          if (isExpired && !isPro) {
+                            setQuotaReason("Mode Consultation actif. Vos rendez-vous restent consultables en sécurité. Réactivez votre Pass Atelier pour modifier ce rendez-vous.");
+                            setUpgradeOpen(true);
+                            return;
+                          }
+                          setEditingAppointment(a);
+                        }}
                         aria-label="Modifier le rendez-vous"
                         title="Modifier"
                       >
@@ -282,7 +352,14 @@ function AppointmentsPage() {
                         variant="ghost"
                         size="sm"
                         className="text-destructive hover:bg-destructive/10"
-                        onClick={() => setDeletingId(a.id)}
+                        onClick={() => {
+                          if (isExpired && !isPro) {
+                            setQuotaReason("Mode Consultation actif. Vos rendez-vous sont protégés contre toute suppression.");
+                            setUpgradeOpen(true);
+                            return;
+                          }
+                          setDeletingId(a.id);
+                        }}
                         aria-label="Supprimer le rendez-vous"
                         title="Supprimer"
                       >
@@ -334,6 +411,12 @@ function AppointmentsPage() {
           appointment={editingAppointment}
         />
       )}
+
+      <UpgradeDialog
+        open={upgradeOpen}
+        onOpenChange={setUpgradeOpen}
+        triggerReason={quotaReason}
+      />
     </div>
   );
 }
@@ -409,7 +492,7 @@ function AppointmentDialog({
             <select
               id="client_id"
               name="client_id"
-              className="h-9 w-full rounded-md border border-input bg-card px-3 text-sm"
+              className="h-11 w-full rounded-xl border border-input bg-card px-3 text-base sm:text-sm font-medium focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
             >
               <option value="">Sans client</option>
               {(clients.data ?? []).map((c) => (
@@ -428,11 +511,17 @@ function AppointmentDialog({
                 type="date"
                 required
                 defaultValue={today()}
+                className="h-11 text-base sm:text-sm rounded-xl"
               />
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="scheduled_time">Heure</Label>
-              <Input id="scheduled_time" name="scheduled_time" type="time" />
+              <Input
+                id="scheduled_time"
+                name="scheduled_time"
+                type="time"
+                className="h-11 text-base sm:text-sm rounded-xl"
+              />
             </div>
           </div>
           <div className="space-y-1.5">
@@ -440,7 +529,7 @@ function AppointmentDialog({
             <select
               id="type"
               name="type"
-              className="h-9 w-full rounded-md border border-input bg-card px-3 text-sm"
+              className="h-11 w-full rounded-xl border border-input bg-card px-3 text-base sm:text-sm font-medium focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
             >
               {APPOINTMENT_TYPES.map((t) => (
                 <option key={t.value} value={t.value}>
@@ -451,7 +540,7 @@ function AppointmentDialog({
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="notes">Notes</Label>
-            <Textarea id="notes" name="notes" rows={2} />
+            <Textarea id="notes" name="notes" rows={2} className="text-base sm:text-sm rounded-xl" />
           </div>
           <DialogFooter>
             <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>
@@ -536,7 +625,7 @@ function EditAppointmentDialog({
               id="edit-client_id"
               name="client_id"
               defaultValue={appointment.client_id ?? ""}
-              className="h-9 w-full rounded-md border border-input bg-card px-3 text-sm"
+              className="h-11 w-full rounded-xl border border-input bg-card px-3 text-base sm:text-sm font-medium focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
             >
               <option value="">Sans client</option>
               {(clients.data ?? []).map((c) => (
@@ -555,6 +644,7 @@ function EditAppointmentDialog({
                 type="date"
                 required
                 defaultValue={appointment.scheduled_date}
+                className="h-11 text-base sm:text-sm rounded-xl"
               />
             </div>
             <div className="space-y-1.5">
@@ -564,6 +654,7 @@ function EditAppointmentDialog({
                 name="scheduled_time"
                 type="time"
                 defaultValue={appointment.scheduled_time ?? ""}
+                className="h-11 text-base sm:text-sm rounded-xl"
               />
             </div>
           </div>
@@ -574,7 +665,7 @@ function EditAppointmentDialog({
                 id="edit-type"
                 name="type"
                 defaultValue={appointment.type}
-                className="h-9 w-full rounded-md border border-input bg-card px-3 text-sm"
+                className="h-11 w-full rounded-xl border border-input bg-card px-3 text-base sm:text-sm font-medium focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
               >
                 {APPOINTMENT_TYPES.map((t) => (
                   <option key={t.value} value={t.value}>
@@ -589,7 +680,7 @@ function EditAppointmentDialog({
                 id="edit-status"
                 name="status"
                 defaultValue={appointment.status}
-                className="h-9 w-full rounded-md border border-input bg-card px-3 text-sm"
+                className="h-11 w-full rounded-xl border border-input bg-card px-3 text-base sm:text-sm font-medium focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
               >
                 {APPOINTMENT_STATUS.map((s) => (
                   <option key={s.value} value={s.value}>
@@ -601,7 +692,13 @@ function EditAppointmentDialog({
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="edit-notes">Notes</Label>
-            <Textarea id="edit-notes" name="notes" rows={2} defaultValue={appointment.notes ?? ""} />
+            <Textarea
+              id="edit-notes"
+              name="notes"
+              rows={2}
+              defaultValue={appointment.notes ?? ""}
+              className="text-base sm:text-sm rounded-xl"
+            />
           </div>
           <DialogFooter>
             <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>

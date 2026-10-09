@@ -26,11 +26,15 @@ import {
   Sparkles,
   PackageCheck,
   AlertCircle,
+  Crown,
+  Eye,
 } from "lucide-react";
 import { toast } from "sonner";
 
 import { supabase } from "@/integrations/supabase/client";
 import { useBusiness } from "@/hooks/use-business";
+import { isProOrAdmin, isSubscriptionExpired } from "@/lib/quotas";
+import { UpgradeDialog } from "@/components/upgrade-dialog";
 import { uploadImage, deleteStorageFile } from "@/hooks/use-signed-url";
 import {
   fetchOrder,
@@ -127,6 +131,11 @@ function OrderDetailPage() {
   const [cancelOrderOpen, setCancelOrderOpen] = useState(false);
   const [uploadingImage, setUploadingImage] = useState(false);
   const [imageKind, setImageKind] = useState("modele");
+  const [upgradeOpen, setUpgradeOpen] = useState(false);
+  const [quotaReason, setQuotaReason] = useState("");
+
+  const isPro = isProOrAdmin(business);
+  const isExpired = isSubscriptionExpired(business);
 
   // Queries
   const orderQuery = useQuery({
@@ -164,8 +173,12 @@ function OrderDetailPage() {
 
   // Calculate finances
   const payments = paymentsQuery.data ?? [];
-  const totalPaid = payments.reduce((sum, p) => sum + Number(p.amount), 0);
-  const totalPrice = Number(order?.price ?? 0);
+  const totalPaid = payments.reduce((sum, p) => {
+    const v = Number(p.amount);
+    return sum + (isNaN(v) ? 0 : v);
+  }, 0);
+  const rawPrice = Number(order?.price ?? 0);
+  const totalPrice = isNaN(rawPrice) ? 0 : rawPrice;
   const balanceDue = totalPrice - totalPaid;
   const client = clientQuery.data;
 
@@ -254,6 +267,12 @@ function OrderDetailPage() {
       delivered_to?: string | null;
       delivery_note?: string | null;
     }) => {
+      if (isSubscriptionExpired(business) && !isProOrAdmin(business)) {
+        const msg = "Votre atelier est en mode Consultation. Vos commandes restent consultables en toute sécurité. Réactivez votre Pass Atelier pour faire évoluer le statut des commandes.";
+        setQuotaReason(msg);
+        setUpgradeOpen(true);
+        throw new Error(msg);
+      }
       const payload: {
         status: OrderStatus;
         delivered_at?: string | null;
@@ -299,6 +318,14 @@ function OrderDetailPage() {
   async function handlePhotoUpload(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file || !business) return;
+    if (isExpired && !isPro) {
+      setQuotaReason(
+        "Mode Consultation actif. Vos confections et photos restent sauvegardées en sécurité. Réactivez votre Pass Atelier pour ajouter de nouvelles photos."
+      );
+      setUpgradeOpen(true);
+      e.target.value = "";
+      return;
+    }
     setUploadingImage(true);
     try {
       const path = await uploadImage(business.id, file, "orders");
@@ -395,7 +422,14 @@ function OrderDetailPage() {
           <Button
             variant="outline"
             size="sm"
-            onClick={() => setOpenEditModal(true)}
+            onClick={() => {
+              if (isExpired && !isPro) {
+                setQuotaReason("Mode Consultation actif. Vos confections restent sauvegardées et consultables. Réactivez votre Pass Atelier pour modifier les informations de la commande.");
+                setUpgradeOpen(true);
+                return;
+              }
+              setOpenEditModal(true);
+            }}
             className="h-8 text-xs font-medium px-2.5 sm:px-3"
           >
             <Edit className="mr-1.5 size-3.5" /> Modifier
@@ -405,7 +439,14 @@ function OrderDetailPage() {
               variant="outline"
               size="sm"
               className="h-8 text-xs text-muted-foreground hover:text-destructive hover:bg-destructive/10 px-2 sm:px-2.5"
-              onClick={() => setCancelOrderOpen(true)}
+              onClick={() => {
+                if (isExpired && !isPro) {
+                  setQuotaReason("Mode Consultation actif. Vos confections restent protégées.");
+                  setUpgradeOpen(true);
+                  return;
+                }
+                setCancelOrderOpen(true);
+              }}
               title="Annuler la commande"
             >
               <XCircle className="size-3.5 sm:mr-1" />
@@ -416,13 +457,43 @@ function OrderDetailPage() {
             variant="ghost"
             size="sm"
             className="size-8 p-0 text-destructive hover:bg-destructive/10"
-            onClick={() => setOpenDeleteModal(true)}
+            onClick={() => {
+              if (isExpired && !isPro) {
+                setQuotaReason("Mode Consultation actif. Vos confections sont protégées contre toute suppression.");
+                setUpgradeOpen(true);
+                return;
+              }
+              setOpenDeleteModal(true);
+            }}
             title="Supprimer"
           >
             <Trash2 className="size-3.5" />
           </Button>
         </div>
       </div>
+
+      {/* Bannière Mode Consultation (abonnement expiré) — Jamais agressive */}
+      {isExpired && !isPro && (
+        <div className="rounded-xl border border-amber-500/40 bg-amber-500/10 p-3.5 text-xs flex flex-wrap items-center justify-between gap-2.5">
+          <div className="flex items-center gap-2">
+            <Eye className="size-4 shrink-0 text-amber-600" />
+            <span className="text-amber-800 dark:text-amber-300">
+              <strong>Mode Consultation :</strong> Cette confection, ses mesures et ses acomptes restent 100 % accessibles.
+              Réactivez votre Pass Atelier pour mettre à jour les étapes ou enregistrer de nouveaux règlements.
+            </span>
+          </div>
+          <Button
+            size="sm"
+            onClick={() => {
+              setQuotaReason("Réactivez votre Pass Atelier pour modifier vos commandes et enregistrer de nouveaux paiements.");
+              setUpgradeOpen(true);
+            }}
+            className="h-7 text-xs font-bold shadow-xs ml-auto"
+          >
+            <Crown className="mr-1 size-3.5" /> Réactiver mon Pass
+          </Button>
+        </div>
+      )}
 
       {/* Bannière alerte quand le vêtement est prêt */}
       {order.status === "prete" && (
@@ -502,6 +573,11 @@ function OrderDetailPage() {
               <Button
                 size="sm"
                 onClick={() => {
+                  if (isExpired && !isPro) {
+                    setQuotaReason("Mode Consultation actif. Vos confections restent protégées et consultables. Réactivez votre Pass Atelier pour mettre à jour les étapes d'avancement.");
+                    setUpgradeOpen(true);
+                    return;
+                  }
                   if (nextStatus === "livree") {
                     setOpenDeliveryModal(true);
                   } else {
@@ -538,6 +614,11 @@ function OrderDetailPage() {
                   key={flowStatus}
                   type="button"
                   onClick={() => {
+                    if (isExpired && !isPro) {
+                      setQuotaReason("Mode Consultation actif. Vos confections restent protégées et consultables. Réactivez votre Pass Atelier pour mettre à jour les étapes d'avancement.");
+                      setUpgradeOpen(true);
+                      return;
+                    }
                     if (flowStatus === "livree") {
                       setOpenDeliveryModal(true);
                     } else {
@@ -578,7 +659,14 @@ function OrderDetailPage() {
                 variant="outline"
                 size="sm"
                 className="ml-auto text-xs"
-                onClick={() => updateStatusMutation.mutate({ status: "nouvelle" })}
+                onClick={() => {
+                  if (isExpired && !isPro) {
+                    setQuotaReason("Mode Consultation actif. Vos confections restent protégées. Réactivez votre Pass Atelier pour réactiver cette commande.");
+                    setUpgradeOpen(true);
+                    return;
+                  }
+                  updateStatusMutation.mutate({ status: "nouvelle" });
+                }}
               >
                 Réactiver
               </Button>
@@ -726,7 +814,17 @@ function OrderDetailPage() {
               Suivi des acomptes, versements échelonnés et solde final.
             </p>
           </div>
-          <Button size="sm" onClick={() => setOpenPaymentModal(true)}>
+          <Button
+            size="sm"
+            onClick={() => {
+              if (isExpired && !isPro) {
+                setQuotaReason("Mode Consultation actif. Tous les paiements et reçus antérieurs restent accessibles. Réactivez votre Pass Atelier pour enregistrer de nouveaux acomptes.");
+                setUpgradeOpen(true);
+                return;
+              }
+              setOpenPaymentModal(true);
+            }}
+          >
             <Plus className="size-4" /> Enregistrer un paiement
           </Button>
         </div>
@@ -788,7 +886,14 @@ function OrderDetailPage() {
                   variant="ghost"
                   size="sm"
                   className="h-8 w-8 p-0 text-muted-foreground hover:text-destructive"
-                  onClick={() => setDeletingPaymentId(p.id)}
+                  onClick={() => {
+                    if (isExpired && !isPro) {
+                      setQuotaReason("Mode Consultation actif. Vos encaissements et historiques sont protégés contre toute suppression.");
+                      setUpgradeOpen(true);
+                      return;
+                    }
+                    setDeletingPaymentId(p.id);
+                  }}
                   aria-label="Supprimer le versement"
                 >
                   <Trash2 className="size-3.5" />
@@ -812,7 +917,7 @@ function OrderDetailPage() {
             <select
               value={imageKind}
               onChange={(e) => setImageKind(e.target.value)}
-              className="h-9 rounded-md border border-input bg-card px-2.5 text-xs font-medium"
+              className="h-11 rounded-xl border border-input bg-card px-3 text-base sm:text-sm font-medium focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
               aria-label="Catégorie de photo"
             >
               {IMAGE_KINDS.map((k) => (
@@ -863,7 +968,14 @@ function OrderDetailPage() {
                     </span>
                     <button
                       type="button"
-                      onClick={() => deleteImageMutation.mutate(img.id)}
+                      onClick={() => {
+                        if (isExpired && !isPro) {
+                          setQuotaReason("Mode Consultation actif. Vos photos et croquis sont protégés contre toute suppression.");
+                          setUpgradeOpen(true);
+                          return;
+                        }
+                        deleteImageMutation.mutate(img.id);
+                      }}
                       className="text-muted-foreground hover:text-destructive"
                       aria-label="Supprimer la photo"
                     >
@@ -892,9 +1004,16 @@ function OrderDetailPage() {
           <form
             onSubmit={async (e) => {
               e.preventDefault();
+              if (isExpired && !isPro) {
+                setQuotaReason(
+                  "Mode Consultation actif. Vos encaissements et historiques restent sauvegardés. Réactivez votre Pass Atelier pour enregistrer de nouveaux règlements."
+                );
+                setUpgradeOpen(true);
+                return;
+              }
               const fd = new FormData(e.currentTarget);
               const amount = Number(fd.get("amount"));
-              if (!amount || amount <= 0) {
+              if (!amount || isNaN(amount) || amount <= 0) {
                 toast.error("Veuillez saisir un montant valide");
                 return;
               }
@@ -928,6 +1047,7 @@ function OrderDetailPage() {
                 defaultValue={balanceDue > 0 ? balanceDue : ""}
                 required
                 inputMode="numeric"
+                className="h-11 text-base sm:text-sm rounded-xl font-bold"
               />
               {balanceDue > 0 && (
                 <p className="text-[0.7rem] text-muted-foreground">
@@ -943,7 +1063,7 @@ function OrderDetailPage() {
                   id="pay-method"
                   name="method"
                   defaultValue="especes"
-                  className="h-9 w-full rounded-md border border-input bg-card px-3 text-sm"
+                  className="h-11 w-full rounded-xl border border-input bg-card px-3 text-base sm:text-sm font-medium focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
                 >
                   {PAYMENT_METHODS.map((m) => (
                     <option key={m.value} value={m.value}>
@@ -954,7 +1074,13 @@ function OrderDetailPage() {
               </div>
               <div className="space-y-1.5">
                 <Label htmlFor="pay-date">Date</Label>
-                <Input id="pay-date" name="paid_at" type="date" defaultValue={today()} />
+                <Input
+                  id="pay-date"
+                  name="paid_at"
+                  type="date"
+                  defaultValue={today()}
+                  className="h-11 text-base sm:text-sm rounded-xl"
+                />
               </div>
             </div>
 
@@ -964,6 +1090,7 @@ function OrderDetailPage() {
                 id="pay-note"
                 name="note"
                 placeholder="Ex. Acompte essayage, Orange Money #TX123..."
+                className="h-11 text-base sm:text-sm rounded-xl"
               />
             </div>
 
@@ -1005,7 +1132,13 @@ function OrderDetailPage() {
           >
             <div className="space-y-1.5">
               <Label htmlFor="del-date">Date de livraison</Label>
-              <Input id="del-date" name="delivered_at" type="date" defaultValue={today()} />
+              <Input
+                id="del-date"
+                name="delivered_at"
+                type="date"
+                defaultValue={today()}
+                className="h-11 text-base sm:text-sm rounded-xl"
+              />
             </div>
 
             <div className="space-y-1.5">
@@ -1015,6 +1148,7 @@ function OrderDetailPage() {
                 name="delivered_to"
                 defaultValue={client ? fullName(client) : ""}
                 placeholder="Le client en personne, un proche..."
+                className="h-11 text-base sm:text-sm rounded-xl"
               />
             </div>
 
@@ -1025,6 +1159,7 @@ function OrderDetailPage() {
                 name="delivery_note"
                 rows={2}
                 placeholder="Essayé avant retrait, satisfait..."
+                className="text-base sm:text-sm rounded-xl"
               />
             </div>
 
@@ -1355,6 +1490,12 @@ function OrderDetailPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <UpgradeDialog
+        open={upgradeOpen}
+        onOpenChange={setUpgradeOpen}
+        triggerReason={quotaReason}
+      />
     </div>
   );
 }
@@ -1384,13 +1525,18 @@ function EditOrderDialog({
     e.preventDefault();
     setSaving(true);
     const fd = new FormData(e.currentTarget);
+    const rawQty = Number(fd.get("quantity") || 1);
+    const quantity = isNaN(rawQty) || rawQty < 1 ? 1 : Math.round(rawQty);
+    const rawPrice = Number(fd.get("price") || 0);
+    const price = isNaN(rawPrice) || rawPrice < 0 ? 0 : rawPrice;
+
     try {
       await saveOrderOffline({
         business_id: businessId,
         garment_type: String(fd.get("garment_type") || "").trim(),
         fabric: String(fd.get("fabric") || "").trim() || null,
-        quantity: Number(fd.get("quantity") || 1),
-        price: Number(fd.get("price") || 0),
+        quantity,
+        price,
         ordered_at: String(fd.get("ordered_at") || today()),
         due_date: String(fd.get("due_date") || "") || null,
         description: String(fd.get("description") || "").trim() || null,
@@ -1426,7 +1572,7 @@ function EditOrderDialog({
                 required
                 defaultValue={order.garment_type}
                 list="garment-list-edit"
-                className="h-9 w-full rounded-md border border-input bg-card px-3 text-sm"
+                className="h-11 w-full rounded-xl border border-input bg-card px-3 text-base sm:text-sm font-medium focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
               />
               <datalist id="garment-list-edit">
                 {(garmentsQuery.data ?? []).map((g) => (
@@ -1436,7 +1582,12 @@ function EditOrderDialog({
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="edit-fabric">Tissu</Label>
-              <Input id="edit-fabric" name="fabric" defaultValue={order.fabric ?? ""} />
+              <Input
+                id="edit-fabric"
+                name="fabric"
+                defaultValue={order.fabric ?? ""}
+                className="h-11 text-base sm:text-sm rounded-xl"
+              />
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="edit-qty">Quantité</Label>
@@ -1446,6 +1597,7 @@ function EditOrderDialog({
                 type="number"
                 min={1}
                 defaultValue={order.quantity}
+                className="h-11 text-base sm:text-sm rounded-xl font-bold"
               />
             </div>
             <div className="space-y-1.5">
@@ -1457,6 +1609,7 @@ function EditOrderDialog({
                 min={0}
                 defaultValue={order.price}
                 required
+                className="h-11 text-base sm:text-sm rounded-xl font-bold"
               />
             </div>
             <div className="space-y-1.5">
@@ -1466,6 +1619,7 @@ function EditOrderDialog({
                 name="ordered_at"
                 type="date"
                 defaultValue={order.ordered_at}
+                className="h-11 text-base sm:text-sm rounded-xl"
               />
             </div>
             <div className="space-y-1.5">
@@ -1475,6 +1629,7 @@ function EditOrderDialog({
                 name="due_date"
                 type="date"
                 defaultValue={order.due_date ?? ""}
+                className="h-11 text-base sm:text-sm rounded-xl"
               />
             </div>
           </div>
@@ -1486,12 +1641,19 @@ function EditOrderDialog({
               name="description"
               rows={2}
               defaultValue={order.description ?? ""}
+              className="text-base sm:text-sm rounded-xl"
             />
           </div>
 
           <div className="space-y-1.5">
             <Label htmlFor="edit-notes">Notes atelier</Label>
-            <Textarea id="edit-notes" name="notes" rows={2} defaultValue={order.notes ?? ""} />
+            <Textarea
+              id="edit-notes"
+              name="notes"
+              rows={2}
+              defaultValue={order.notes ?? ""}
+              className="text-base sm:text-sm rounded-xl"
+            />
           </div>
 
           <DialogFooter>

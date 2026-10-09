@@ -1,12 +1,15 @@
 const nf = new Intl.NumberFormat("fr-FR");
 
 export function fcfa(value: number | null | undefined, currency = "FCFA") {
-  const n = Math.round(Number(value ?? 0));
+  const num = Number(value ?? 0);
+  const n = isNaN(num) ? 0 : Math.round(num);
   return `${nf.format(n).replace(/\u202f|\u00a0/g, " ")} ${currency}`;
 }
 
 export function money(value: number | null | undefined) {
-  return nf.format(Math.round(Number(value ?? 0))).replace(/\u202f|\u00a0/g, " ");
+  const num = Number(value ?? 0);
+  const n = isNaN(num) ? 0 : Math.round(num);
+  return nf.format(n).replace(/\u202f|\u00a0/g, " ");
 }
 
 export function dateFr(value: string | null | undefined) {
@@ -38,8 +41,11 @@ export function initials(first?: string | null, last?: string | null) {
 }
 
 export function fullName(c: { first_name?: string | null; last_name?: string | null } | null | undefined) {
-  if (!c) return "Client supprimé";
-  return `${c.first_name ?? ""} ${(c.last_name ?? "").toUpperCase()}`.trim();
+  if (!c) return "Client";
+  const first = (c.first_name ?? "").trim();
+  const last = (c.last_name ?? "").trim().toUpperCase();
+  const res = `${first} ${last}`.trim();
+  return res || "Client sans nom";
 }
 
 /** Normalise un numéro de téléphone pour un lien WhatsApp (conserve l'indicatif international). */
