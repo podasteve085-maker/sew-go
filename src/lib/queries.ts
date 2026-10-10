@@ -11,28 +11,27 @@ import {
 } from "./offline-storage";
 
 export async function currentBusinessId(): Promise<string> {
-  // 0. Si hors-ligne avéré, accès instantané au cache local (0ms de latence)
-  if (typeof navigator !== "undefined" && !navigator.onLine) {
-    if (typeof window !== "undefined") {
-      const cachedBizId = localStorage.getItem("couturpro_current_business_id");
-      if (cachedBizId) return cachedBizId;
-    }
+  // 1. Accès instantané au cache local (0ms de latence, fonctionne toujours en ligne et hors-ligne)
+  if (typeof window !== "undefined") {
+    const cachedBizId = localStorage.getItem("couturpro_current_business_id");
+    if (cachedBizId) return cachedBizId;
   }
 
-  // 1. Tenter la session active Supabase
+  // 2. Si absent du cache local, tenter la session active Supabase
   try {
-    const { data, error } = await supabase.auth.getUser();
-    if (!error && data.user) {
+    const { data: sessionData } = await supabase.auth.getSession();
+    const userId = sessionData?.session?.user?.id;
+    if (userId) {
       const { data: business, error: businessError } = await supabase
         .from("businesses")
         .select("id")
-        .eq("owner_id", data.user.id)
+        .eq("owner_id", userId)
         .maybeSingle();
       if (!businessError && business?.id) {
         if (typeof window !== "undefined") {
           try {
             localStorage.setItem("couturpro_current_business_id", business.id);
-            localStorage.setItem("couturpro_current_user_id", data.user.id);
+            localStorage.setItem("couturpro_current_user_id", userId);
           } catch {
             // ignore
           }
@@ -44,7 +43,7 @@ export async function currentBusinessId(): Promise<string> {
     // Mode hors-ligne : bascule sur le cache local
   }
 
-  // 2. Fallback cache local hors-ligne
+  // 3. Fallback cache local hors-ligne
   if (typeof window !== "undefined") {
     const cachedBizId = localStorage.getItem("couturpro_current_business_id");
     if (cachedBizId) return cachedBizId;

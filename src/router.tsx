@@ -10,6 +10,10 @@ export const getRouter = () => {
         gcTime: 1000 * 60 * 30, // 30 minutes de conservation en mémoire
         refetchOnWindowFocus: false, // pas de rechargement intempestif
         retry: 1,
+        networkMode: "always", // Ne jamais suspendre l'exécution des requêtes hors-ligne (exécute le repli IndexedDB)
+      },
+      mutations: {
+        networkMode: "always", // Permet d'exécuter les mutations hors-ligne pour la file de synchronisation
       },
     },
   });

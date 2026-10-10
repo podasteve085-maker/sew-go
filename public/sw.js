@@ -8,12 +8,13 @@
  * 3. Données API (Supabase) : Laissées au SyncEngine / IndexedDB client
  */
 
-const CACHE_NAME = "couturpro-v2";
+const CACHE_NAME = "couturpro-v3";
 const OFFLINE_FALLBACK = "/offline.html";
 
 /** Ressources pré-mises en cache à l'installation (shell statique de base) */
 const PRECACHE_ASSETS = [
   "/",
+  "/dashboard",
   "/offline.html",
   "/manifest.webmanifest",
   "/favicon.svg",
@@ -81,24 +82,39 @@ self.addEventListener("fetch", (event) => {
   // ─── A. NAVIGATION (Chargement d'une page HTML) ─────────────────
   if (request.mode === "navigate") {
     event.respondWith(
-      fetch(request)
-        .then((networkResponse) => {
+      (async () => {
+        // Mode hors-ligne direct : servir immédiatement le Shell sans tenter le réseau
+        if (typeof navigator !== "undefined" && !navigator.onLine) {
+          const cached =
+            (await caches.match(request)) ||
+            (await caches.match("/dashboard")) ||
+            (await caches.match("/"));
+          if (cached) return cached;
+        }
+
+        try {
+          // Tenter le réseau avec un timeout de 2.5s max pour ne jamais bloquer WebKit/Safari
+          const timeoutPromise = new Promise((_, reject) =>
+            setTimeout(() => reject(new Error("Navigation network timeout")), 2500)
+          );
+          const networkResponse = await Promise.race([fetch(request), timeoutPromise]);
+
           if (networkResponse && networkResponse.status === 200) {
             const cloned = networkResponse.clone();
             caches.open(CACHE_NAME).then((cache) => cache.put(request, cloned));
           }
           return networkResponse;
-        })
-        .catch(async () => {
-          // Hors ligne : renvoyer d'abord l'URL exacte si cachée
+        } catch {
+          // Hors-ligne ou réseau lent : servir le Shell SPA sans attendre
           const cachedUrl = await caches.match(request);
           if (cachedUrl) return cachedUrl;
 
-          // Sinon renvoyer le Shell SPA ("/") pour que TanStack Router prenne le relais
+          const cachedDashboard = await caches.match("/dashboard");
+          if (cachedDashboard) return cachedDashboard;
+
           const cachedShell = await caches.match("/");
           if (cachedShell) return cachedShell;
 
-          // En dernier recours, renvoyer la page de secours offline.html
           const offlinePage = await caches.match(OFFLINE_FALLBACK);
           if (offlinePage) return offlinePage;
 
@@ -106,7 +122,8 @@ self.addEventListener("fetch", (event) => {
             status: 503,
             headers: { "Content-Type": "text/plain; charset=utf-8" },
           });
-        })
+        }
+      })()
     );
     return;
   }

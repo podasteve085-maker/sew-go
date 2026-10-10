@@ -605,7 +605,7 @@ function SignOutButton({
         }
       }
       // 5. Rechargement dur pour détruire tout état mémoire React/TanStack
-      window.location.href = "/auth";
+      window.location.href = "/auth?logout=true";
     }
   }
 

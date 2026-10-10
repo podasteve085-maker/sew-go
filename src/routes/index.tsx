@@ -1,4 +1,5 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, redirect, useNavigate } from "@tanstack/react-router";
+import { useEffect } from "react";
 import {
   Ruler,
   Users,
@@ -13,8 +14,28 @@ import {
 
 import { Button } from "@/components/ui/button";
 import heroImage from "@/assets/hero-atelier.jpg";
+import { supabase } from "@/integrations/supabase/client";
 
 export const Route = createFileRoute("/")({
+  ssr: false,
+  beforeLoad: async () => {
+    // Si l'utilisateur est déjà connecté ou a un atelier local, aller directement au tableau de bord (comme WhatsApp)
+    if (typeof window !== "undefined") {
+      try {
+        const { data: sessionData } = await supabase.auth.getSession();
+        if (sessionData?.session?.user) {
+          throw redirect({ to: "/dashboard" });
+        }
+        if (localStorage.getItem("couturpro_current_business_id")) {
+          throw redirect({ to: "/dashboard" });
+        }
+      } catch (e) {
+        if (e && typeof e === "object" && "to" in e) {
+          throw e;
+        }
+      }
+    }
+  },
   head: () => ({
     meta: [
       { title: "CouturPro — Le logiciel de gestion pour ateliers de couture en Afrique & dans le monde" },
@@ -68,6 +89,19 @@ const features = [
 ];
 
 function Landing() {
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const bizId = localStorage.getItem("couturpro_current_business_id");
+      supabase.auth.getSession().then(({ data }) => {
+        if (data?.session?.user || bizId) {
+          navigate({ to: "/dashboard", replace: true });
+        }
+      });
+    }
+  }, [navigate]);
+
   return (
     <div className="min-h-screen bg-background">
       <div className="faso-stripes h-2 w-full" />

@@ -7,6 +7,11 @@ function isNewSupabaseApiKey(value: string): boolean {
 
 function createSupabaseFetch(supabaseKey: string): typeof fetch {
   return (input, init) => {
+    // Si hors-ligne avéré côté navigateur, rejeter instantanément pour basculer sur IndexedDB sans latence
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      return Promise.reject(new TypeError('Failed to fetch (offline)'));
+    }
+
     const headers = new Headers(
       typeof Request !== 'undefined' && input instanceof Request ? input.headers : undefined,
     );
@@ -21,7 +26,26 @@ function createSupabaseFetch(supabaseKey: string): typeof fetch {
     }
 
     headers.set('apikey', supabaseKey);
-    return fetch(input, { ...init, headers });
+
+    // Timeout de sécurité de 4.5s max pour éviter tout blocage réseau prolongé sur mobile
+    const controller = new AbortController();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+
+    if (init?.signal) {
+      if (init.signal.aborted) {
+        controller.abort();
+      } else {
+        init.signal.addEventListener('abort', () => controller.abort());
+      }
+    } else {
+      timer = setTimeout(() => {
+        controller.abort();
+      }, 4500);
+    }
+
+    return fetch(input, { ...init, headers, signal: controller.signal }).finally(() => {
+      if (timer) clearTimeout(timer);
+    });
   };
 }
 

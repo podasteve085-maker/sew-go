@@ -5,45 +5,27 @@ import { AppShell } from "@/components/app-shell";
 export const Route = createFileRoute("/_authenticated")({
   ssr: false,
   beforeLoad: async () => {
-    const isOnline = typeof navigator !== "undefined" ? navigator.onLine : true;
-
-    // Mode hors-ligne : vérification de la session locale sans appel réseau
-    if (!isOnline) {
-      const { data: sessionData } = await supabase.auth.getSession();
-      if (sessionData?.session?.user) {
-        return { user: sessionData.session.user };
-      }
-      if (typeof window !== "undefined" && localStorage.getItem("couturpro_current_business_id")) {
-        return { user: { id: localStorage.getItem("couturpro_current_user_id") || "offline_user" } };
-      }
-      throw redirect({ to: "/auth" });
-    }
-
+    // 1. Vérification locale immédiate (0ms, aucune requête réseau, résilient hors-ligne)
     try {
-      // Mode en ligne : validation côté serveur Supabase
-      const { data: userData, error } = await supabase.auth.getUser();
-      if (error || !userData.user) {
-        // Micro-coupure réseau : vérifier la session locale avant d'évincer l'utilisateur
-        const { data: sessionData } = await supabase.auth.getSession();
-        if (sessionData?.session?.user) {
-          return { user: sessionData.session.user };
-        }
-        if (typeof window !== "undefined" && localStorage.getItem("couturpro_current_business_id")) {
-          return { user: { id: localStorage.getItem("couturpro_current_user_id") || "offline_user" } };
-        }
-        throw redirect({ to: "/auth" });
-      }
-      return { user: userData.user };
-    } catch {
       const { data: sessionData } = await supabase.auth.getSession();
       if (sessionData?.session?.user) {
         return { user: sessionData.session.user };
       }
-      if (typeof window !== "undefined" && localStorage.getItem("couturpro_current_business_id")) {
-        return { user: { id: localStorage.getItem("couturpro_current_user_id") || "offline_user" } };
-      }
-      throw redirect({ to: "/auth" });
+    } catch {
+      // ignore
     }
+
+    // 2. Mode secours hors-ligne (si le token a été purgé mais que l'atelier est actif)
+    if (typeof window !== "undefined") {
+      const offlineBiz = localStorage.getItem("couturpro_current_business_id");
+      if (offlineBiz) {
+        const offlineUserId = localStorage.getItem("couturpro_current_user_id") || "offline_user";
+        return { user: { id: offlineUserId } };
+      }
+    }
+
+    // 3. Aucune session locale ni atelier trouvé : redirection vers la page de connexion
+    throw redirect({ to: "/auth" });
   },
   component: () => (
     <AppShell>

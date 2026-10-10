@@ -1,4 +1,4 @@
-import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, Link, useNavigate, redirect } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import {
   Scissors,
@@ -28,6 +28,27 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 export const Route = createFileRoute("/auth")({
   ssr: false,
+  beforeLoad: async ({ search }) => {
+    // Si l'utilisateur a explicitement demandé à se déconnecter ou changer de compte, on ne redirige pas
+    if (search.logout || search.reconnect) {
+      return;
+    }
+    if (typeof window !== "undefined") {
+      try {
+        const { data: sessionData } = await supabase.auth.getSession();
+        if (sessionData?.session?.user) {
+          throw redirect({ to: "/dashboard" });
+        }
+        if (localStorage.getItem("couturpro_current_business_id")) {
+          throw redirect({ to: "/dashboard" });
+        }
+      } catch (e) {
+        if (e && typeof e === "object" && "to" in e) {
+          throw e;
+        }
+      }
+    }
+  },
   validateSearch: (
     search: Record<string, unknown>,
   ): { logout?: boolean; reconnect?: boolean; tab?: "signin" | "signup" } => {
@@ -90,6 +111,15 @@ function AuthPage() {
       }
       supabase.auth.signOut({ scope: "local" }).catch(() => {});
       return;
+    }
+
+    // 3. Si l'utilisateur est déjà connecté, redirection immédiate vers le tableau de bord
+    if (typeof window !== "undefined") {
+      supabase.auth.getSession().then(({ data }) => {
+        if (data?.session?.user || localStorage.getItem("couturpro_current_business_id")) {
+          navigate({ to: "/dashboard", replace: true });
+        }
+      });
     }
 
     // 4. Écoute des événements de récupération de mot de passe
