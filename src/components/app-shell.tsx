@@ -214,20 +214,16 @@ export function AppShell({ children }: { children: ReactNode }) {
               </Button>
             </div>
           ) : null}
-          <div className="flex items-center justify-between px-1 pt-2">
-            <span className="text-[10px] font-semibold uppercase tracking-wider text-sidebar-foreground/60">
+          <div className="flex items-center justify-between px-1.5 pt-3 border-t border-sidebar-border/70">
+            <span className="text-[11px] font-semibold uppercase tracking-wider text-sidebar-foreground/60">
               Réseau & Sync
             </span>
             <SyncStatusBadge />
           </div>
-          <div>
-            <p className="text-[10px] font-semibold uppercase tracking-wider text-sidebar-foreground/60 mb-1.5 px-1">
-              Thème d'affichage
-            </p>
-            <ThemeSegmentedControl />
+          <div className="pt-1 space-y-2">
+            <PwaInstallButton />
+            <SignOutButton />
           </div>
-          <PwaInstallButton />
-          <SignOutButton />
         </div>
       </aside>
 
@@ -553,19 +549,13 @@ export function AppShell({ children }: { children: ReactNode }) {
             </div>
           </div>
 
-          {/* Pied du tiroir : Réseau + Thème + Installation PWA + Bouton Se Déconnecter */}
-          <div className="p-3 border-t border-sidebar-border space-y-2.5 bg-sidebar/70">
+          {/* Pied du tiroir : Réseau + Installation PWA + Bouton Se Déconnecter */}
+          <div className="p-3.5 border-t border-sidebar-border space-y-3 bg-sidebar/70">
             <div className="flex items-center justify-between px-1">
               <span className="text-[10px] font-semibold uppercase tracking-wider text-sidebar-foreground/60">
                 État connexion
               </span>
               <SyncStatusBadge />
-            </div>
-            <div>
-              <p className="text-[10px] font-semibold uppercase tracking-wider text-sidebar-foreground/60 mb-1.5 px-1">
-                Thème d'affichage
-              </p>
-              <ThemeSegmentedControl />
             </div>
             <PwaInstallButton />
             <SignOutButton

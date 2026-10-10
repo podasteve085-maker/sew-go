@@ -12,7 +12,6 @@ import {
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-import { ThemeToggle } from "@/components/theme-toggle";
 import heroImage from "@/assets/hero-atelier.jpg";
 
 export const Route = createFileRoute("/")({
@@ -80,7 +79,6 @@ function Landing() {
           CouturPro
         </span>
         <div className="flex items-center gap-2 sm:gap-3">
-          <ThemeToggle />
           <Button asChild variant="secondary" size="sm">
             <Link to="/auth">Se connecter</Link>
           </Button>
