@@ -194,6 +194,32 @@ export async function clearStore(storeName: string): Promise<void> {
 export async function addToSyncQueue(
   item: Omit<SyncQueueItem, "id" | "createdAt" | "status" | "retryCount">,
 ): Promise<SyncQueueItem> {
+  const targetId = (item.payload["id"] as string) || item.tempId;
+  const existingQueue = await getPendingSyncQueue();
+
+  // Déduplication stricte : si une opération est déjà en attente pour cet objet, fusionner
+  if (targetId) {
+    const existing = existingQueue.find(
+      (q) =>
+        q.entity === item.entity &&
+        ((q.payload["id"] as string) === targetId || q.tempId === targetId) &&
+        q.status === "pending",
+    );
+
+    if (existing) {
+      const mergedAction =
+        existing.action === "create" && item.action === "update" ? "create" : item.action;
+      const updatedItem: SyncQueueItem = {
+        ...existing,
+        action: mergedAction,
+        payload: { ...existing.payload, ...item.payload },
+        createdAt: new Date().toISOString(),
+      };
+      await setLocalItem("sync_queue", updatedItem);
+      return updatedItem;
+    }
+  }
+
   const syncItem: SyncQueueItem = {
     ...item,
     id: `sync_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`,

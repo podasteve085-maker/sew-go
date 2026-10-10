@@ -80,6 +80,25 @@ export async function syncPendingMutations(): Promise<number> {
   return syncedCount;
 }
 
+async function uploadDataUrl(businessId: string, dataUrl: string, folder: string): Promise<string | null> {
+  try {
+    const res = await fetch(dataUrl);
+    const blob = await res.blob();
+    const ext = blob.type.includes("webp") ? "webp" : blob.type.includes("png") ? "png" : "jpg";
+    const path = `${businessId}/${folder}/${Math.random().toString(36).slice(2, 10)}_${Date.now()}.${ext}`;
+
+    const { error } = await supabase.storage.from("atelier").upload(path, blob, {
+      cacheControl: "31536000, public, immutable",
+      contentType: blob.type || "image/jpeg",
+      upsert: false,
+    });
+    if (error) return null;
+    return path;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Traite une mutation unitaire et met à jour la table de mappage des identifiants temporaires.
  */
@@ -104,31 +123,42 @@ async function processSyncItem(
   // 2. Traitement selon l'entité
   switch (item.entity) {
     case "client": {
-      if (item.action === "create") {
-        const tempId = item.tempId || (payload["id"] as string);
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const insertData: Record<string, any> = { ...payload };
-        // Si c'est un ID temporaire non-UUID, on laisse la base générer le vrai UUID
-        if (tempId && tempId.startsWith("temp_")) {
-          delete insertData["id"];
-        }
-        const { data, error } = await supabase.from("clients").insert(insertData as never).select().single();
-        if (error) throw error;
-        if (tempId && data?.id) {
-          idMapping.set(tempId, data.id);
-          // Mettre à jour le store local avec le vrai ID
-          await deleteLocalItem("clients", tempId);
-          await setLocalItem("clients", data);
-        }
-      } else if (item.action === "update") {
+      if (item.action === "create" || item.action === "update") {
         const id = (payload["id"] as string) || item.tempId!;
         const targetId = idMapping.get(id) || id;
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const updateData: Record<string, any> = { ...payload };
-        delete updateData["id"];
-        const { data, error } = await supabase.from("clients").update(updateData as never).eq("id", targetId).select().single();
+        const upsertData: Record<string, any> = { ...payload };
+
+        if (targetId && !targetId.startsWith("temp_")) {
+          upsertData["id"] = targetId;
+        } else {
+          delete upsertData["id"];
+        }
+
+        // Si la photo a été stockée en DataURL base64 hors-ligne, on la téléverse vers Supabase Storage
+        if (typeof upsertData["photo_url"] === "string" && upsertData["photo_url"].startsWith("data:")) {
+          const bizId = upsertData["business_id"];
+          if (bizId) {
+            const uploadedPath = await uploadDataUrl(bizId, upsertData["photo_url"], "clients");
+            if (uploadedPath) {
+              upsertData["photo_url"] = uploadedPath;
+            }
+          }
+        }
+
+        const { data, error } = await supabase
+          .from("clients")
+          .upsert(upsertData as never, { onConflict: "id" })
+          .select()
+          .single();
         if (error) throw error;
-        if (data) await setLocalItem("clients", data);
+        if (data) {
+          if (id && id !== data.id) idMapping.set(id, data.id);
+          await setLocalItem("clients", data);
+          if (id && id.startsWith("temp_")) {
+            await deleteLocalItem("clients", id);
+          }
+        }
       } else if (item.action === "delete") {
         const id = (payload["id"] as string) || item.tempId!;
         const targetId = idMapping.get(id) || id;
@@ -140,35 +170,33 @@ async function processSyncItem(
     }
 
     case "order": {
-      if (item.action === "create") {
-        const tempId = item.tempId || (payload["id"] as string);
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const insertData: Record<string, any> = { ...payload };
-        if (tempId && tempId.startsWith("temp_")) {
-          delete insertData["id"];
-        }
-        // Supprimer les champs imbriqués calculés non-colonnes
-        delete insertData["clients"];
-        delete insertData["payments"];
-
-        const { data, error } = await supabase.from("orders").insert(insertData as never).select().single();
-        if (error) throw error;
-        if (tempId && data?.id) {
-          idMapping.set(tempId, data.id);
-          await deleteLocalItem("orders", tempId);
-          await setLocalItem("orders", data);
-        }
-      } else if (item.action === "update") {
+      if (item.action === "create" || item.action === "update") {
         const id = (payload["id"] as string) || item.tempId!;
         const targetId = idMapping.get(id) || id;
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const updateData: Record<string, any> = { ...payload };
-        delete updateData["id"];
-        delete updateData["clients"];
-        delete updateData["payments"];
-        const { data, error } = await supabase.from("orders").update(updateData as never).eq("id", targetId).select().single();
+        const upsertData: Record<string, any> = { ...payload };
+        delete upsertData["clients"];
+        delete upsertData["payments"];
+
+        if (targetId && !targetId.startsWith("temp_")) {
+          upsertData["id"] = targetId;
+        } else {
+          delete upsertData["id"];
+        }
+
+        const { data, error } = await supabase
+          .from("orders")
+          .upsert(upsertData as never, { onConflict: "id" })
+          .select()
+          .single();
         if (error) throw error;
-        if (data) await setLocalItem("orders", data);
+        if (data) {
+          if (id && id !== data.id) idMapping.set(id, data.id);
+          await setLocalItem("orders", data);
+          if (id && id.startsWith("temp_")) {
+            await deleteLocalItem("orders", id);
+          }
+        }
       } else if (item.action === "delete") {
         const id = (payload["id"] as string) || item.tempId!;
         const targetId = idMapping.get(id) || id;
@@ -186,7 +214,11 @@ async function processSyncItem(
         if (typeof insertData["id"] === "string" && insertData["id"].startsWith("temp_")) {
           delete insertData["id"];
         }
-        const { data, error } = await supabase.from("payments").insert(insertData as never).select().single();
+        const { data, error } = await supabase
+          .from("payments")
+          .upsert(insertData as never, { onConflict: "id" })
+          .select()
+          .single();
         if (error) throw error;
         if (data) await setLocalItem("payments", data);
       } else if (item.action === "delete") {
@@ -210,10 +242,15 @@ async function processSyncItem(
         if (tempId && tempId.startsWith("temp_")) {
           delete setData["id"];
         }
-        const { data: setRow, error: setError } = await supabase.from("measurement_sets").insert(setData as never).select().single();
+        const { data: setRow, error: setError } = await supabase
+          .from("measurement_sets")
+          .upsert(setData as never, { onConflict: "id" })
+          .select()
+          .single();
         if (setError) throw setError;
 
         if (values.length > 0 && setRow?.id) {
+          await supabase.from("measurement_values").delete().eq("set_id", setRow.id);
           const valuesToInsert = values.map((v) => ({
             set_id: setRow.id,
             name: v["name"],
@@ -241,24 +278,18 @@ async function processSyncItem(
     }
 
     case "appointment": {
-      if (item.action === "create") {
+      if (item.action === "create" || item.action === "update") {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const insertData: Record<string, any> = { ...payload };
         delete insertData["clients"];
         if (typeof insertData["id"] === "string" && insertData["id"].startsWith("temp_")) {
           delete insertData["id"];
         }
-        const { data, error } = await supabase.from("appointments").insert(insertData as never).select().single();
-        if (error) throw error;
-        if (data) await setLocalItem("appointments", data);
-      } else if (item.action === "update") {
-        const id = (payload["id"] as string) || item.tempId!;
-        const targetId = idMapping.get(id) || id;
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const updateData: Record<string, any> = { ...payload };
-        delete updateData["id"];
-        delete updateData["clients"];
-        const { data, error } = await supabase.from("appointments").update(updateData as never).eq("id", targetId).select().single();
+        const { data, error } = await supabase
+          .from("appointments")
+          .upsert(insertData as never, { onConflict: "id" })
+          .select()
+          .single();
         if (error) throw error;
         if (data) await setLocalItem("appointments", data);
       } else if (item.action === "delete") {

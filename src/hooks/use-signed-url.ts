@@ -4,7 +4,7 @@ import { supabase } from "@/integrations/supabase/client";
 export const BUCKET = "atelier";
 
 /** Génère un UUID v4 compatible avec tous les navigateurs (Safari iOS inclus). */
-function uuid(): string {
+export function uuid(): string {
   if (
     typeof crypto !== "undefined" &&
     typeof crypto.randomUUID === "function"
@@ -136,7 +136,15 @@ export async function compressImage(
   });
 }
 
-export async function uploadImage(businessId: string, file: File, folder: string) {
+export function blobToDataUrl(blob: Blob): Promise<string> {
+  return new Promise((resolve) => {
+    const reader = new FileReader();
+    reader.onloadend = () => resolve(reader.result as string);
+    reader.readAsDataURL(blob);
+  });
+}
+
+export async function uploadImage(businessId: string, file: File, folder: string): Promise<string> {
   // Ajustement précis selon le dossier pour économie d'espace maximale :
   // - "atelier" (logo) ou "clients" (avatar) : format compact 400x400
   // - "orders" ou "catalog" : format haute définition équilibré 1280x1280
@@ -146,16 +154,29 @@ export async function uploadImage(businessId: string, file: File, folder: string
     : { maxWidth: 1280, maxHeight: 1280, quality: 0.78 };
 
   const { blob, ext, contentType } = await compressImage(file, compressionConfig);
+
+  // Si formellement hors-ligne : convertir immédiatement en DataURL sans tenter le réseau
+  const isOnline = typeof navigator !== "undefined" ? navigator.onLine : true;
+  if (!isOnline) {
+    return await blobToDataUrl(blob);
+  }
+
   const path = `${businessId}/${folder}/${uuid()}.${ext}`;
 
-  // Cache immutable 1 an : le navigateur ne retélécharge jamais une photo existante (0 egress)
-  const { error } = await supabase.storage.from(BUCKET).upload(path, blob, {
-    cacheControl: "31536000, public, immutable",
-    contentType,
-    upsert: false,
-  });
-  if (error) throw error;
-  return path;
+  try {
+    // Cache immutable 1 an : le navigateur ne retélécharge jamais une photo existante (0 egress)
+    const { error } = await supabase.storage.from(BUCKET).upload(path, blob, {
+      cacheControl: "31536000, public, immutable",
+      contentType,
+      upsert: false,
+    });
+    if (!error) return path;
+  } catch {
+    // Échec réseau ou micro-coupure : repli sur le DataURL local
+  }
+
+  // Fallback universel : retourner le DataURL local pour affichage et sauvegarde immédiate
+  return await blobToDataUrl(blob);
 }
 
 /**

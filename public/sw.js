@@ -1,5 +1,5 @@
 /**
- * CouturPro — Service Worker (v2)
+ * CouturPro — Service Worker (v4)
  * Architecture Offline-First pour artisans couturiers.
  *
  * Stratégies :
@@ -8,7 +8,7 @@
  * 3. Données API (Supabase) : Laissées au SyncEngine / IndexedDB client
  */
 
-const CACHE_NAME = "couturpro-v3";
+const CACHE_NAME = "couturpro-v4";
 const OFFLINE_FALLBACK = "/offline.html";
 
 /** Ressources pré-mises en cache à l'installation (shell statique de base) */

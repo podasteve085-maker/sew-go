@@ -1,6 +1,6 @@
 import { supabase } from "@/integrations/supabase/client";
 import type { OrderStatus } from "@/lib/domain";
-import { deleteStorageFiles } from "@/hooks/use-signed-url";
+import { deleteStorageFiles, uuid } from "@/hooks/use-signed-url";
 import {
   setLocalItem,
   setLocalItems,
@@ -203,6 +203,35 @@ export async function fetchOrder(id: string): Promise<OrderRow | null> {
   return getLocalItem<OrderRow>("orders", id);
 }
 
+export function deduplicateClients(clients: ClientRow[]): ClientRow[] {
+  const seenIds = new Set<string>();
+  const seenFingerprints = new Set<string>();
+  const unique: ClientRow[] = [];
+
+  for (const client of clients) {
+    if (!client || !client.id) continue;
+    if (seenIds.has(client.id)) continue;
+    seenIds.add(client.id);
+
+    // Empreinte unique : prénom + nom + téléphone normalisé
+    const normFirst = (client.first_name || "").trim().toLowerCase();
+    const normLast = (client.last_name || "").trim().toLowerCase();
+    const normPhone = (client.phone || "").replace(/\D/g, "");
+
+    const fingerprint = `${normFirst}|${normLast}|${normPhone}`;
+    if (normFirst && (normLast || normPhone) && seenFingerprints.has(fingerprint)) {
+      // Doublon strict détecté : ignorer la copie superflue
+      continue;
+    }
+    if (normFirst && (normLast || normPhone)) {
+      seenFingerprints.add(fingerprint);
+    }
+    unique.push(client);
+  }
+
+  return unique;
+}
+
 export async function fetchClients(term?: string): Promise<ClientRow[]> {
   const businessId = await currentBusinessId();
 
@@ -215,7 +244,7 @@ export async function fetchClients(term?: string): Promise<ClientRow[]> {
       }
       const { data, error } = await query.order("first_name", { ascending: true });
       if (!error && data) {
-        const rows = data as unknown as ClientRow[];
+        const rows = deduplicateClients(data as unknown as ClientRow[]);
         setLocalItems("clients", rows).catch(() => {});
         return rows;
       }
@@ -236,7 +265,7 @@ export async function fetchClients(term?: string): Promise<ClientRow[]> {
         (c.whatsapp && c.whatsapp.toLowerCase().includes(q)),
     );
   }
-  return filtered.sort((a, b) => a.first_name.localeCompare(b.first_name));
+  return deduplicateClients(filtered).sort((a, b) => a.first_name.localeCompare(b.first_name));
 }
 
 export async function fetchClient(id: string): Promise<ClientRow | null> {
@@ -397,6 +426,73 @@ export async function fetchOrderImages(orderId: string): Promise<OrderImageRow[]
   }
 }
 
+export const DEFAULT_GARMENT_TYPES: { id: string; name: string; default_price: number | null }[] = [
+  { id: "default_boubou", name: "Boubou", default_price: null },
+  { id: "default_faso", name: "Faso Dan Fani", default_price: null },
+  { id: "default_costume", name: "Costume", default_price: null },
+  { id: "default_chemise", name: "Chemise", default_price: null },
+  { id: "default_pantalon", name: "Pantalon", default_price: null },
+  { id: "default_robe", name: "Robe", default_price: null },
+  { id: "default_jupe", name: "Jupe", default_price: null },
+  { id: "default_ensemble", name: "Ensemble", default_price: null },
+  { id: "default_traditionnelle", name: "Tenue traditionnelle", default_price: null },
+  { id: "default_uniforme", name: "Uniforme", default_price: null },
+  { id: "default_autre", name: "Autre", default_price: null },
+];
+
+export const DEFAULT_MEASUREMENT_TEMPLATES: { id: string; name: string; fields: string[] }[] = [
+  {
+    id: "default_homme",
+    name: "Homme",
+    fields: [
+      "Tour de poitrine",
+      "Tour de taille",
+      "Tour de hanches",
+      "Carrure",
+      "Longueur épaule",
+      "Longueur dos",
+      "Longueur manche",
+      "Tour de bras",
+      "Tour de poignet",
+      "Longueur pantalon",
+      "Tour de cuisse",
+      "Tour de genou",
+      "Tour de cheville",
+    ],
+  },
+  {
+    id: "default_femme",
+    name: "Femme",
+    fields: [
+      "Tour de poitrine",
+      "Sous-poitrine",
+      "Tour de taille",
+      "Tour de hanches",
+      "Carrure",
+      "Longueur épaule",
+      "Longueur dos",
+      "Longueur devant",
+      "Longueur manche",
+      "Tour de bras",
+      "Longueur robe",
+      "Longueur jupe",
+      "Tour de cuisse",
+    ],
+  },
+  {
+    id: "default_enfant",
+    name: "Enfant",
+    fields: [
+      "Tour de poitrine",
+      "Tour de taille",
+      "Tour de hanches",
+      "Longueur dos",
+      "Longueur manche",
+      "Longueur pantalon",
+    ],
+  },
+];
+
 export async function fetchGarmentTypes(): Promise<{ id: string; name: string; default_price: number | null }[]> {
   const businessId = await currentBusinessId();
 
@@ -407,7 +503,7 @@ export async function fetchGarmentTypes(): Promise<{ id: string; name: string; d
         .select("id, name, default_price")
         .eq("business_id", businessId)
         .order("name");
-      if (!error && data) {
+      if (!error && data && data.length > 0) {
         const rows = data as unknown as { id: string; name: string; default_price: number | null }[];
         setLocalItems("garment_types", rows).catch(() => {});
         return rows;
@@ -418,22 +514,54 @@ export async function fetchGarmentTypes(): Promise<{ id: string; name: string; d
   }
 
   const all = await getAllLocalItems<{ id: string; name: string; default_price: number | null; business_id?: string }>("garment_types");
-  return all.filter((g) => g.business_id === businessId || !g.business_id);
+  const filtered = all.filter((g) => g.business_id === businessId || !g.business_id);
+  return filtered.length > 0 ? filtered : DEFAULT_GARMENT_TYPES;
 }
 
 export async function fetchTemplates(): Promise<{ id: string; name: string; fields: string[] }[]> {
-  const businessId = await currentBusinessId();
+  const getFallbackTemplates = (): { id: string; name: string; fields: string[] }[] => {
+    if (typeof window !== "undefined") {
+      try {
+        const cached = localStorage.getItem("couturpro_cached_templates");
+        if (cached) {
+          const parsed = JSON.parse(cached);
+          if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+        }
+      } catch {
+        // ignore
+      }
+    }
+    return DEFAULT_MEASUREMENT_TEMPLATES;
+  };
+
+  const isOnline = typeof navigator !== "undefined" ? navigator.onLine : true;
+  if (!isOnline) {
+    return getFallbackTemplates();
+  }
+
   try {
+    const businessId = await currentBusinessId();
     const { data, error } = await supabase
       .from("measurement_templates")
       .select("id, name, fields")
       .eq("business_id", businessId)
       .order("name");
-    if (error) throw error;
-    return (data ?? []) as unknown as { id: string; name: string; fields: string[] }[];
+    if (!error && data && data.length > 0) {
+      const rows = data as unknown as { id: string; name: string; fields: string[] }[];
+      if (typeof window !== "undefined") {
+        try {
+          localStorage.setItem("couturpro_cached_templates", JSON.stringify(rows));
+        } catch {
+          // ignore
+        }
+      }
+      return rows;
+    }
   } catch {
-    return [];
+    // Mode hors-ligne ou erreur réseau
   }
+
+  return getFallbackTemplates();
 }
 
 export type CatalogModelRow = {
@@ -540,32 +668,11 @@ export async function saveClientOffline(
   const cData: Record<string, any> = clientData;
   const businessId = (cData["business_id"] as string) || (await currentBusinessId());
 
-  if (isOnline) {
-    try {
-      if (isNew) {
-        const { data, error } = await supabase.from("clients").insert({ ...cData, business_id: businessId } as never).select().single();
-        if (!error && data) {
-          const row = data as unknown as ClientRow;
-          await setLocalItem("clients", row);
-          return row;
-        }
-      } else if (existingId) {
-        const { data, error } = await supabase.from("clients").update(cData as never).eq("id", existingId).select().single();
-        if (!error && data) {
-          const row = data as unknown as ClientRow;
-          await setLocalItem("clients", row);
-          return row;
-        }
-      }
-    } catch {
-      // Fallback hors-ligne
-    }
-  }
+  // UUID permanent et stable dès la création : élimine 100% des doublons
+  const clientId = existingId || uuid();
 
-  // Écriture locale optimiste
-  const tempId = existingId || `temp_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
   const localClient: ClientRow = {
-    id: tempId,
+    id: clientId,
     business_id: businessId,
     first_name: (cData["first_name"] as string) || "",
     last_name: (cData["last_name"] as string) || "",
@@ -580,12 +687,33 @@ export async function saveClientOffline(
     created_at: new Date().toISOString(),
   };
 
+  // 1. Écriture locale instantanée à 0ms dans IndexedDB
   await setLocalItem("clients", localClient);
+
+  if (isOnline) {
+    try {
+      // Upsert idempotent : ne crée JAMAIS de doublon même en cas de re-soumission
+      const { data, error } = await supabase
+        .from("clients")
+        .upsert(localClient as never, { onConflict: "id" })
+        .select()
+        .single();
+      if (!error && data) {
+        const row = data as unknown as ClientRow;
+        await setLocalItem("clients", row);
+        return row;
+      }
+    } catch {
+      // Fallback hors-ligne
+    }
+  }
+
+  // 2. Mise en file d'attente de synchronisation avec son UUID définitif
   await addToSyncQueue({
     entity: "client",
     action: isNew ? "create" : "update",
     payload: localClient,
-    tempId: isNew ? tempId : undefined,
+    tempId: clientId,
   });
 
   return localClient;
@@ -601,39 +729,9 @@ export async function saveOrderOffline(
   const oData: Record<string, any> = orderData;
   const businessId = (oData["business_id"] as string) || (await currentBusinessId());
 
-  if (isOnline) {
-    try {
-      if (isNew) {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const insertPayload: Record<string, any> = { ...oData, business_id: businessId };
-        delete insertPayload["clients"];
-        delete insertPayload["payments"];
-        const { data, error } = await supabase.from("orders").insert(insertPayload as never).select().single();
-        if (!error && data) {
-          const row = data as unknown as OrderRow;
-          await setLocalItem("orders", row);
-          return row;
-        }
-      } else if (existingId) {
-        const updatePayload = { ...oData };
-        delete updatePayload["clients"];
-        delete updatePayload["payments"];
-        const { data, error } = await supabase.from("orders").update(updatePayload as never).eq("id", existingId).select().single();
-        if (!error && data) {
-          const row = data as unknown as OrderRow;
-          await setLocalItem("orders", row);
-          return row;
-        }
-      }
-    } catch {
-      // Fallback hors-ligne
-    }
-  }
-
-  // Écriture locale optimiste
-  const tempId = existingId || `temp_ord_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  const orderId = existingId || uuid();
   const localOrder: OrderRow = {
-    id: tempId,
+    id: orderId,
     business_id: businessId,
     client_id: (oData["client_id"] as string) || "",
     reference: (oData["reference"] as string) || `CMD-${Date.now().toString().slice(-4)}`,
@@ -653,11 +751,33 @@ export async function saveOrderOffline(
   };
 
   await setLocalItem("orders", localOrder);
+
+  if (isOnline) {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const upsertPayload: Record<string, any> = { ...localOrder };
+      delete upsertPayload["clients"];
+      delete upsertPayload["payments"];
+      const { data, error } = await supabase
+        .from("orders")
+        .upsert(upsertPayload as never, { onConflict: "id" })
+        .select()
+        .single();
+      if (!error && data) {
+        const row = data as unknown as OrderRow;
+        await setLocalItem("orders", row);
+        return row;
+      }
+    } catch {
+      // Fallback hors-ligne
+    }
+  }
+
   await addToSyncQueue({
     entity: "order",
     action: isNew ? "create" : "update",
     payload: localOrder,
-    tempId: isNew ? tempId : undefined,
+    tempId: orderId,
   });
 
   return localOrder;
@@ -665,10 +785,26 @@ export async function saveOrderOffline(
 
 export async function savePaymentOffline(paymentData: Record<string, unknown>): Promise<PaymentRow> {
   const isOnline = typeof navigator !== "undefined" ? navigator.onLine : true;
+  const paymentId = (paymentData["id"] as string) || uuid();
+
+  const localPayment: PaymentRow = {
+    id: paymentId,
+    order_id: (paymentData["order_id"] as string) || "",
+    amount: (() => { const v = Number(paymentData["amount"] || 0); return isNaN(v) || v < 0 ? 0 : v; })(),
+    method: (paymentData["method"] as string) || "especes",
+    paid_at: (paymentData["paid_at"] as string) || (new Date().toISOString().split("T")[0] as string),
+    note: (paymentData["note"] as string) || null,
+  };
+
+  await setLocalItem("payments", localPayment);
 
   if (isOnline) {
     try {
-      const { data, error } = await supabase.from("payments").insert(paymentData as never).select().single();
+      const { data, error } = await supabase
+        .from("payments")
+        .upsert(localPayment as never, { onConflict: "id" })
+        .select()
+        .single();
       if (!error && data) {
         const row = data as unknown as PaymentRow;
         await setLocalItem("payments", row);
@@ -679,22 +815,11 @@ export async function savePaymentOffline(paymentData: Record<string, unknown>): 
     }
   }
 
-  const tempId = `temp_pay_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-  const localPayment: PaymentRow = {
-    id: tempId,
-    order_id: (paymentData["order_id"] as string) || "",
-    amount: (() => { const v = Number(paymentData["amount"] || 0); return isNaN(v) || v < 0 ? 0 : v; })(),
-    method: (paymentData["method"] as string) || "especes",
-    paid_at: (paymentData["paid_at"] as string) || (new Date().toISOString().split("T")[0] as string),
-    note: (paymentData["note"] as string) || null,
-  };
-
-  await setLocalItem("payments", localPayment);
   await addToSyncQueue({
     entity: "payment",
     action: "create",
     payload: localPayment,
-    tempId,
+    tempId: paymentId,
   });
 
   return localPayment;
@@ -705,15 +830,33 @@ export async function saveMeasurementSetOffline(
   values: Array<{ name: string; value: number | null; unit: string; position: number }>,
 ): Promise<MeasurementSetRow> {
   const isOnline = typeof navigator !== "undefined" ? navigator.onLine : true;
+  const setId = (setData["id"] as string) || uuid();
+
+  const localSet: MeasurementSetRow = {
+    id: setId,
+    client_id: (setData["client_id"] as string) || "",
+    label: (setData["label"] as string) || null,
+    template_name: (setData["template_name"] as string) || null,
+    notes: (setData["notes"] as string) || null,
+    recorded_at: new Date().toISOString(),
+    measurement_values: values.map((v, i) => ({ ...v, id: `val_${i}` })),
+  };
+
+  await setLocalItem("measurement_sets", localSet);
 
   if (isOnline) {
     try {
-      const { data: setRow, error: setError } = await supabase.from("measurement_sets").insert(setData as never).select().single();
+      const { data: setRow, error: setError } = await supabase
+        .from("measurement_sets")
+        .upsert({ ...setData, id: setId } as never, { onConflict: "id" })
+        .select()
+        .single();
       if (!setError && setRow) {
         if (values.length > 0) {
+          await supabase.from("measurement_values").delete().eq("set_id", setId);
           await supabase.from("measurement_values").insert(
             values.map((v) => ({
-              set_id: (setRow as { id: string }).id,
+              set_id: setId,
               name: v.name,
               value: v.value,
               unit: v.unit,
@@ -733,23 +876,11 @@ export async function saveMeasurementSetOffline(
     }
   }
 
-  const tempId = `temp_meas_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-  const localSet: MeasurementSetRow = {
-    id: tempId,
-    client_id: (setData["client_id"] as string) || "",
-    label: (setData["label"] as string) || null,
-    template_name: (setData["template_name"] as string) || null,
-    notes: (setData["notes"] as string) || null,
-    recorded_at: new Date().toISOString(),
-    measurement_values: values.map((v, i) => ({ ...v, id: `val_${i}` })),
-  };
-
-  await setLocalItem("measurement_sets", localSet);
   await addToSyncQueue({
     entity: "measurement_set",
     action: "create",
-    payload: { ...setData, id: tempId, values },
-    tempId,
+    payload: { ...setData, id: setId, values },
+    tempId: setId,
   });
 
   return localSet;

@@ -40,16 +40,30 @@ function ErrorComponent({ error, reset }: { error: Error; reset: () => void }) {
   console.error(error);
   const router = useRouter();
 
+  // Détecter les erreurs d'import de chunk (modules Vite manquants offline)
+  const isChunkError = error?.message && (
+    error.message.includes("Importing a module script") ||
+    error.message.includes("Failed to fetch dynamically imported module") ||
+    error.message.includes("error loading dynamically imported module") ||
+    error.message.includes("Unable to preload CSS")
+  );
+
+  const isOffline = typeof navigator !== "undefined" && !navigator.onLine;
+
   return (
     <div className="flex min-h-screen items-center justify-center bg-background px-4">
       <div className="max-w-md text-center">
         <h1 className="text-xl font-semibold tracking-tight text-foreground">
-          Cette page n'a pas pu s'afficher
+          {isChunkError
+            ? "Page non disponible hors ligne"
+            : "Cette page n'a pas pu s'afficher"}
         </h1>
         <p className="mt-2 text-sm text-muted-foreground">
-          Une erreur est survenue. Réessayez ou revenez à l'accueil.
+          {isChunkError
+            ? "Cette section n'a pas encore été mise en cache. Reconnectez-vous à Internet ou naviguez vers une page déjà visitée."
+            : "Une erreur est survenue. Réessayez ou revenez à l'accueil."}
         </p>
-        {error?.message && (
+        {!isChunkError && error?.message && (
           <div className="mt-4 rounded-xl border border-destructive/20 bg-destructive/5 p-3 text-left font-mono text-xs text-destructive max-h-32 overflow-auto break-all">
             {error.message}
           </div>
@@ -57,19 +71,24 @@ function ErrorComponent({ error, reset }: { error: Error; reset: () => void }) {
         <div className="mt-6 flex flex-wrap justify-center gap-2">
           <button
             onClick={() => {
-              router.invalidate();
-              reset();
+              if (isChunkError && !isOffline) {
+                // En ligne : recharger complètement pour récupérer le chunk manquant
+                window.location.reload();
+              } else {
+                router.invalidate();
+                reset();
+              }
             }}
             className="inline-flex items-center justify-center rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
           >
             Réessayer
           </button>
-          <a
-            href="/dashboard"
+          <Link
+            to="/dashboard"
             className="inline-flex items-center justify-center rounded-md border border-input bg-background px-4 py-2 text-sm font-medium text-foreground transition-colors hover:bg-accent"
           >
             Tableau de bord
-          </a>
+          </Link>
         </div>
       </div>
     </div>
@@ -203,7 +222,7 @@ function RootComponent() {
     }
   }, []);
 
-  // Préchargement proactif des routes clés pour naviguer sans réseau
+  // Préchargement proactif et parallèle des routes clés pour naviguer sans réseau
   useEffect(() => {
     const routesToPreload = [
       "/dashboard",
@@ -214,27 +233,21 @@ function RootComponent() {
       "/catalogue",
       "/rendez-vous",
       "/statistiques",
-      "/abonnement",
       "/atelier",
     ] as const;
 
-    const preloadAll = async () => {
-      for (const path of routesToPreload) {
-        try {
-          await router.preloadRoute({ to: path });
-        } catch {
-          // ignore
-        }
-      }
+    const preloadAll = () => {
+      Promise.allSettled(
+        routesToPreload.map((path) =>
+          router.preloadRoute({ to: path }).catch(() => {})
+        )
+      );
     };
 
     if (typeof window !== "undefined") {
-      const win = window as unknown as { requestIdleCallback?: (cb: () => void) => void };
-      if (typeof win.requestIdleCallback === "function") {
-        win.requestIdleCallback(() => preloadAll());
-      } else {
-        setTimeout(preloadAll, 1200);
-      }
+      // Lancer immédiatement sans attendre requestIdleCallback
+      // pour garantir le cache des chunks avant perte réseau
+      setTimeout(preloadAll, 500);
     }
   }, [router]);
 

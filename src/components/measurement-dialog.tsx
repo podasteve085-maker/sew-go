@@ -9,6 +9,7 @@ import {
   fetchClients,
   type MeasurementSetRow,
   saveMeasurementSetOffline,
+  DEFAULT_MEASUREMENT_TEMPLATES,
 } from "@/lib/queries";
 import { today, fullName } from "@/lib/format";
 import { Button } from "@/components/ui/button";
@@ -82,16 +83,35 @@ export function MeasurementDialog({
         }));
       setFields(existing);
     } else {
-      setTemplateName("");
-      setFields([]);
+      // Mode create : pré-charger automatiquement un template pour que les champs
+      // soient immédiatement visibles (essentiel en offline)
       setNotes("");
       setRecordedAt(today());
+
+      // Déterminer le template selon le genre du client sélectionné
+      const clientId = initialClientId;
+      const client = clientId ? clients.data?.find((c) => c.id === clientId) : null;
+      const genderMap: Record<string, string> = { homme: "Homme", masculin: "Homme", m: "Homme", femme: "Femme", féminin: "Femme", f: "Femme", enfant: "Enfant" };
+      const gender = client?.gender?.toLowerCase()?.trim() ?? "";
+      const autoTemplateName = genderMap[gender] || "Homme";
+
+      const source = templates.data && templates.data.length > 0
+        ? templates.data
+        : DEFAULT_MEASUREMENT_TEMPLATES;
+      const tpl = source.find((t) => t.name === autoTemplateName);
+      setTemplateName(autoTemplateName);
+      setFields((tpl?.fields ?? []).map((f) => ({ name: f, value: "" })));
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, initialClientId, initialSet, mode]);
 
   function pickTemplate(name: string) {
     setTemplateName(name);
-    const tpl = templates.data?.find((t) => t.name === name);
+    // Priorité : templates serveur → DEFAULT_MEASUREMENT_TEMPLATES (offline fallback)
+    const source = templates.data && templates.data.length > 0
+      ? templates.data
+      : DEFAULT_MEASUREMENT_TEMPLATES;
+    const tpl = source.find((t) => t.name === name);
     setFields((tpl?.fields ?? []).map((f) => ({ name: f, value: "" })));
   }
 
