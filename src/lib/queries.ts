@@ -18,39 +18,69 @@ export async function currentBusinessId(): Promise<string> {
     if (cachedBizId) return cachedBizId;
   }
 
-  // 2. Si absent du cache local, tenter la session active Supabase
+  // 2. Vérification dans IndexedDB workshop_data
   try {
-    const { data: sessionData } = await supabase.auth.getSession();
-    const userId = sessionData?.session?.user?.id;
-    if (userId) {
-      const { data: business, error: businessError } = await supabase
-        .from("businesses")
-        .select("id")
-        .eq("owner_id", userId)
-        .maybeSingle();
-      if (!businessError && business?.id) {
-        if (typeof window !== "undefined") {
-          try {
-            localStorage.setItem("couturpro_current_business_id", business.id);
-            localStorage.setItem("couturpro_current_user_id", userId);
-          } catch {
-            // ignore
-          }
+    const workshops = await getAllLocalItems<{ id: string }>("workshop_data");
+    const firstW = workshops[0];
+    if (firstW && firstW.id) {
+      if (typeof window !== "undefined") {
+        try {
+          localStorage.setItem("couturpro_current_business_id", firstW.id);
+        } catch {
+          // ignore
         }
-        return business.id as string;
       }
+      return firstW.id;
     }
   } catch {
-    // Mode hors-ligne : bascule sur le cache local
+    // ignore
   }
 
-  // 3. Fallback cache local hors-ligne
-  if (typeof window !== "undefined") {
-    const cachedBizId = localStorage.getItem("couturpro_current_business_id");
-    if (cachedBizId) return cachedBizId;
+  // 3. Si en ligne, tenter la session active Supabase
+  if (typeof navigator === "undefined" || navigator.onLine) {
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const userId = sessionData?.session?.user?.id;
+      if (userId) {
+        const { data: business, error: businessError } = await supabase
+          .from("businesses")
+          .select("id")
+          .eq("owner_id", userId)
+          .maybeSingle();
+        if (!businessError && business?.id) {
+          if (typeof window !== "undefined") {
+            try {
+              localStorage.setItem("couturpro_current_business_id", business.id);
+              localStorage.setItem("couturpro_current_user_id", userId);
+            } catch {
+              // ignore
+            }
+          }
+          return business.id as string;
+        }
+      }
+    } catch {
+      // ignore
+    }
   }
 
-  throw new Error("Session atelier introuvable. Connectez-vous une première fois en ligne.");
+  // 4. Déduction locale depuis les commandes ou clients déjà présents
+  try {
+    const orders = await getAllLocalItems<OrderRow>("orders");
+    const firstO = orders[0];
+    if (firstO && firstO.business_id) {
+      return firstO.business_id;
+    }
+    const clients = await getAllLocalItems<ClientRow>("clients");
+    const firstC = clients[0];
+    if (firstC && firstC.business_id) {
+      return firstC.business_id;
+    }
+  } catch {
+    // ignore
+  }
+
+  return "";
 }
 
 export type ClientRow = {
@@ -98,8 +128,8 @@ export type OrderRow = {
   delivered_to: string | null;
   delivery_note: string | null;
   created_at: string;
-  clients?: Pick<ClientRow, "first_name" | "last_name" | "phone" | "whatsapp"> | null;
-  payments?: { id?: string; amount: number }[];
+  clients?: Pick<ClientRow, "first_name" | "last_name" | "phone" | "whatsapp"> | null | undefined;
+  payments?: { id?: string; amount: number }[] | undefined;
 };
 
 export type AppointmentRow = {
@@ -201,14 +231,23 @@ export async function fetchOrders(opts?: { clientId?: string }): Promise<OrderRo
 
   if (typeof navigator === "undefined" || navigator.onLine) {
     try {
-      let query = supabase.from("orders").select(ORDER_SELECT).eq("business_id", businessId);
+      let query = supabase.from("orders").select(ORDER_SELECT);
+      if (businessId) {
+        query = query.eq("business_id", businessId);
+      }
       if (opts?.clientId) query = query.eq("client_id", opts.clientId);
       const { data, error } = await query
         .order("due_date", { ascending: true, nullsFirst: false })
         .order("created_at", { ascending: false });
       if (!error && data) {
         const rows = data as unknown as OrderRow[];
-        const enriched = await enrichOrdersWithPayments(rows);
+        const localOrders = await getAllLocalItems<OrderRow>("orders");
+        const serverIds = new Set(rows.map((r) => r.id));
+        const pendingLocals = localOrders.filter(
+          (l) => !serverIds.has(l.id) && (!businessId || l.business_id === businessId || !l.business_id)
+        );
+        const combined = [...rows, ...pendingLocals];
+        const enriched = await enrichOrdersWithPayments(combined);
         setLocalItems("orders", enriched).catch(() => {});
         return enriched;
       }
@@ -218,7 +257,9 @@ export async function fetchOrders(opts?: { clientId?: string }): Promise<OrderRo
   }
 
   const localOrders = await getAllLocalItems<OrderRow>("orders");
-  let filtered = localOrders.filter((o) => o.business_id === businessId);
+  let filtered = businessId
+    ? localOrders.filter((o) => o.business_id === businessId || !o.business_id)
+    : localOrders;
   if (opts?.clientId) {
     filtered = filtered.filter((o) => o.client_id === opts.clientId);
   }
@@ -231,12 +272,11 @@ export async function fetchOrder(id: string): Promise<OrderRow | null> {
 
   if (typeof navigator === "undefined" || navigator.onLine) {
     try {
-      const { data, error } = await supabase
-        .from("orders")
-        .select(ORDER_SELECT)
-        .eq("id", id)
-        .eq("business_id", businessId)
-        .maybeSingle();
+      let query = supabase.from("orders").select(ORDER_SELECT).eq("id", id);
+      if (businessId) {
+        query = query.eq("business_id", businessId);
+      }
+      const { data, error } = await query.maybeSingle();
       if (!error && data) {
         const order = data as unknown as OrderRow;
         const [enriched] = await enrichOrdersWithPayments([order]);
@@ -264,17 +304,18 @@ export function deduplicateClients(clients: ClientRow[]): ClientRow[] {
     if (seenIds.has(client.id)) continue;
     seenIds.add(client.id);
 
-    // Empreinte unique : prénom + nom + téléphone normalisé
+    // Empreinte unique : prénom + nom + téléphone normalisé (8 derniers chiffres)
     const normFirst = (client.first_name || "").trim().toLowerCase();
     const normLast = (client.last_name || "").trim().toLowerCase();
-    const normPhone = (client.phone || "").replace(/\D/g, "");
+    const rawDigits = (client.phone || client.whatsapp || "").replace(/\D/g, "");
+    const phoneKey = rawDigits.length >= 8 ? rawDigits.slice(-8) : rawDigits;
 
-    const fingerprint = `${normFirst}|${normLast}|${normPhone}`;
-    if (normFirst && (normLast || normPhone) && seenFingerprints.has(fingerprint)) {
+    const fingerprint = `${normFirst}|${normLast}|${phoneKey}`;
+    if (normFirst && (normLast || phoneKey) && seenFingerprints.has(fingerprint)) {
       // Doublon strict détecté : ignorer la copie superflue
       continue;
     }
-    if (normFirst && (normLast || normPhone)) {
+    if (normFirst && (normLast || phoneKey)) {
       seenFingerprints.add(fingerprint);
     }
     unique.push(client);
@@ -288,16 +329,25 @@ export async function fetchClients(term?: string): Promise<ClientRow[]> {
 
   if (typeof navigator === "undefined" || navigator.onLine) {
     try {
-      let query = supabase.from("clients").select("*").eq("business_id", businessId);
+      let query = supabase.from("clients").select("*");
+      if (businessId) {
+        query = query.eq("business_id", businessId);
+      }
       if (term && term.trim().length >= 1) {
         const like = `%${term.trim()}%`;
         query = query.or(`first_name.ilike.${like},last_name.ilike.${like},phone.ilike.${like}`);
       }
       const { data, error } = await query.order("first_name", { ascending: true });
       if (!error && data) {
-        const rows = deduplicateClients(data as unknown as ClientRow[]);
-        setLocalItems("clients", rows).catch(() => {});
-        return rows;
+        const serverRows = deduplicateClients(data as unknown as ClientRow[]);
+        const localClients = await getAllLocalItems<ClientRow>("clients");
+        const serverIds = new Set(serverRows.map((r) => r.id));
+        const pendingLocals = localClients.filter(
+          (l) => !serverIds.has(l.id) && (!businessId || l.business_id === businessId || !l.business_id)
+        );
+        const combined = deduplicateClients([...serverRows, ...pendingLocals]);
+        setLocalItems("clients", combined).catch(() => {});
+        return combined;
       }
     } catch {
       // Fallback IndexedDB
@@ -305,7 +355,9 @@ export async function fetchClients(term?: string): Promise<ClientRow[]> {
   }
 
   const localClients = await getAllLocalItems<ClientRow>("clients");
-  let filtered = localClients.filter((c) => c.business_id === businessId);
+  let filtered = businessId
+    ? localClients.filter((c) => c.business_id === businessId || !c.business_id)
+    : localClients;
   if (term && term.trim()) {
     const q = term.trim().toLowerCase();
     filtered = filtered.filter(
@@ -324,12 +376,11 @@ export async function fetchClient(id: string): Promise<ClientRow | null> {
 
   if (typeof navigator === "undefined" || navigator.onLine) {
     try {
-      const { data, error } = await supabase
-        .from("clients")
-        .select("*")
-        .eq("id", id)
-        .eq("business_id", businessId)
-        .maybeSingle();
+      let query = supabase.from("clients").select("*").eq("id", id);
+      if (businessId) {
+        query = query.eq("business_id", businessId);
+      }
+      const { data, error } = await query.maybeSingle();
       if (!error && data) {
         const row = data as unknown as ClientRow;
         setLocalItem("clients", row).catch(() => {});
@@ -752,33 +803,39 @@ export async function saveClientOffline(
   const isOnline = typeof navigator !== "undefined" ? navigator.onLine : true;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const cData: Record<string, any> = clientData;
-  const businessId = (cData["business_id"] as string) || (await currentBusinessId());
 
-  // UUID permanent et stable dès la création : élimine 100% des doublons
+  let existingClient: ClientRow | null = null;
+  if (existingId) {
+    existingClient = await getLocalItem<ClientRow>("clients", existingId);
+  }
+
+  const businessId =
+    (cData["business_id"] as string) ||
+    existingClient?.business_id ||
+    (await currentBusinessId());
+
   const clientId = existingId || uuid();
 
   const localClient: ClientRow = {
     id: clientId,
     business_id: businessId,
-    first_name: (cData["first_name"] as string) || "",
-    last_name: (cData["last_name"] as string) || "",
-    phone: (cData["phone"] as string) || null,
-    whatsapp: (cData["whatsapp"] as string) || null,
-    gender: (cData["gender"] as string) || null,
-    birth_date: (cData["birth_date"] as string) || null,
-    address: (cData["address"] as string) || null,
-    city: (cData["city"] as string) || null,
-    notes: (cData["notes"] as string) || null,
-    photo_url: (cData["photo_url"] as string) || null,
-    created_at: new Date().toISOString(),
+    first_name: (cData["first_name"] as string) ?? existingClient?.first_name ?? "",
+    last_name: (cData["last_name"] as string) ?? existingClient?.last_name ?? "",
+    phone: cData["phone"] !== undefined ? (cData["phone"] as string | null) : (existingClient?.phone ?? null),
+    whatsapp: cData["whatsapp"] !== undefined ? (cData["whatsapp"] as string | null) : (existingClient?.whatsapp ?? null),
+    gender: cData["gender"] !== undefined ? (cData["gender"] as string | null) : (existingClient?.gender ?? null),
+    birth_date: cData["birth_date"] !== undefined ? (cData["birth_date"] as string | null) : (existingClient?.birth_date ?? null),
+    address: cData["address"] !== undefined ? (cData["address"] as string | null) : (existingClient?.address ?? null),
+    city: cData["city"] !== undefined ? (cData["city"] as string | null) : (existingClient?.city ?? null),
+    notes: cData["notes"] !== undefined ? (cData["notes"] as string | null) : (existingClient?.notes ?? null),
+    photo_url: cData["photo_url"] !== undefined ? (cData["photo_url"] as string | null) : (existingClient?.photo_url ?? null),
+    created_at: existingClient?.created_at || new Date().toISOString(),
   };
 
-  // 1. Écriture locale instantanée à 0ms dans IndexedDB
   await setLocalItem("clients", localClient);
 
-  if (isOnline) {
+  if (isOnline && businessId) {
     try {
-      // Upsert idempotent : ne crée JAMAIS de doublon même en cas de re-soumission
       const { data, error } = await supabase
         .from("clients")
         .upsert(localClient as never, { onConflict: "id" })
@@ -794,7 +851,6 @@ export async function saveClientOffline(
     }
   }
 
-  // 2. Mise en file d'attente de synchronisation avec son UUID définitif
   await addToSyncQueue({
     entity: "client",
     action: isNew ? "create" : "update",
@@ -813,32 +869,60 @@ export async function saveOrderOffline(
   const isOnline = typeof navigator !== "undefined" ? navigator.onLine : true;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const oData: Record<string, any> = orderData;
-  const businessId = (oData["business_id"] as string) || (await currentBusinessId());
-
   const orderId = existingId || uuid();
+
+  // Si c'est une mise à jour d'une commande existante, récupérer l'état existant pour fusionner !
+  let existingOrder: OrderRow | null = null;
+  if (existingId) {
+    existingOrder = await getLocalItem<OrderRow>("orders", existingId);
+    if (!existingOrder && isOnline) {
+      try {
+        const { data } = await supabase
+          .from("orders")
+          .select(ORDER_SELECT)
+          .eq("id", existingId)
+          .maybeSingle();
+        if (data) existingOrder = data as unknown as OrderRow;
+      } catch {
+        // ignore
+      }
+    }
+  }
+
+  const businessId =
+    (oData["business_id"] as string) ||
+    existingOrder?.business_id ||
+    (await currentBusinessId());
+
   const localOrder: OrderRow = {
     id: orderId,
     business_id: businessId,
-    client_id: (oData["client_id"] as string) || "",
-    reference: (oData["reference"] as string) || `CMD-${Date.now().toString().slice(-4)}`,
-    garment_type: (oData["garment_type"] as string) || "",
-    fabric: (oData["fabric"] as string) || null,
-    quantity: (() => { const v = Number(oData["quantity"] || 1); return isNaN(v) || v < 1 ? 1 : Math.round(v); })(),
-    description: (oData["description"] as string) || null,
-    price: (() => { const v = Number(oData["price"] || 0); return isNaN(v) || v < 0 ? 0 : v; })(),
-    ordered_at: (oData["ordered_at"] as string) || (new Date().toISOString().split("T")[0] as string),
-    due_date: (oData["due_date"] as string) || null,
-    status: (oData["status"] as OrderStatus) || "nouvelle",
-    notes: (oData["notes"] as string) || null,
-    delivered_at: (oData["delivered_at"] as string) || null,
-    delivered_to: (oData["delivered_to"] as string) || null,
-    delivery_note: (oData["delivery_note"] as string) || null,
-    created_at: new Date().toISOString(),
+    client_id: (oData["client_id"] as string) ?? existingOrder?.client_id ?? "",
+    reference: (oData["reference"] as string) ?? existingOrder?.reference ?? `CMD-${Date.now().toString().slice(-4)}`,
+    garment_type: (oData["garment_type"] as string) ?? existingOrder?.garment_type ?? "",
+    fabric: oData["fabric"] !== undefined ? (oData["fabric"] as string | null) : (existingOrder?.fabric ?? null),
+    quantity: oData["quantity"] !== undefined
+      ? (() => { const v = Number(oData["quantity"]); return isNaN(v) || v < 1 ? 1 : Math.round(v); })()
+      : (existingOrder?.quantity ?? 1),
+    description: oData["description"] !== undefined ? (oData["description"] as string | null) : (existingOrder?.description ?? null),
+    price: oData["price"] !== undefined
+      ? (() => { const v = Number(oData["price"]); return isNaN(v) || v < 0 ? 0 : v; })()
+      : (existingOrder?.price ?? 0),
+    ordered_at: (oData["ordered_at"] as string) ?? existingOrder?.ordered_at ?? (new Date().toISOString().split("T")[0] as string),
+    due_date: oData["due_date"] !== undefined ? (oData["due_date"] as string | null) : (existingOrder?.due_date ?? null),
+    status: (oData["status"] as OrderStatus) ?? existingOrder?.status ?? "nouvelle",
+    notes: oData["notes"] !== undefined ? (oData["notes"] as string | null) : (existingOrder?.notes ?? null),
+    delivered_at: oData["delivered_at"] !== undefined ? (oData["delivered_at"] as string | null) : (existingOrder?.delivered_at ?? null),
+    delivered_to: oData["delivered_to"] !== undefined ? (oData["delivered_to"] as string | null) : (existingOrder?.delivered_to ?? null),
+    delivery_note: oData["delivery_note"] !== undefined ? (oData["delivery_note"] as string | null) : (existingOrder?.delivery_note ?? null),
+    created_at: existingOrder?.created_at || new Date().toISOString(),
+    clients: existingOrder?.clients,
+    payments: existingOrder?.payments,
   };
 
   await setLocalItem("orders", localOrder);
 
-  if (isOnline) {
+  if (isOnline && businessId) {
     try {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const upsertPayload: Record<string, any> = { ...localOrder };
@@ -850,7 +934,12 @@ export async function saveOrderOffline(
         .select()
         .single();
       if (!error && data) {
-        const row = data as unknown as OrderRow;
+        const row: OrderRow = {
+          ...localOrder,
+          ...(data as unknown as OrderRow),
+          clients: localOrder.clients,
+          payments: localOrder.payments,
+        };
         await setLocalItem("orders", row);
         return row;
       }
