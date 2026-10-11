@@ -387,6 +387,40 @@ async function processSyncItem(
       }
       break;
     }
+
+    case "catalog_model": {
+      if (item.action === "create" || item.action === "update") {
+        const id = (payload["id"] as string) || item.tempId!;
+        const targetId = idMapping.get(id) || id;
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const upsertData: Record<string, any> = { ...payload };
+        if (targetId && !targetId.startsWith("temp_")) {
+          upsertData["id"] = targetId;
+        } else {
+          delete upsertData["id"];
+        }
+        const { data, error } = await supabase
+          .from("catalog_models")
+          .upsert(upsertData as never, { onConflict: "id" })
+          .select()
+          .single();
+        if (error) throw error;
+        if (data) {
+          if (id && id !== data.id) idMapping.set(id, data.id);
+          await setLocalItem("catalog_models", data);
+          if (id && id.startsWith("temp_")) {
+            await deleteLocalItem("catalog_models", id);
+          }
+        }
+      } else if (item.action === "delete") {
+        const id = (payload["id"] as string) || item.tempId!;
+        const targetId = idMapping.get(id) || id;
+        const { error } = await supabase.from("catalog_models").delete().eq("id", targetId);
+        if (error) throw error;
+        await deleteLocalItem("catalog_models", targetId);
+      }
+      break;
+    }
   }
 }
 

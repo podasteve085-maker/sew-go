@@ -1,4 +1,4 @@
-import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useState, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
@@ -14,29 +14,35 @@ import {
   ChevronLeft,
   ChevronRight,
   X,
-  Crown,
-  Lock,
   Sparkles,
-  Check,
+  Copy,
+  MessageCircle,
 } from "lucide-react";
 import { toast } from "sonner";
 
-import { supabase } from "@/integrations/supabase/client";
 import { useBusiness } from "@/hooks/use-business";
-import { isProOrAdmin } from "@/lib/quotas";
 import {
   fetchCatalogModels,
   deleteCatalogModel,
   type CatalogModelRow,
 } from "@/lib/queries";
 import { CATALOG_CATEGORIES, catalogCategoryLabel } from "@/lib/domain";
-import { fcfa } from "@/lib/format";
+import { fcfa, cleanPhone } from "@/lib/format";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { StoredImage, EmptyState, SectionTitle } from "@/components/bits";
+import { StoredImage, EmptyState } from "@/components/bits";
 import { CatalogModelDialog } from "@/components/catalog-model-dialog";
-import { UpgradeDialog } from "@/components/upgrade-dialog";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
 export const Route = createFileRoute("/_authenticated/catalogue")({
   head: () => ({
@@ -57,13 +63,11 @@ function CataloguePage() {
   const queryClient = useQueryClient();
   const { data: business } = useBusiness();
 
-  const isPro = isProOrAdmin(business);
-  const [upgradeOpen, setUpgradeOpen] = useState(false);
-  const [quotaReason, setQuotaReason] = useState("");
   const [selectedCategory, setSelectedCategory] = useState<string>("all");
   const [searchQuery, setSearchQuery] = useState("");
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingModel, setEditingModel] = useState<CatalogModelRow | null>(null);
+  const [modelToDelete, setModelToDelete] = useState<CatalogModelRow | null>(null);
 
   // Mode Présentation Plein Écran pour le client
   const [presentationModel, setPresentationModel] = useState<CatalogModelRow | null>(null);
@@ -104,7 +108,9 @@ function CataloguePage() {
     mutationFn: (id: string) => deleteCatalogModel(id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["catalog-models"] });
-      toast.success("Modèle retiré du catalogue");
+      toast.success("Modèle supprimé avec succès du catalogue");
+      setModelToDelete(null);
+      if (presentationModel) setPresentationModel(null);
     },
     onError: (err: unknown) => {
       const msg = err instanceof Error ? err.message : "Erreur lors de la suppression";
@@ -113,21 +119,11 @@ function CataloguePage() {
   });
 
   function handleEdit(model: CatalogModelRow) {
-    if (!isPro) {
-      setQuotaReason("Mode Consultation Lookbook : Vous pouvez librement parcourir et présenter ce modèle à vos clients. Pour modifier vos fiches de modèles, activez CouturPro Pro (dès 2 000 FCFA).");
-      setUpgradeOpen(true);
-      return;
-    }
     setEditingModel(model);
     setDialogOpen(true);
   }
 
   function handleCreate() {
-    if (!isPro) {
-      setQuotaReason("Mode Consultation Lookbook : Vous pouvez librement parcourir et présenter les modèles à vos clients. Pour ajouter vos propres créations dans votre Lookbook, activez CouturPro Pro (dès 2 000 FCFA).");
-      setUpgradeOpen(true);
-      return;
-    }
     setEditingModel(null);
     setDialogOpen(true);
   }
@@ -137,13 +133,45 @@ function CataloguePage() {
     setCurrentPhotoIndex(0);
   }
 
+  function getBaseUrl() {
+    if (typeof window !== "undefined") {
+      return window.location.origin;
+    }
+    return "https://couturpro-couturpro.workers.dev";
+  }
+
   function handleShareWhatsApp(model: CatalogModelRow) {
-    const priceText = model.default_price ? ` — ${fcfa(model.default_price)}` : "";
-    const fabricText = model.fabric_needed ? `\nTissu recommandé : ${model.fabric_needed}` : "";
-    const descText = model.description ? `\n${model.description}` : "";
-    const text = `✨ *${business?.name ?? "CouturPro"} — Modèle : ${model.name}*${priceText}${fabricText}${descText}\n\nConfection sur mesure disponible dans notre atelier !`;
+    const baseUrl = getBaseUrl();
+    const publicUrl = `${baseUrl}/lookbook?atelierId=${business?.id || ""}&modelId=${model.id}&name=${encodeURIComponent(model.name)}&price=${model.default_price || ""}&fabric=${encodeURIComponent(model.fabric_needed || "")}&atelier=${encodeURIComponent(business?.name || "")}&phone=${cleanPhone(business?.phone || "")}`;
+    
+    const priceText = model.default_price ? `\n💰 Prix indicatif : ${fcfa(model.default_price, business?.currency)}` : "";
+    const fabricText = model.fabric_needed ? `\n🧵 Tissu recommandé : ${model.fabric_needed}` : "";
+    const descText = model.description ? `\n📝 ${model.description}` : "";
+
+    const text = `✨ *${business?.name ?? "Notre Atelier"} — Modèle : ${model.name}*${priceText}${fabricText}${descText}\n\n👉 *Consultez les photos et détails ici :*\n${publicUrl}\n\nConfection sur mesure disponible dans notre atelier ! ✂️`;
     const url = `https://wa.me/?text=${encodeURIComponent(text)}`;
     window.open(url, "_blank");
+  }
+
+  function handleShareFullCatalogWhatsApp() {
+    const baseUrl = getBaseUrl();
+    const publicUrl = `${baseUrl}/lookbook?atelierId=${business?.id || ""}&atelier=${encodeURIComponent(business?.name || "")}&phone=${cleanPhone(business?.phone || "")}`;
+
+    const text = `✨ *Catalogue & Lookbook — ${business?.name ?? "Notre Atelier"}* 👗✂️\n\nDécouvrez toutes nos créations et modèles confections sur mesure :\n\n👉 *Consultez notre catalogue en ligne :*\n${publicUrl}\n\nContactez-nous pour commander ou confectionner votre tenue ! ✂️`;
+    const url = `https://wa.me/?text=${encodeURIComponent(text)}`;
+    window.open(url, "_blank");
+  }
+
+  function handleCopyCatalogLink() {
+    const baseUrl = getBaseUrl();
+    const publicUrl = `${baseUrl}/lookbook?atelierId=${business?.id || ""}&atelier=${encodeURIComponent(business?.name || "")}&phone=${cleanPhone(business?.phone || "")}`;
+    if (typeof navigator !== "undefined" && navigator.clipboard) {
+      navigator.clipboard.writeText(publicUrl).then(() => {
+        toast.success("Lien du catalogue copié dans le presse-papier !");
+      }).catch(() => {
+        toast.error("Impossible de copier le lien");
+      });
+    }
   }
 
   function handleOrderFromModel(model: CatalogModelRow) {
@@ -186,53 +214,42 @@ function CataloguePage() {
             </div>
           </div>
           <p className="mt-1 text-xs text-muted-foreground sm:text-sm">
-            Vos modèles confections prêts à présenter et à commander en 1 clic.
+            Vos modèles confections prêts à présenter et à partager avec vos clients.
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
-          {allModels.length > 0 && (
+        <div className="flex flex-wrap items-center gap-2">
+          {/* Bouton de partage général du catalogue au client */}
+          <div className="flex items-center gap-1">
             <Button
               variant="outline"
               size="sm"
-              onClick={() => openPresentation(allModels[0]!)}
-              className="h-9 text-xs font-semibold sm:h-10 sm:text-sm"
+              onClick={handleShareFullCatalogWhatsApp}
+              className="h-9 sm:h-10 text-xs sm:text-sm font-semibold rounded-xl border-success/30 bg-success/10 text-success hover:bg-success/20 shadow-xs"
+              title="Envoyer le lien du catalogue par WhatsApp"
             >
-              <Eye className="mr-1.5 size-4 text-primary" /> Mode Client
+              <MessageCircle className="mr-1.5 size-4" /> Partager catalogue
             </Button>
-          )}
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={handleCopyCatalogLink}
+              className="size-9 sm:size-10 rounded-xl"
+              title="Copier le lien du catalogue"
+            >
+              <Copy className="size-4 text-muted-foreground" />
+            </Button>
+          </div>
+
           <Button
             onClick={handleCreate}
             size="sm"
-            className="h-9 text-xs font-bold sm:h-10 sm:text-sm shadow-xs"
+            className="h-9 text-xs font-bold sm:h-10 sm:text-sm shadow-xs rounded-xl"
           >
             <Plus className="mr-1.5 size-4" /> Nouveau modèle
           </Button>
         </div>
       </div>
-
-      {/* Bannière Mode Consultation Lookbook — Reassuring & never aggressive */}
-      {!isPro && (
-        <div className="rounded-xl border border-primary/20 bg-primary/5 p-3 sm:p-3.5 text-xs flex flex-wrap items-center justify-between gap-2.5">
-          <div className="flex items-center gap-2 text-foreground">
-            <Sparkles className="size-4 shrink-0 text-primary" />
-            <span>
-              <strong>Mode Consultation Lookbook :</strong> Vous pouvez librement parcourir, présenter en plein écran et partager vos modèles avec vos clients.
-              Passez à Pro pour ajouter vos propres créations.
-            </span>
-          </div>
-          <Button
-            size="sm"
-            onClick={() => {
-              setQuotaReason("Ajoutez et personnalisez les modèles de votre atelier dans votre Lookbook avec CouturPro Pro (dès 2 000 FCFA).");
-              setUpgradeOpen(true);
-            }}
-            className="h-7 text-xs font-bold shadow-xs ml-auto"
-          >
-            <Crown className="mr-1 size-3.5" /> Passer à Pro
-          </Button>
-        </div>
-      )}
 
       {/* Barre de recherche et filtres */}
       <div className="space-y-2.5">
@@ -299,7 +316,7 @@ function CataloguePage() {
 
       {/* Grille des modèles */}
       {modelsQuery.isLoading ? (
-        <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 md:grid-cols-4 sm:gap-4">
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 sm:gap-4">
           {[1, 2, 3, 4].map((n) => (
             <div key={n} className="card-soft h-52 sm:h-64 animate-pulse bg-muted/60" />
           ))}
@@ -323,7 +340,7 @@ function CataloguePage() {
           }
         />
       ) : (
-        <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 md:grid-cols-4 sm:gap-4">
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 sm:gap-4">
           {filteredModels.map((model) => {
             const hasPhotos = model.photo_paths && model.photo_paths.length > 0;
             const coverPhoto = hasPhotos ? model.photo_paths[0] : null;
@@ -333,7 +350,7 @@ function CataloguePage() {
                 key={model.id}
                 className="card-soft group flex flex-col justify-between overflow-hidden border border-border transition-all hover:border-primary/50 hover:shadow-md"
               >
-                {/* Image de couverture ou visuel par défaut */}
+                {/* Image de couverture ou visuel par défaut avec barre d'action visible */}
                 <div
                   onClick={() => openPresentation(model)}
                   className="relative aspect-square sm:aspect-4/3 w-full cursor-pointer overflow-hidden bg-muted transition-transform group-hover:opacity-95"
@@ -351,30 +368,45 @@ function CataloguePage() {
                     </div>
                   )}
 
-                  {/* Badge de catégorie */}
-                  <span className="absolute top-1.5 left-1.5 rounded-full bg-black/60 backdrop-blur px-2 py-0.5 text-[0.62rem] font-bold text-white shadow-xs">
+                  {/* Badge de catégorie (en haut à gauche) */}
+                  <span className="absolute top-2 left-2 rounded-full bg-black/65 backdrop-blur-md px-2.5 py-0.5 text-[0.65rem] font-bold text-white shadow-xs">
                     {catalogCategoryLabel(model.category)}
                   </span>
 
+                  {/* Boutons d'action rapides sur l'image (en haut à droite) : TOUJOURS VISIBLES SUR MOBILE */}
+                  <div className="absolute top-2 right-2 flex items-center gap-1.5 z-10">
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleEdit(model);
+                      }}
+                      className="flex size-8 items-center justify-center rounded-full bg-black/70 text-white shadow-md backdrop-blur-sm transition-transform hover:bg-primary active:scale-90"
+                      title="Modifier ce modèle"
+                      aria-label="Modifier"
+                    >
+                      <Edit className="size-3.5" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setModelToDelete(model);
+                      }}
+                      className="flex size-8 items-center justify-center rounded-full bg-black/70 text-white shadow-md backdrop-blur-sm transition-transform hover:bg-destructive active:scale-90"
+                      title="Supprimer ce modèle"
+                      aria-label="Supprimer"
+                    >
+                      <Trash2 className="size-3.5" />
+                    </button>
+                  </div>
+
                   {/* Indicateur multi-photos */}
                   {model.photo_paths && model.photo_paths.length > 1 && (
-                    <span className="absolute bottom-1.5 right-1.5 rounded-full bg-black/65 px-1.5 py-0.5 text-[0.6rem] font-bold text-white backdrop-blur">
-                      +{model.photo_paths.length - 1}
+                    <span className="absolute bottom-2 right-2 rounded-full bg-black/65 px-2 py-0.5 text-[0.65rem] font-bold text-white backdrop-blur">
+                      +{model.photo_paths.length - 1} photos
                     </span>
                   )}
-
-                  {/* Bouton rapide d'agrandissement */}
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      openPresentation(model);
-                    }}
-                    className="absolute top-1.5 right-1.5 flex size-6.5 items-center justify-center rounded-full bg-black/50 text-white opacity-90 sm:opacity-0 transition-opacity hover:bg-black group-hover:opacity-100"
-                    title="Voir en plein écran"
-                  >
-                    <Eye className="size-3" />
-                  </button>
                 </div>
 
                 {/* Contenu de la fiche modèle */}
@@ -393,7 +425,7 @@ function CataloguePage() {
                     <div className="mt-1.5 flex flex-wrap items-center gap-1 text-[0.7rem] sm:text-xs">
                       {model.default_price ? (
                         <span className="inline-flex items-center gap-0.5 rounded-md bg-primary/10 px-1.5 py-0.5 font-bold text-primary">
-                          <Coins className="size-2.5 sm:size-3" /> {fcfa(model.default_price)}
+                          <Coins className="size-2.5 sm:size-3" /> {fcfa(model.default_price, business?.currency)}
                         </span>
                       ) : null}
 
@@ -405,51 +437,25 @@ function CataloguePage() {
                     </div>
                   </div>
 
-                  {/* Boutons d'action sous la carte */}
-                  <div className="mt-2.5 flex items-center justify-between gap-1 border-t border-border/70 pt-2">
+                  {/* Boutons d'action sous la carte : Espacés et parfaitement ergonomiques sur mobile */}
+                  <div className="mt-3 space-y-1.5 border-t border-border/70 pt-2.5">
                     <Button
                       size="sm"
                       onClick={() => handleOrderFromModel(model)}
-                      className="h-7 sm:h-8 flex-1 text-[0.7rem] sm:text-xs font-bold px-1.5"
+                      className="h-9 w-full text-xs font-bold rounded-xl shadow-xs"
                     >
-                      <Scissors className="mr-1 size-3" /> Commander
+                      <Scissors className="mr-1.5 size-3.5" /> Commander ce modèle
                     </Button>
 
-                    <button
+                    <Button
                       type="button"
+                      variant="outline"
+                      size="sm"
                       onClick={() => handleShareWhatsApp(model)}
-                      title="WhatsApp"
-                      className="flex size-7 sm:size-8 shrink-0 items-center justify-center rounded-md border border-success/30 bg-success/10 text-success transition-all hover:bg-success/20 active:scale-95"
+                      className="h-8.5 w-full text-xs font-semibold rounded-xl border-success/30 bg-success/10 text-success hover:bg-success/20 transition-all active:scale-95"
                     >
-                      <Share2 className="size-3 sm:size-3.5" />
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => handleEdit(model)}
-                      title="Modifier"
-                      className="flex size-7 sm:size-8 shrink-0 items-center justify-center rounded-md border border-border text-muted-foreground transition-all hover:bg-accent hover:text-foreground active:scale-95"
-                    >
-                      <Edit className="size-3 sm:size-3.5" />
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => {
-                        if (!isPro) {
-                          setQuotaReason("Mode Consultation Lookbook actif. Vos modèles sont protégés contre toute suppression. Passez à Pro pour gérer votre catalogue.");
-                          setUpgradeOpen(true);
-                          return;
-                        }
-                        if (confirm(`Voulez-vous retirer le modèle "${model.name}" ?`)) {
-                          deleteMutation.mutate(model.id);
-                        }
-                      }}
-                      title="Supprimer"
-                      className="flex size-7 sm:size-8 shrink-0 items-center justify-center rounded-md border border-border text-muted-foreground transition-all hover:border-destructive/30 hover:bg-destructive/10 hover:text-destructive active:scale-95"
-                    >
-                      <Trash2 className="size-3 sm:size-3.5" />
-                    </button>
+                      <Share2 className="mr-1.5 size-3.5" /> Partager au client
+                    </Button>
                   </div>
                 </div>
               </div>
@@ -555,7 +561,7 @@ function CataloguePage() {
                         Prix indicatif
                       </p>
                       <p className="font-display text-lg sm:text-xl font-bold text-primary">
-                        {fcfa(presentationModel.default_price)}
+                        {fcfa(presentationModel.default_price, business?.currency)}
                       </p>
                     </div>
                   )}
@@ -583,17 +589,42 @@ function CataloguePage() {
                       setPresentationModel(null);
                       handleOrderFromModel(presentationModel);
                     }}
-                    className="flex-1 font-bold h-11"
+                    className="flex-1 font-bold h-11 rounded-xl"
                   >
-                    <Scissors className="mr-2 size-4" /> Choisir ce modèle pour une commande
+                    <Scissors className="mr-2 size-4" /> Commander ce modèle
                   </Button>
                   <Button
                     variant="outline"
                     size="lg"
                     onClick={() => handleShareWhatsApp(presentationModel)}
-                    className="h-11 font-semibold"
+                    className="h-11 font-semibold rounded-xl border-success/30 bg-success/10 text-success hover:bg-success/20"
                   >
-                    <Share2 className="mr-1.5 size-4 text-success" /> Partager
+                    <Share2 className="mr-1.5 size-4" /> Partager au client
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="lg"
+                    onClick={() => {
+                      const m = presentationModel;
+                      setPresentationModel(null);
+                      handleEdit(m);
+                    }}
+                    className="h-11 rounded-xl"
+                    title="Modifier"
+                  >
+                    <Edit className="size-4" />
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="lg"
+                    onClick={() => {
+                      const m = presentationModel;
+                      setModelToDelete(m);
+                    }}
+                    className="h-11 rounded-xl text-destructive hover:bg-destructive/10"
+                    title="Supprimer"
+                  >
+                    <Trash2 className="size-4" />
                   </Button>
                 </div>
               </div>
@@ -601,7 +632,38 @@ function CataloguePage() {
           </DialogContent>
         </Dialog>
       )}
-      <UpgradeDialog open={upgradeOpen} onOpenChange={setUpgradeOpen} triggerReason={quotaReason} />
+
+      {/* Boîte de dialogue de confirmation de suppression */}
+      <AlertDialog
+        open={Boolean(modelToDelete)}
+        onOpenChange={(open) => {
+          if (!open) setModelToDelete(null);
+        }}
+      >
+        <AlertDialogContent className="rounded-2xl max-w-md">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="text-lg font-bold">
+              Supprimer le modèle "{modelToDelete?.name}" ?
+            </AlertDialogTitle>
+            <AlertDialogDescription className="text-sm text-muted-foreground">
+              Cette action supprimera ce modèle de votre catalogue et Lookbook. Cette action est irréversible.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter className="gap-2 sm:gap-0">
+            <AlertDialogCancel className="rounded-xl">Annuler</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                if (modelToDelete) {
+                  deleteMutation.mutate(modelToDelete.id);
+                }
+              }}
+              className="rounded-xl bg-destructive text-destructive-foreground hover:bg-destructive/90 font-bold"
+            >
+              Supprimer définitivement
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

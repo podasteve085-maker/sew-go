@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   Dialog,
@@ -11,16 +11,13 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { Loader2, Plus, X, UploadCloud, Tag } from "lucide-react";
+import { Loader2, Plus, X, UploadCloud, Tag, Trash2 } from "lucide-react";
 import { toast } from "sonner";
-import { supabase } from "@/integrations/supabase/client";
 import { useBusiness } from "@/hooks/use-business";
 import { uploadImage } from "@/hooks/use-signed-url";
 import { CATALOG_CATEGORIES, type CatalogCategory } from "@/lib/domain";
-import type { CatalogModelRow } from "@/lib/queries";
+import { saveCatalogModelOffline, type CatalogModelRow } from "@/lib/queries";
 import { StoredImage } from "@/components/bits";
-import { isProOrAdmin } from "@/lib/quotas";
-import { UpgradeDialog } from "@/components/upgrade-dialog";
 
 const SUGGESTED_TAGS = [
   "Cérémonie",
@@ -76,6 +73,13 @@ export function CatalogModelDialog({ open, onOpenChange, model }: CatalogModelDi
     setTagInput("");
   }
 
+  // Dès que le dialogue s'ouvre ou que le modèle change, mettre à jour le formulaire
+  useEffect(() => {
+    if (open) {
+      resetForm(model);
+    }
+  }, [open, model]);
+
   async function handleFileUpload(e: React.ChangeEvent<HTMLInputElement>) {
     const files = e.target.files;
     if (!files || files.length === 0 || !business) return;
@@ -104,6 +108,7 @@ export function CatalogModelDialog({ open, onOpenChange, model }: CatalogModelDi
 
   function removePhoto(indexToRemove: number) {
     setPhotoPaths((prev) => prev.filter((_, idx) => idx !== indexToRemove));
+    toast.info("Photo retirée du modèle");
   }
 
   function addTag(tagToAdd: string) {
@@ -119,22 +124,14 @@ export function CatalogModelDialog({ open, onOpenChange, model }: CatalogModelDi
 
   const saveMutation = useMutation({
     mutationFn: async () => {
-      if (!business) throw new Error("Atelier non identifié");
       if (!name.trim()) throw new Error("Le nom du modèle est obligatoire");
-
-      if (!isProOrAdmin(business)) {
-        const msg = "Mode Consultation Lookbook actif. Vous pouvez librement parcourir et présenter vos modèles. Passez à CouturPro Pro pour ajouter ou modifier vos créations dans votre Lookbook.";
-        setQuotaReason(msg);
-        setUpgradeOpen(true);
-        throw new Error(msg);
-      }
 
       const parsedPrice = defaultPrice ? Number(defaultPrice) : null;
       const validPrice =
         parsedPrice !== null && !isNaN(parsedPrice) && parsedPrice >= 0 ? parsedPrice : null;
 
       const payload = {
-        business_id: business.id,
+        business_id: business?.id,
         name: name.trim(),
         category,
         description: description.trim() || null,
@@ -145,19 +142,7 @@ export function CatalogModelDialog({ open, onOpenChange, model }: CatalogModelDi
         is_active: true,
       };
 
-      if (isEdit && model) {
-        const { error } = await supabase
-          .from("catalog_models")
-          .update(payload)
-          .eq("id", model.id)
-          .eq("business_id", business.id);
-        if (error) throw error;
-      } else {
-        const { error } = await supabase
-          .from("catalog_models")
-          .insert(payload);
-        if (error) throw error;
-      }
+      await saveCatalogModelOffline(payload, !isEdit, model?.id);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["catalog-models"] });
@@ -169,7 +154,7 @@ export function CatalogModelDialog({ open, onOpenChange, model }: CatalogModelDi
       const msg =
         err instanceof Error
           ? err.message
-          : "Impossible d'enregistrer le modèle. Vérifiez la table Supabase.";
+          : "Impossible d'enregistrer le modèle.";
       toast.error(msg);
     },
   });
@@ -323,11 +308,15 @@ export function CatalogModelDialog({ open, onOpenChange, model }: CatalogModelDi
                   />
                   <button
                     type="button"
-                    onClick={() => removePhoto(idx)}
-                    aria-label="Supprimer la photo"
-                    className="absolute top-1 right-1 flex size-5 items-center justify-center rounded-full bg-black/70 text-white transition-opacity hover:bg-destructive"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      removePhoto(idx);
+                    }}
+                    aria-label="Supprimer cette photo"
+                    title="Supprimer cette photo"
+                    className="absolute top-1.5 right-1.5 flex size-7 items-center justify-center rounded-full bg-destructive text-destructive-foreground shadow-md transition-transform hover:scale-110 active:scale-90"
                   >
-                    <X className="size-3" />
+                    <Trash2 className="size-3.5" />
                   </button>
                   {idx === 0 && (
                     <span className="absolute bottom-0 inset-x-0 bg-primary/90 text-primary-foreground py-0.5 text-center text-[0.6rem] font-bold">
@@ -446,11 +435,5 @@ export function CatalogModelDialog({ open, onOpenChange, model }: CatalogModelDi
         </form>
       </DialogContent>
     </Dialog>
-    <UpgradeDialog
-      open={upgradeOpen}
-      onOpenChange={setUpgradeOpen}
-      triggerReason={quotaReason}
-    />
-    </>
   );
 }

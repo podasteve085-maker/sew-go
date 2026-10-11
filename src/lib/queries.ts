@@ -716,27 +716,37 @@ export type CatalogModelRow = {
   updated_at: string;
 };
 
-export async function fetchCatalogModels(category?: string): Promise<CatalogModelRow[]> {
-  try {
-    const businessId = await currentBusinessId();
-    let query = supabase.from("catalog_models").select("*").eq("business_id", businessId);
-    if (category && category !== "all") {
-      query = query.eq("category", category);
+export async function fetchCatalogModels(category?: string, bizId?: string): Promise<CatalogModelRow[]> {
+  const businessId = bizId || (await currentBusinessId());
+
+  if (typeof navigator === "undefined" || navigator.onLine) {
+    try {
+      let query = supabase.from("catalog_models").select("*");
+      if (businessId) query = query.eq("business_id", businessId);
+      if (category && category !== "all") {
+        query = query.eq("category", category);
+      }
+      const { data, error } = await query
+        .eq("is_active", true)
+        .order("created_at", { ascending: false });
+      if (!error && data) {
+        const serverRows = data as unknown as CatalogModelRow[];
+        const localModels = await getAllLocalItems<CatalogModelRow>("catalog_models");
+        const serverIds = new Set(serverRows.map((m) => m.id));
+        const pendingLocals = localModels.filter(
+          (m) => m.is_active && !serverIds.has(m.id) && (!businessId || m.business_id === businessId || !m.business_id)
+        );
+        const combined = [...serverRows, ...pendingLocals];
+        setLocalItems("catalog_models", combined).catch(() => {});
+        return combined;
+      }
+    } catch {
+      // Fallback IndexedDB
     }
-    const { data, error } = await query
-      .eq("is_active", true)
-      .order("created_at", { ascending: false });
-    if (!error && data) {
-      const rows = data as unknown as CatalogModelRow[];
-      setLocalItems("catalog_models", rows).catch(() => {});
-      return rows;
-    }
-  } catch {
-    // Fallback IndexedDB
   }
 
   const all = await getAllLocalItems<CatalogModelRow>("catalog_models");
-  let filtered = all.filter((m) => m.is_active);
+  let filtered = all.filter((m) => m.is_active && (!businessId || m.business_id === businessId || !m.business_id));
   if (category && category !== "all") {
     filtered = filtered.filter((m) => m.category === category);
   }
@@ -745,20 +755,19 @@ export async function fetchCatalogModels(category?: string): Promise<CatalogMode
 
 export async function fetchCatalogModel(id: string): Promise<CatalogModelRow | null> {
   const businessId = await currentBusinessId();
-  try {
-    const { data, error } = await supabase
-      .from("catalog_models")
-      .select("*")
-      .eq("id", id)
-      .eq("business_id", businessId)
-      .maybeSingle();
-    if (!error && data) {
-      const model = data as unknown as CatalogModelRow;
-      setLocalItem("catalog_models", model).catch(() => {});
-      return model;
+  if (typeof navigator === "undefined" || navigator.onLine) {
+    try {
+      let query = supabase.from("catalog_models").select("*").eq("id", id);
+      if (businessId) query = query.eq("business_id", businessId);
+      const { data, error } = await query.maybeSingle();
+      if (!error && data) {
+        const model = data as unknown as CatalogModelRow;
+        setLocalItem("catalog_models", model).catch(() => {});
+        return model;
+      }
+    } catch {
+      // Fallback
     }
-  } catch {
-    // Fallback
   }
   return getLocalItem<CatalogModelRow>("catalog_models", id);
 }
@@ -769,11 +778,9 @@ export async function deleteCatalogModel(id: string): Promise<void> {
 
   if (isOnline) {
     try {
-      const { error } = await supabase
-        .from("catalog_models")
-        .update({ is_active: false })
-        .eq("id", id)
-        .eq("business_id", businessId);
+      let query = supabase.from("catalog_models").delete().eq("id", id);
+      if (businessId) query = query.eq("business_id", businessId);
+      const { error } = await query;
       if (!error) {
         deleteLocalItem("catalog_models", id).catch(() => {});
         return;
@@ -787,8 +794,72 @@ export async function deleteCatalogModel(id: string): Promise<void> {
   await addToSyncQueue({
     entity: "catalog_model",
     action: "delete",
-    payload: { id },
+    payload: { id, business_id: businessId },
   });
+}
+
+export async function saveCatalogModelOffline(
+  modelData: Record<string, unknown>,
+  isNew: boolean,
+  existingId?: string,
+): Promise<CatalogModelRow> {
+  const isOnline = typeof navigator !== "undefined" ? navigator.onLine : true;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const mData: Record<string, any> = modelData;
+  const modelId = existingId || uuid();
+
+  let existingModel: CatalogModelRow | null = null;
+  if (existingId) {
+    existingModel = await getLocalItem<CatalogModelRow>("catalog_models", existingId);
+  }
+
+  const businessId =
+    (mData["business_id"] as string) ||
+    existingModel?.business_id ||
+    (await currentBusinessId());
+
+  const localModel: CatalogModelRow = {
+    id: modelId,
+    business_id: businessId,
+    name: (mData["name"] as string) ?? existingModel?.name ?? "",
+    category: (mData["category"] as string) ?? existingModel?.category ?? "boubou",
+    description: mData["description"] !== undefined ? (mData["description"] as string | null) : (existingModel?.description ?? null),
+    default_price: mData["default_price"] !== undefined ? (mData["default_price"] as number | null) : (existingModel?.default_price ?? null),
+    fabric_needed: mData["fabric_needed"] !== undefined ? (mData["fabric_needed"] as string | null) : (existingModel?.fabric_needed ?? null),
+    photo_paths: (mData["photo_paths"] as string[]) ?? existingModel?.photo_paths ?? [],
+    tags: (mData["tags"] as string[]) ?? existingModel?.tags ?? [],
+    is_active: true,
+    created_at: existingModel?.created_at || new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  };
+
+  await setLocalItem("catalog_models", localModel);
+
+  if (isOnline && businessId) {
+    try {
+      const { data, error } = await supabase
+        .from("catalog_models")
+        .upsert(localModel as never, { onConflict: "id" })
+        .select()
+        .single();
+      if (!error && data) {
+        const row = data as unknown as CatalogModelRow;
+        await setLocalItem("catalog_models", row);
+        return row;
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  await addToSyncQueue({
+    entity: "catalog_model",
+    action: isNew ? "create" : "update",
+    payload: localModel,
+    tempId: modelId,
+  });
+
+  return localModel;
 }
 
 // ============================================================
