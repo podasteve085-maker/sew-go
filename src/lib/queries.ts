@@ -8,6 +8,7 @@ import {
   getAllLocalItems,
   deleteLocalItem,
   addToSyncQueue,
+  getPendingSyncQueue,
 } from "./offline-storage";
 
 export async function currentBusinessId(): Promise<string> {
@@ -70,11 +71,13 @@ export type ClientRow = {
 
 export type PaymentRow = {
   id: string;
+  business_id?: string;
   order_id: string;
   amount: number;
   method: string;
   paid_at: string;
   note: string | null;
+  created_at?: string;
 };
 
 export type OrderRow = {
@@ -96,7 +99,7 @@ export type OrderRow = {
   delivery_note: string | null;
   created_at: string;
   clients?: Pick<ClientRow, "first_name" | "last_name" | "phone" | "whatsapp"> | null;
-  payments?: { amount: number }[];
+  payments?: { id?: string; amount: number }[];
 };
 
 export type AppointmentRow = {
@@ -137,7 +140,7 @@ export type MeasurementSetRow = {
 };
 
 const ORDER_SELECT =
-  "*, clients(first_name, last_name, phone, whatsapp), payments(amount)";
+  "*, clients(first_name, last_name, phone, whatsapp), payments(id, amount)";
 
 export function paidTotal(order: OrderRow) {
   return (order.payments ?? []).reduce((sum, p) => {
@@ -149,6 +152,48 @@ export function paidTotal(order: OrderRow) {
 export function balance(order: OrderRow) {
   const price = Number(order.price);
   return (isNaN(price) ? 0 : price) - paidTotal(order);
+}
+
+async function enrichOrdersWithPayments(ordersList: OrderRow[]): Promise<OrderRow[]> {
+  try {
+    const allLocalPayments = await getAllLocalItems<PaymentRow>("payments");
+    let queuePayments: PaymentRow[] = [];
+    try {
+      const queue = await getPendingSyncQueue();
+      queuePayments = queue
+        .filter((q) => q.entity === "payment" && q.action === "create" && q.payload)
+        .map((q) => q.payload as unknown as PaymentRow);
+    } catch {
+      // ignore
+    }
+
+    const allExtra = [...allLocalPayments, ...queuePayments];
+    if (allExtra.length === 0) return ordersList;
+
+    return ordersList.map((ord) => {
+      const extraForOrder = allExtra.filter((p) => p && p.order_id === ord.id);
+      if (extraForOrder.length === 0) return ord;
+
+      const existingIds = new Set(
+        (ord.payments || [])
+          .map((p) => p.id)
+          .filter((id): id is string => Boolean(id))
+      );
+      const combined = [...(ord.payments || [])];
+
+      for (const p of extraForOrder) {
+        if (!p || !p.id) continue;
+        if (!existingIds.has(p.id)) {
+          existingIds.add(p.id);
+          combined.push({ id: p.id, amount: Number(p.amount) || 0 });
+        }
+      }
+
+      return { ...ord, payments: combined };
+    });
+  } catch {
+    return ordersList;
+  }
 }
 
 export async function fetchOrders(opts?: { clientId?: string }): Promise<OrderRow[]> {
@@ -163,8 +208,9 @@ export async function fetchOrders(opts?: { clientId?: string }): Promise<OrderRo
         .order("created_at", { ascending: false });
       if (!error && data) {
         const rows = data as unknown as OrderRow[];
-        setLocalItems("orders", rows).catch(() => {});
-        return rows;
+        const enriched = await enrichOrdersWithPayments(rows);
+        setLocalItems("orders", enriched).catch(() => {});
+        return enriched;
       }
     } catch {
       // Fallback IndexedDB
@@ -176,7 +222,8 @@ export async function fetchOrders(opts?: { clientId?: string }): Promise<OrderRo
   if (opts?.clientId) {
     filtered = filtered.filter((o) => o.client_id === opts.clientId);
   }
-  return filtered.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+  const enriched = await enrichOrdersWithPayments(filtered);
+  return enriched.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
 }
 
 export async function fetchOrder(id: string): Promise<OrderRow | null> {
@@ -192,15 +239,19 @@ export async function fetchOrder(id: string): Promise<OrderRow | null> {
         .maybeSingle();
       if (!error && data) {
         const order = data as unknown as OrderRow;
-        setLocalItem("orders", order).catch(() => {});
-        return order;
+        const [enriched] = await enrichOrdersWithPayments([order]);
+        setLocalItem("orders", enriched || order).catch(() => {});
+        return enriched || order;
       }
     } catch {
       // Fallback IndexedDB
     }
   }
 
-  return getLocalItem<OrderRow>("orders", id);
+  const local = await getLocalItem<OrderRow>("orders", id);
+  if (!local) return null;
+  const [enriched] = await enrichOrdersWithPayments([local]);
+  return enriched || local;
 }
 
 export function deduplicateClients(clients: ClientRow[]): ClientRow[] {
@@ -386,28 +437,63 @@ export async function fetchAppointments(opts?: { clientId?: string }): Promise<A
 }
 
 export async function fetchPayments(orderId: string): Promise<PaymentRow[]> {
-  const businessId = await currentBusinessId();
+  let businessId = "";
+  try {
+    businessId = await currentBusinessId();
+  } catch {
+    // ignore
+  }
+
+  // 1. Récupérer les paiements locaux enregistrés (IndexedDB)
+  const localPayments = await getAllLocalItems<PaymentRow>("payments");
+  const localForOrder = localPayments.filter((p) => p.order_id === orderId);
+
+  // 2. Récupérer les paiements encore en file d'attente de synchronisation
+  let pendingPayments: PaymentRow[] = [];
+  try {
+    const queue = await getPendingSyncQueue();
+    pendingPayments = queue
+      .filter((q) => q.entity === "payment" && q.action === "create" && (q.payload?.["order_id"] === orderId))
+      .map((q) => q.payload as unknown as PaymentRow);
+  } catch {
+    // ignore
+  }
 
   if (typeof navigator === "undefined" || navigator.onLine) {
     try {
-      const { data, error } = await supabase
-        .from("payments")
-        .select("*")
-        .eq("order_id", orderId)
-        .eq("business_id", businessId)
-        .order("paid_at", { ascending: false });
+      let query = supabase.from("payments").select("*").eq("order_id", orderId);
+      if (businessId) query = query.eq("business_id", businessId);
+      const { data, error } = await query.order("paid_at", { ascending: false });
       if (!error && data) {
-        const rows = data as unknown as PaymentRow[];
-        setLocalItems("payments", rows).catch(() => {});
-        return rows;
+        const serverRows = data as unknown as PaymentRow[];
+        const serverIds = new Set(serverRows.map((p) => p.id));
+
+        // Fusion sans doublon : conserver paiements serveur + paiements locaux/pending pas encore sur le serveur
+        const merged = [...serverRows];
+        for (const lp of [...localForOrder, ...pendingPayments]) {
+          if (lp && lp.id && !serverIds.has(lp.id)) {
+            merged.push(lp);
+            serverIds.add(lp.id);
+          }
+        }
+
+        await setLocalItems("payments", merged).catch(() => {});
+        return merged.sort((a, b) => new Date(b.paid_at).getTime() - new Date(a.paid_at).getTime());
       }
     } catch {
       // Fallback IndexedDB
     }
   }
 
-  const all = await getAllLocalItems<PaymentRow>("payments");
-  return all.filter((p) => p.order_id === orderId).sort((a, b) => new Date(b.paid_at).getTime() - new Date(a.paid_at).getTime());
+  const seenIds = new Set<string>();
+  const combined: PaymentRow[] = [];
+  for (const p of [...localForOrder, ...pendingPayments]) {
+    if (p && p.id && !seenIds.has(p.id)) {
+      seenIds.add(p.id);
+      combined.push(p);
+    }
+  }
+  return combined.sort((a, b) => new Date(b.paid_at).getTime() - new Date(a.paid_at).getTime());
 }
 
 export async function fetchOrderImages(orderId: string): Promise<OrderImageRow[]> {
@@ -786,9 +872,18 @@ export async function saveOrderOffline(
 export async function savePaymentOffline(paymentData: Record<string, unknown>): Promise<PaymentRow> {
   const isOnline = typeof navigator !== "undefined" ? navigator.onLine : true;
   const paymentId = (paymentData["id"] as string) || uuid();
+  let businessId = (paymentData["business_id"] as string) || "";
+  if (!businessId) {
+    try {
+      businessId = await currentBusinessId();
+    } catch {
+      // ignore
+    }
+  }
 
   const localPayment: PaymentRow = {
     id: paymentId,
+    business_id: businessId,
     order_id: (paymentData["order_id"] as string) || "",
     amount: (() => { const v = Number(paymentData["amount"] || 0); return isNaN(v) || v < 0 ? 0 : v; })(),
     method: (paymentData["method"] as string) || "especes",
@@ -798,7 +893,24 @@ export async function savePaymentOffline(paymentData: Record<string, unknown>): 
 
   await setLocalItem("payments", localPayment);
 
-  if (isOnline) {
+  // Mettre à jour immédiatement la commande locale pour que son solde soit à jour instantanément
+  if (localPayment.order_id) {
+    try {
+      const ord = await getLocalItem<OrderRow>("orders", localPayment.order_id);
+      if (ord) {
+        const existingPayments = (ord.payments || []).filter((p) => p.id !== localPayment.id);
+        const updatedOrder: OrderRow = {
+          ...ord,
+          payments: [...existingPayments, { id: localPayment.id, amount: localPayment.amount }],
+        };
+        await setLocalItem("orders", updatedOrder);
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  if (isOnline && businessId) {
     try {
       const { data, error } = await supabase
         .from("payments")
@@ -823,6 +935,47 @@ export async function savePaymentOffline(paymentData: Record<string, unknown>): 
   });
 
   return localPayment;
+}
+
+export async function deletePaymentOffline(paymentId: string, orderId?: string): Promise<void> {
+  const isOnline = typeof navigator !== "undefined" ? navigator.onLine : true;
+
+  // 1. Supprimer du stockage local
+  await deleteLocalItem("payments", paymentId);
+
+  // 2. Mettre à jour la commande locale si fournie
+  if (orderId) {
+    try {
+      const ord = await getLocalItem<OrderRow>("orders", orderId);
+      if (ord && ord.payments) {
+        const updatedOrder: OrderRow = {
+          ...ord,
+          payments: ord.payments.filter((p) => p.id !== paymentId),
+        };
+        await setLocalItem("orders", updatedOrder);
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  // 3. Si en ligne, tenter la suppression distante
+  if (isOnline) {
+    try {
+      const { error } = await supabase.from("payments").delete().eq("id", paymentId);
+      if (!error) return;
+    } catch {
+      // ignore
+    }
+  }
+
+  // 4. Mettre en file de synchronisation
+  await addToSyncQueue({
+    entity: "payment",
+    action: "delete",
+    payload: { id: paymentId, order_id: orderId },
+    tempId: paymentId,
+  });
 }
 
 export async function saveMeasurementSetOffline(

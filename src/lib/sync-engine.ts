@@ -9,6 +9,7 @@ import { supabase } from "@/integrations/supabase/client";
 import {
   getPendingSyncQueue,
   removeSyncQueueItem,
+  updateSyncQueueItem,
   getSyncQueueCount,
   setLocalItem,
   deleteLocalItem,
@@ -54,10 +55,32 @@ export async function syncPendingMutations(): Promise<number> {
         await processSyncItem(item, idMapping);
         await removeSyncQueueItem(item.id);
         syncedCount++;
-      } catch (err) {
+      } catch (err: unknown) {
         console.error(`[Sync Engine] Échec sur l'action ${item.id} (${item.entity}) :`, err);
         // En cas d'erreur réseau transitoire, on stoppe la file pour ne pas désynchroniser les dépendances
         if (!navigator.onLine) break;
+
+        const currentRetries = (item.retryCount || 0) + 1;
+        const errMsg = err instanceof Error ? err.message : String(err);
+
+        // Si l'erreur est fatale (clé étrangère absente, entité orpheline, ou > 3 échecs en ligne)
+        // on retire l'élément empoisonné pour ne pas bloquer indéfiniment l'interface et le badge
+        if (
+          currentRetries >= 3 ||
+          errMsg.includes("foreign key") ||
+          errMsg.includes("Paiement sans business_id") ||
+          errMsg.includes("not found")
+        ) {
+          console.warn(`[Sync Engine] Action défectueuse retirée de la file : ${item.id} (${item.entity}) :`, errMsg);
+          await removeSyncQueueItem(item.id);
+        } else {
+          await updateSyncQueueItem({
+            ...item,
+            retryCount: currentRetries,
+            status: "failed",
+            errorMessage: errMsg,
+          });
+        }
       }
     }
 
@@ -68,9 +91,9 @@ export async function syncPendingMutations(): Promise<number> {
           : `${syncedCount} modifications hors-ligne synchronisées !`,
         { description: "Vos données atelier sont à jour sur le serveur." },
       );
-      if (queryInvalidator) {
-        queryInvalidator();
-      }
+    }
+    if (queryInvalidator) {
+      queryInvalidator();
     }
   } finally {
     isSyncing = false;
@@ -214,6 +237,37 @@ async function processSyncItem(
         if (typeof insertData["id"] === "string" && insertData["id"].startsWith("temp_")) {
           delete insertData["id"];
         }
+
+        // 1. S'assurer que business_id est toujours présent
+        if (!insertData["business_id"]) {
+          try {
+            const { currentBusinessId } = await import("./queries");
+            insertData["business_id"] = await currentBusinessId();
+          } catch {
+            // ignore
+          }
+        }
+
+        // 2. Si toujours absent, le déduire depuis la commande liée
+        if (!insertData["business_id"] && insertData["order_id"]) {
+          try {
+            const { data: ord } = await supabase
+              .from("orders")
+              .select("business_id")
+              .eq("id", insertData["order_id"])
+              .maybeSingle();
+            if (ord?.business_id) {
+              insertData["business_id"] = ord.business_id;
+            }
+          } catch {
+            // ignore
+          }
+        }
+
+        if (!insertData["business_id"]) {
+          throw new Error("Paiement sans business_id valide");
+        }
+
         const { data, error } = await supabase
           .from("payments")
           .upsert(insertData as never, { onConflict: "id" })

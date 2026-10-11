@@ -191,6 +191,7 @@ function NewOrder() {
 
       if (depositVal > 0) {
         await savePaymentOffline({
+          business_id: business.id,
           order_id: orderId,
           amount: depositVal,
           method: values["deposit_method"] || "especes",

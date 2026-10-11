@@ -46,6 +46,7 @@ import {
   deleteOrderCascade,
   saveOrderOffline,
   savePaymentOffline,
+  deletePaymentOffline,
 } from "@/lib/queries";
 import {
   ORDER_STATUS,
@@ -227,8 +228,7 @@ function OrderDetailPage() {
   // Delete Payment Mutation
   const deletePaymentMutation = useMutation({
     mutationFn: async (pId: string) => {
-      const { error } = await supabase.from("payments").delete().eq("id", pId);
-      if (error) throw error;
+      await deletePaymentOffline(pId, orderId);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["payments", orderId] });
@@ -1029,9 +1029,11 @@ function OrderDetailPage() {
                 paid_at: String(fd.get("paid_at") || today()),
                 note: String(fd.get("note") || ""),
               });
-              queryClient.invalidateQueries({ queryKey: ["payments", orderId] });
-              queryClient.invalidateQueries({ queryKey: ["order", orderId] });
-              queryClient.invalidateQueries({ queryKey: ["orders"] });
+              await Promise.all([
+                queryClient.invalidateQueries({ queryKey: ["payments", orderId] }),
+                queryClient.invalidateQueries({ queryKey: ["order", orderId] }),
+                queryClient.invalidateQueries({ queryKey: ["orders"] }),
+              ]);
               toast.success("Paiement enregistré avec succès");
               setOpenPaymentModal(false);
             }}
