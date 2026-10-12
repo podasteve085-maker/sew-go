@@ -27,7 +27,18 @@ function createSupabaseFetch(supabaseKey: string): typeof fetch {
 
     headers.set('apikey', supabaseKey);
 
-    // Timeout de sécurité de 4.5s max pour éviter tout blocage réseau prolongé sur mobile
+    const requestUrl =
+      typeof input === 'string'
+        ? input
+        : input instanceof URL
+          ? input.toString()
+          : typeof Request !== 'undefined' && input instanceof Request
+            ? input.url
+            : '';
+    const isStorageCall = requestUrl.includes('/storage/v1/');
+    // Les photos catalogue / lookbook peuvent dépasser 4.5s sur mobile.
+    const timeoutMs = isStorageCall ? 20000 : 8000;
+
     const controller = new AbortController();
     let timer: ReturnType<typeof setTimeout> | undefined;
 
@@ -40,7 +51,7 @@ function createSupabaseFetch(supabaseKey: string): typeof fetch {
     } else {
       timer = setTimeout(() => {
         controller.abort();
-      }, 4500);
+      }, timeoutMs);
     }
 
     return fetch(input, { ...init, headers, signal: controller.signal }).finally(() => {

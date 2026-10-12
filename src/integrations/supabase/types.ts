@@ -582,11 +582,31 @@ export type Database = {
       }
     }
     Views: {
-      [_ in never]: never
+      atelier_lookbook_public: {
+        Row: {
+          address: string | null
+          city: string | null
+          currency: string | null
+          id: string | null
+          logo_url: string | null
+          name: string | null
+          phone: string | null
+          whatsapp: string | null
+        }
+        Relationships: []
+      }
     }
     Functions: {
       current_business_id: { Args: never; Returns: string }
       owns_business: { Args: { _business_id: string }; Returns: boolean }
+      delete_catalog_model: {
+        Args: { p_model_id: string }
+        Returns: Json
+      }
+      save_catalog_model: {
+        Args: { p_model: Json }
+        Returns: Json
+      }
     }
     Enums: {
       [_ in never]: never

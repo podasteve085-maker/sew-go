@@ -10,13 +10,12 @@ import {
   Share2,
   Trash2,
   Edit,
-  Eye,
   ChevronLeft,
   ChevronRight,
   X,
-  Sparkles,
   Copy,
   MessageCircle,
+  ExternalLink,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -26,8 +25,15 @@ import {
   deleteCatalogModel,
   type CatalogModelRow,
 } from "@/lib/queries";
-import { CATALOG_CATEGORIES, catalogCategoryLabel } from "@/lib/domain";
-import { fcfa, cleanPhone } from "@/lib/format";
+import {
+  CATALOG_CATEGORIES,
+  catalogCategoryLabel,
+  catalogShareMessage,
+  copyTextToClipboard,
+  lookbookAbsoluteUrl,
+  openWhatsAppShare,
+} from "@/lib/domain";
+import { fcfa } from "@/lib/format";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { StoredImage, EmptyState } from "@/components/bits";
@@ -74,26 +80,28 @@ function CataloguePage() {
   const [currentPhotoIndex, setCurrentPhotoIndex] = useState(0);
 
   const modelsQuery = useQuery({
-    queryKey: ["catalog-models", selectedCategory],
-    queryFn: () => fetchCatalogModels(selectedCategory),
-    enabled: true,
+    queryKey: ["catalog-models", business?.id],
+    queryFn: () => fetchCatalogModels("all", business?.id),
+    enabled: Boolean(business?.id),
   });
 
   const allModels = modelsQuery.data ?? [];
 
-  // Filtrage par texte de recherche
+  // Filtrage par texte de recherche et catégorie
   const filteredModels = useMemo(() => {
-    if (!searchQuery.trim()) return allModels;
     const q = searchQuery.toLowerCase().trim();
     return allModels.filter((m) => {
+      const matchCategory = selectedCategory === "all" || m.category === selectedCategory;
+      if (!matchCategory) return false;
+      if (!q) return true;
       const matchName = m.name.toLowerCase().includes(q);
       const matchDesc = (m.description ?? "").toLowerCase().includes(q);
       const matchFabric = (m.fabric_needed ?? "").toLowerCase().includes(q);
       const matchTags = (m.tags ?? []).some((t) => t.toLowerCase().includes(q));
-      const matchCategory = catalogCategoryLabel(m.category).toLowerCase().includes(q);
-      return matchName || matchDesc || matchFabric || matchTags || matchCategory;
+      const matchCategoryLabel = catalogCategoryLabel(m.category).toLowerCase().includes(q);
+      return matchName || matchDesc || matchFabric || matchTags || matchCategoryLabel;
     });
-  }, [allModels, searchQuery]);
+  }, [allModels, searchQuery, selectedCategory]);
 
   // Compteurs par catégorie
   const categoryCounts = useMemo(() => {
@@ -108,6 +116,7 @@ function CataloguePage() {
     mutationFn: (id: string) => deleteCatalogModel(id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["catalog-models"] });
+      queryClient.invalidateQueries({ queryKey: ["public-catalog-models"] });
       toast.success("Modèle supprimé avec succès du catalogue");
       setModelToDelete(null);
       if (presentationModel) setPresentationModel(null);
@@ -133,45 +142,56 @@ function CataloguePage() {
     setCurrentPhotoIndex(0);
   }
 
-  function getBaseUrl() {
-    if (typeof window !== "undefined") {
-      return window.location.origin;
+  function catalogPublicUrl(modelId?: string) {
+    if (!business?.id) {
+      toast.error("Atelier introuvable. Rechargez la page puis réessayez.");
+      return null;
     }
-    return "https://couturpro-couturpro.workers.dev";
+    return lookbookAbsoluteUrl(business.id, modelId);
   }
 
-  function handleShareWhatsApp(model: CatalogModelRow) {
-    const baseUrl = getBaseUrl();
-    const publicUrl = `${baseUrl}/lookbook?atelierId=${business?.id || ""}&modelId=${model.id}&name=${encodeURIComponent(model.name)}&price=${model.default_price || ""}&fabric=${encodeURIComponent(model.fabric_needed || "")}&atelier=${encodeURIComponent(business?.name || "")}&phone=${cleanPhone(business?.phone || "")}`;
-    
-    const priceText = model.default_price ? `\n💰 Prix indicatif : ${fcfa(model.default_price, business?.currency)}` : "";
-    const fabricText = model.fabric_needed ? `\n🧵 Tissu recommandé : ${model.fabric_needed}` : "";
-    const descText = model.description ? `\n📝 ${model.description}` : "";
-
-    const text = `✨ *${business?.name ?? "Notre Atelier"} — Modèle : ${model.name}*${priceText}${fabricText}${descText}\n\n👉 *Consultez les photos et détails ici :*\n${publicUrl}\n\nConfection sur mesure disponible dans notre atelier ! ✂️`;
-    const url = `https://wa.me/?text=${encodeURIComponent(text)}`;
-    window.open(url, "_blank");
+  async function handleShareWhatsApp(model: CatalogModelRow) {
+    const publicUrl = catalogPublicUrl(model.id);
+    if (!publicUrl) return;
+    const priceText = model.default_price
+      ? `Prix indicatif : ${fcfa(model.default_price, business?.currency)}`
+      : null;
+    const text = catalogShareMessage({
+      atelierName: business?.name ?? "Notre atelier",
+      publicUrl,
+      modelName: model.name,
+      priceText,
+    });
+    await openWhatsAppShare(text, publicUrl);
+    toast.success("WhatsApp ouvert. Le message contient le lien du lookbook.");
   }
 
-  function handleShareFullCatalogWhatsApp() {
-    const baseUrl = getBaseUrl();
-    const publicUrl = `${baseUrl}/lookbook?atelierId=${business?.id || ""}&atelier=${encodeURIComponent(business?.name || "")}&phone=${cleanPhone(business?.phone || "")}`;
-
-    const text = `✨ *Catalogue & Lookbook — ${business?.name ?? "Notre Atelier"}* 👗✂️\n\nDécouvrez toutes nos créations et modèles confections sur mesure :\n\n👉 *Consultez notre catalogue en ligne :*\n${publicUrl}\n\nContactez-nous pour commander ou confectionner votre tenue ! ✂️`;
-    const url = `https://wa.me/?text=${encodeURIComponent(text)}`;
-    window.open(url, "_blank");
+  async function handleShareFullCatalogWhatsApp() {
+    const publicUrl = catalogPublicUrl();
+    if (!publicUrl) return;
+    const text = catalogShareMessage({
+      atelierName: business?.name ?? "Notre atelier",
+      publicUrl,
+    });
+    await openWhatsAppShare(text, publicUrl);
+    toast.success("WhatsApp ouvert. Le message contient le lien du catalogue.");
   }
 
-  function handleCopyCatalogLink() {
-    const baseUrl = getBaseUrl();
-    const publicUrl = `${baseUrl}/lookbook?atelierId=${business?.id || ""}&atelier=${encodeURIComponent(business?.name || "")}&phone=${cleanPhone(business?.phone || "")}`;
-    if (typeof navigator !== "undefined" && navigator.clipboard) {
-      navigator.clipboard.writeText(publicUrl).then(() => {
-        toast.success("Lien du catalogue copié dans le presse-papier !");
-      }).catch(() => {
-        toast.error("Impossible de copier le lien");
-      });
+  async function handleCopyCatalogLink(modelId?: string) {
+    const publicUrl = catalogPublicUrl(modelId);
+    if (!publicUrl) return;
+    const ok = await copyTextToClipboard(publicUrl);
+    if (ok) {
+      toast.success("Lien copié. Envoyez-le au client : il ouvre le lookbook.");
+    } else {
+      toast.error("Impossible de copier le lien");
     }
+  }
+
+  function handlePreviewAsClient() {
+    const publicUrl = catalogPublicUrl();
+    if (!publicUrl) return;
+    window.open(publicUrl, "_blank", "noopener,noreferrer");
   }
 
   function handleOrderFromModel(model: CatalogModelRow) {
@@ -218,36 +238,45 @@ function CataloguePage() {
           </p>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2">
-          {/* Bouton de partage général du catalogue au client */}
-          <div className="flex items-center gap-1">
+        <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
+          <div className="grid grid-cols-2 gap-2 sm:flex sm:items-center">
             <Button
               variant="outline"
               size="sm"
-              onClick={handleShareFullCatalogWhatsApp}
-              className="h-9 sm:h-10 text-xs sm:text-sm font-semibold rounded-xl border-success/30 bg-success/10 text-success hover:bg-success/20 shadow-xs"
-              title="Envoyer le lien du catalogue par WhatsApp"
+              onClick={handlePreviewAsClient}
+              className="h-11 sm:h-10 text-xs sm:text-sm font-semibold rounded-xl"
+              title="Ouvrir le lookbook tel que le client le voit"
             >
-              <MessageCircle className="mr-1.5 size-4" /> Partager catalogue
+              <ExternalLink className="mr-1.5 size-4" /> Mode client
             </Button>
             <Button
-              variant="ghost"
-              size="icon"
-              onClick={handleCopyCatalogLink}
-              className="size-9 sm:size-10 rounded-xl"
-              title="Copier le lien du catalogue"
+              onClick={handleCreate}
+              size="sm"
+              className="h-11 sm:h-10 text-xs font-bold sm:text-sm shadow-xs rounded-xl"
             >
-              <Copy className="size-4 text-muted-foreground" />
+              <Plus className="mr-1.5 size-4" /> Nouveau modèle
             </Button>
           </div>
-
-          <Button
-            onClick={handleCreate}
-            size="sm"
-            className="h-9 text-xs font-bold sm:h-10 sm:text-sm shadow-xs rounded-xl"
-          >
-            <Plus className="mr-1.5 size-4" /> Nouveau modèle
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => void handleShareFullCatalogWhatsApp()}
+              className="h-11 sm:h-10 flex-1 sm:flex-none text-xs sm:text-sm font-bold rounded-xl border-success/40 bg-success text-success-foreground hover:bg-success/90 shadow-xs"
+              title="Envoyer le lien du catalogue au client"
+            >
+              <MessageCircle className="mr-1.5 size-4" /> Envoyer le catalogue
+            </Button>
+            <Button
+              variant="outline"
+              size="icon"
+              onClick={() => void handleCopyCatalogLink()}
+              className="size-11 sm:size-10 rounded-xl shrink-0"
+              title="Copier le lien du catalogue"
+            >
+              <Copy className="size-4" />
+            </Button>
+          </div>
         </div>
       </div>
 
@@ -316,7 +345,7 @@ function CataloguePage() {
 
       {/* Grille des modèles */}
       {modelsQuery.isLoading ? (
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 sm:gap-4">
+        <div className="grid grid-cols-1 min-[480px]:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 sm:gap-4">
           {[1, 2, 3, 4].map((n) => (
             <div key={n} className="card-soft h-52 sm:h-64 animate-pulse bg-muted/60" />
           ))}
@@ -340,7 +369,7 @@ function CataloguePage() {
           }
         />
       ) : (
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 sm:gap-4">
+        <div className="grid grid-cols-1 min-[480px]:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 sm:gap-4">
           {filteredModels.map((model) => {
             const hasPhotos = model.photo_paths && model.photo_paths.length > 0;
             const coverPhoto = hasPhotos ? model.photo_paths[0] : null;
@@ -373,40 +402,39 @@ function CataloguePage() {
                     {catalogCategoryLabel(model.category)}
                   </span>
 
-                  {/* Boutons d'action rapides sur l'image (en haut à droite) : TOUJOURS VISIBLES SUR MOBILE */}
-                  <div className="absolute top-2 right-2 flex items-center gap-1.5 z-10">
+                  {/* Indicateur multi-photos */}
+                  {model.photo_paths && model.photo_paths.length > 1 && (
+                    <span className="absolute top-2 right-2 rounded-full bg-black/65 px-2 py-0.5 text-[0.65rem] font-bold text-white backdrop-blur">
+                      +{model.photo_paths.length - 1}
+                    </span>
+                  )}
+
+                  <div className="absolute bottom-2 right-2 z-10 flex items-center gap-1.5">
                     <button
                       type="button"
+                      aria-label="Modifier le modèle"
+                      title="Modifier"
                       onClick={(e) => {
                         e.stopPropagation();
                         handleEdit(model);
                       }}
-                      className="flex size-8 items-center justify-center rounded-full bg-black/70 text-white shadow-md backdrop-blur-sm transition-transform hover:bg-primary active:scale-90"
-                      title="Modifier ce modèle"
-                      aria-label="Modifier"
+                      className="flex size-11 items-center justify-center rounded-full bg-white text-foreground shadow-lg ring-1 ring-black/10 active:scale-95"
                     >
-                      <Edit className="size-3.5" />
+                      <Edit className="size-4.5" />
                     </button>
                     <button
                       type="button"
+                      aria-label="Supprimer le modèle"
+                      title="Supprimer"
                       onClick={(e) => {
                         e.stopPropagation();
                         setModelToDelete(model);
                       }}
-                      className="flex size-8 items-center justify-center rounded-full bg-black/70 text-white shadow-md backdrop-blur-sm transition-transform hover:bg-destructive active:scale-90"
-                      title="Supprimer ce modèle"
-                      aria-label="Supprimer"
+                      className="flex size-11 items-center justify-center rounded-full bg-destructive text-white shadow-lg active:scale-95"
                     >
-                      <Trash2 className="size-3.5" />
+                      <Trash2 className="size-4.5" />
                     </button>
                   </div>
-
-                  {/* Indicateur multi-photos */}
-                  {model.photo_paths && model.photo_paths.length > 1 && (
-                    <span className="absolute bottom-2 right-2 rounded-full bg-black/65 px-2 py-0.5 text-[0.65rem] font-bold text-white backdrop-blur">
-                      +{model.photo_paths.length - 1} photos
-                    </span>
-                  )}
                 </div>
 
                 {/* Contenu de la fiche modèle */}
@@ -437,24 +465,39 @@ function CataloguePage() {
                     </div>
                   </div>
 
-                  {/* Boutons d'action sous la carte : Espacés et parfaitement ergonomiques sur mobile */}
-                  <div className="mt-3 space-y-1.5 border-t border-border/70 pt-2.5">
-                    <Button
-                      size="sm"
-                      onClick={() => handleOrderFromModel(model)}
-                      className="h-9 w-full text-xs font-bold rounded-xl shadow-xs"
-                    >
-                      <Scissors className="mr-1.5 size-3.5" /> Commander ce modèle
-                    </Button>
-
+                  <div className="mt-3 grid grid-cols-2 gap-1.5 border-t border-border/70 pt-2.5">
                     <Button
                       type="button"
                       variant="outline"
                       size="sm"
-                      onClick={() => handleShareWhatsApp(model)}
-                      className="h-8.5 w-full text-xs font-semibold rounded-xl border-success/30 bg-success/10 text-success hover:bg-success/20 transition-all active:scale-95"
+                      onClick={() => handleEdit(model)}
+                      className="h-11 text-xs font-bold rounded-xl px-1.5"
                     >
-                      <Share2 className="mr-1.5 size-3.5" /> Partager au client
+                      <Edit className="mr-1 size-3.5" /> Modifier
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setModelToDelete(model)}
+                      className="h-11 text-xs font-bold rounded-xl px-1.5 border-destructive/40 text-destructive hover:bg-destructive/10"
+                    >
+                      <Trash2 className="mr-1 size-3.5" /> Supprimer
+                    </Button>
+                    <Button
+                      size="sm"
+                      onClick={() => handleOrderFromModel(model)}
+                      className="h-11 text-xs font-bold rounded-xl shadow-xs px-1.5"
+                    >
+                      <Scissors className="mr-1 size-3.5" /> Commander
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      onClick={() => void handleShareWhatsApp(model)}
+                      className="h-11 text-xs font-bold rounded-xl bg-success text-success-foreground hover:bg-success/90 px-1.5"
+                    >
+                      <Share2 className="mr-1 size-3.5" /> Envoyer
                     </Button>
                   </div>
                 </div>
@@ -472,12 +515,18 @@ function CataloguePage() {
           if (!v) setEditingModel(null);
         }}
         model={editingModel}
+        onSaved={(saved) => {
+          setEditingModel(saved);
+          if (presentationModel?.id === saved.id) {
+            setPresentationModel(saved);
+          }
+        }}
       />
 
       {/* Mode Présentation Plein Écran pour le client */}
       {presentationModel && (
         <Dialog open={Boolean(presentationModel)} onOpenChange={() => setPresentationModel(null)}>
-          <DialogContent className="max-h-[95vh] max-w-2xl overflow-hidden p-0 bg-card border-border">
+          <DialogContent className="max-h-[95vh] max-w-2xl overflow-hidden p-0 bg-card border-border [&>button]:hidden">
             <div className="relative flex flex-col">
               {/* Grand affichage photo */}
               <div className="relative aspect-4/3 sm:aspect-16/10 w-full bg-black/90 flex items-center justify-center overflow-hidden">
@@ -582,49 +631,47 @@ function CataloguePage() {
                   </p>
                 )}
 
-                <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-border">
+                <div className="grid grid-cols-2 gap-2 pt-2 border-t border-border">
                   <Button
                     size="lg"
                     onClick={() => {
                       setPresentationModel(null);
                       handleOrderFromModel(presentationModel);
                     }}
-                    className="flex-1 font-bold h-11 rounded-xl"
+                    className="col-span-2 font-bold h-11 rounded-xl"
                   >
                     <Scissors className="mr-2 size-4" /> Commander ce modèle
                   </Button>
                   <Button
-                    variant="outline"
                     size="lg"
-                    onClick={() => handleShareWhatsApp(presentationModel)}
-                    className="h-11 font-semibold rounded-xl border-success/30 bg-success/10 text-success hover:bg-success/20"
+                    onClick={() => void handleShareWhatsApp(presentationModel)}
+                    className="col-span-2 h-11 font-bold rounded-xl bg-success text-success-foreground hover:bg-success/90"
                   >
-                    <Share2 className="mr-1.5 size-4" /> Partager au client
+                    <Share2 className="mr-1.5 size-4" /> Envoyer au client
                   </Button>
                   <Button
-                    variant="ghost"
+                    variant="outline"
                     size="lg"
                     onClick={() => {
                       const m = presentationModel;
                       setPresentationModel(null);
                       handleEdit(m);
                     }}
-                    className="h-11 rounded-xl"
-                    title="Modifier"
+                    className="h-11 rounded-xl font-semibold"
                   >
-                    <Edit className="size-4" />
+                    <Edit className="mr-1.5 size-4" /> Modifier
                   </Button>
                   <Button
-                    variant="ghost"
+                    variant="outline"
                     size="lg"
                     onClick={() => {
                       const m = presentationModel;
+                      setPresentationModel(null);
                       setModelToDelete(m);
                     }}
-                    className="h-11 rounded-xl text-destructive hover:bg-destructive/10"
-                    title="Supprimer"
+                    className="h-11 rounded-xl font-semibold border-destructive/40 text-destructive hover:bg-destructive/10"
                   >
-                    <Trash2 className="size-4" />
+                    <Trash2 className="mr-1.5 size-4" /> Supprimer
                   </Button>
                 </div>
               </div>
@@ -652,14 +699,15 @@ function CataloguePage() {
           <AlertDialogFooter className="gap-2 sm:gap-0">
             <AlertDialogCancel className="rounded-xl">Annuler</AlertDialogCancel>
             <AlertDialogAction
-              onClick={() => {
-                if (modelToDelete) {
-                  deleteMutation.mutate(modelToDelete.id);
-                }
+              disabled={deleteMutation.isPending}
+              onClick={(e) => {
+                e.preventDefault();
+                const id = modelToDelete?.id;
+                if (id) deleteMutation.mutate(id);
               }}
               className="rounded-xl bg-destructive text-destructive-foreground hover:bg-destructive/90 font-bold"
             >
-              Supprimer définitivement
+              {deleteMutation.isPending ? "Suppression..." : "Supprimer définitivement"}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

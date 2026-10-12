@@ -6,6 +6,9 @@
 import { useState, useEffect } from "react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
+import { deleteStorageFiles, uploadDataUrl } from "@/hooks/use-signed-url";
+import { isMissingDbRoutine, parseCatalogRpcPayload } from "@/lib/queries";
+import type { Json } from "@/integrations/supabase/types";
 import {
   getPendingSyncQueue,
   removeSyncQueueItem,
@@ -101,25 +104,6 @@ export async function syncPendingMutations(): Promise<number> {
   }
 
   return syncedCount;
-}
-
-async function uploadDataUrl(businessId: string, dataUrl: string, folder: string): Promise<string | null> {
-  try {
-    const res = await fetch(dataUrl);
-    const blob = await res.blob();
-    const ext = blob.type.includes("webp") ? "webp" : blob.type.includes("png") ? "png" : "jpg";
-    const path = `${businessId}/${folder}/${Math.random().toString(36).slice(2, 10)}_${Date.now()}.${ext}`;
-
-    const { error } = await supabase.storage.from("atelier").upload(path, blob, {
-      cacheControl: "31536000, public, immutable",
-      contentType: blob.type || "image/jpeg",
-      upsert: false,
-    });
-    if (error) return null;
-    return path;
-  } catch {
-    return null;
-  }
 }
 
 /**
@@ -399,25 +383,67 @@ async function processSyncItem(
         } else {
           delete upsertData["id"];
         }
-        const { data, error } = await supabase
-          .from("catalog_models")
-          .upsert(upsertData as never, { onConflict: "id" })
-          .select()
-          .single();
-        if (error) throw error;
-        if (data) {
-          if (id && id !== data.id) idMapping.set(id, data.id);
-          await setLocalItem("catalog_models", data);
+        if (Array.isArray(upsertData["photo_paths"])) {
+          const bizId = upsertData["business_id"] as string | undefined;
+          const nextPaths: string[] = [];
+          for (const photo of upsertData["photo_paths"] as unknown[]) {
+            if (typeof photo === "string" && photo.startsWith("data:") && bizId) {
+              const uploadedPath = await uploadDataUrl(bizId, photo, "catalog");
+              nextPaths.push(uploadedPath || photo);
+            } else if (typeof photo === "string") {
+              nextPaths.push(photo);
+            }
+          }
+          upsertData["photo_paths"] = nextPaths;
+        }
+        const rpc = await supabase.rpc("save_catalog_model", {
+          p_model: upsertData as Json,
+        });
+        if (!rpc.error) {
+          const saved = parseCatalogRpcPayload(rpc.data);
+          const savedId = typeof saved?.["id"] === "string" ? saved["id"] : targetId;
+          if (id && savedId && id !== savedId) idMapping.set(id, savedId);
+          if (saved) await setLocalItem("catalog_models", saved);
           if (id && id.startsWith("temp_")) {
             await deleteLocalItem("catalog_models", id);
           }
+        } else if (isMissingDbRoutine(rpc.error)) {
+          const { data, error } = await supabase
+            .from("catalog_models")
+            .upsert(upsertData as never, { onConflict: "id" })
+            .select()
+            .single();
+          if (error) throw error;
+          if (data) {
+            if (id && id !== data.id) idMapping.set(id, data.id);
+            await setLocalItem("catalog_models", data);
+            if (id && id.startsWith("temp_")) {
+              await deleteLocalItem("catalog_models", id);
+            }
+          }
+        } else {
+          throw rpc.error;
         }
       } else if (item.action === "delete") {
         const id = (payload["id"] as string) || item.tempId!;
         const targetId = idMapping.get(id) || id;
-        const { error } = await supabase.from("catalog_models").delete().eq("id", targetId);
-        if (error) throw error;
+        const rpc = await supabase.rpc("delete_catalog_model", { p_model_id: targetId });
+        if (rpc.error && !isMissingDbRoutine(rpc.error)) {
+          throw rpc.error;
+        }
+        if (rpc.error) {
+          const { error } = await supabase.from("catalog_models").delete().eq("id", targetId);
+          if (error) throw error;
+        }
         await deleteLocalItem("catalog_models", targetId);
+        const rpcPayload = parseCatalogRpcPayload(rpc.data);
+        const rpcPhotos = Array.isArray(rpcPayload?.["photo_paths"])
+          ? (rpcPayload["photo_paths"] as string[])
+          : undefined;
+        const photoPaths = rpcPhotos ?? (payload["photo_paths"] as string[] | undefined) ?? [];
+        if (photoPaths.length > 0) {
+          await deleteStorageFiles(photoPaths);
+        }
       }
       break;
     }

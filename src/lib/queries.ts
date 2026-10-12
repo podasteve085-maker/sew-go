@@ -1,6 +1,7 @@
 import { supabase } from "@/integrations/supabase/client";
+import type { Json } from "@/integrations/supabase/types";
 import type { OrderStatus } from "@/lib/domain";
-import { deleteStorageFiles, uuid } from "@/hooks/use-signed-url";
+import { deleteStorageFiles, materializeStoragePaths, uuid } from "@/hooks/use-signed-url";
 import {
   setLocalItem,
   setLocalItems,
@@ -716,34 +717,51 @@ export type CatalogModelRow = {
   updated_at: string;
 };
 
-export async function fetchCatalogModels(category?: string, bizId?: string): Promise<CatalogModelRow[]> {
-  const businessId = bizId || (await currentBusinessId());
+export async function fetchCatalogModels(
+  category?: string,
+  bizId?: string,
+  options?: { publicAccess?: boolean },
+): Promise<CatalogModelRow[]> {
+  const publicAccess = options?.publicAccess === true;
+  const businessId = bizId || (publicAccess ? undefined : await currentBusinessId());
+
+  if (!businessId) return [];
 
   if (typeof navigator === "undefined" || navigator.onLine) {
     try {
-      let query = supabase.from("catalog_models").select("*");
-      if (businessId) query = query.eq("business_id", businessId);
+      let query = supabase.from("catalog_models").select("*").eq("business_id", businessId);
       if (category && category !== "all") {
         query = query.eq("category", category);
       }
       const { data, error } = await query
         .eq("is_active", true)
         .order("created_at", { ascending: false });
-      if (!error && data) {
-        const serverRows = data as unknown as CatalogModelRow[];
+      if (error) throw error;
+      if (data) {
+        const deletingIds = publicAccess ? new Set<string>() : await pendingCatalogDeleteIds();
+        const serverRows = (data as unknown as CatalogModelRow[]).filter((m) => !deletingIds.has(m.id));
+        if (publicAccess) return serverRows;
+
         const localModels = await getAllLocalItems<CatalogModelRow>("catalog_models");
         const serverIds = new Set(serverRows.map((m) => m.id));
         const pendingLocals = localModels.filter(
-          (m) => m.is_active && !serverIds.has(m.id) && (!businessId || m.business_id === businessId || !m.business_id)
+          (m) =>
+            m.is_active &&
+            !serverIds.has(m.id) &&
+            !deletingIds.has(m.id) &&
+            (!businessId || m.business_id === businessId || !m.business_id)
         );
         const combined = [...serverRows, ...pendingLocals];
         setLocalItems("catalog_models", combined).catch(() => {});
         return combined;
       }
-    } catch {
-      // Fallback IndexedDB
+    } catch (err) {
+      if (publicAccess) throw err;
+      // Fallback IndexedDB pour le propriétaire hors-ligne
     }
   }
+
+  if (publicAccess) return [];
 
   const all = await getAllLocalItems<CatalogModelRow>("catalog_models");
   let filtered = all.filter((m) => m.is_active && (!businessId || m.business_id === businessId || !m.business_id));
@@ -772,30 +790,180 @@ export async function fetchCatalogModel(id: string): Promise<CatalogModelRow | n
   return getLocalItem<CatalogModelRow>("catalog_models", id);
 }
 
+function isNetworkError(error: { message?: string; name?: string } | null | undefined): boolean {
+  const msg = `${error?.name ?? ""} ${error?.message ?? ""}`.toLowerCase();
+  return (
+    msg.includes("failed to fetch") ||
+    msg.includes("network") ||
+    msg.includes("timeout") ||
+    msg.includes("offline") ||
+    msg.includes("abort")
+  );
+}
+
+export function isMissingDbRoutine(error: { message?: string; code?: string } | null | undefined): boolean {
+  const msg = `${error?.code ?? ""} ${error?.message ?? ""}`.toLowerCase();
+  return (
+    msg.includes("pgrst202") ||
+    msg.includes("could not find the function") ||
+    msg.includes("schema cache") ||
+    (msg.includes("function") && msg.includes("does not exist"))
+  );
+}
+
+export function parseCatalogRpcPayload(data: unknown): Record<string, unknown> | null {
+  if (data == null) return null;
+  try {
+    const obj = typeof data === "string" ? (JSON.parse(data) as unknown) : data;
+    if (!obj || typeof obj !== "object" || Array.isArray(obj)) return null;
+    return obj as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+}
+
+function catalogRpcPhotoPaths(data: unknown, fallback: string[] = []): string[] {
+  const parsed = parseCatalogRpcPayload(data);
+  const paths = parsed?.["photo_paths"];
+  if (!Array.isArray(paths)) return fallback;
+  return paths.filter((p): p is string => typeof p === "string" && p.length > 0);
+}
+
+function catalogRpcRow(data: unknown): CatalogModelRow | null {
+  const parsed = parseCatalogRpcPayload(data);
+  if (!parsed || typeof parsed["id"] !== "string" || typeof parsed["name"] !== "string") {
+    return null;
+  }
+  const photoPaths = Array.isArray(parsed["photo_paths"])
+    ? parsed["photo_paths"].filter((p): p is string => typeof p === "string")
+    : [];
+  const tags = Array.isArray(parsed["tags"])
+    ? parsed["tags"].filter((t): t is string => typeof t === "string")
+    : [];
+  return {
+    id: parsed["id"],
+    business_id: typeof parsed["business_id"] === "string" ? parsed["business_id"] : "",
+    name: parsed["name"],
+    category: typeof parsed["category"] === "string" ? parsed["category"] : "boubou",
+    description: typeof parsed["description"] === "string" ? parsed["description"] : null,
+    default_price:
+      typeof parsed["default_price"] === "number"
+        ? parsed["default_price"]
+        : parsed["default_price"] == null
+          ? null
+          : Number(parsed["default_price"]) || null,
+    fabric_needed: typeof parsed["fabric_needed"] === "string" ? parsed["fabric_needed"] : null,
+    photo_paths: photoPaths,
+    tags,
+    is_active: parsed["is_active"] !== false,
+    created_at: typeof parsed["created_at"] === "string" ? parsed["created_at"] : new Date().toISOString(),
+    updated_at: typeof parsed["updated_at"] === "string" ? parsed["updated_at"] : new Date().toISOString(),
+  };
+}
+
+async function pendingCatalogDeleteIds(): Promise<Set<string>> {
+  try {
+    const queue = await getPendingSyncQueue();
+    return new Set(
+      queue
+        .filter((item) => item.entity === "catalog_model" && item.action === "delete")
+        .map((item) => String(item.payload["id"] ?? item.tempId ?? ""))
+        .filter(Boolean),
+    );
+  } catch {
+    return new Set();
+  }
+}
+
 export async function deleteCatalogModel(id: string): Promise<void> {
   const businessId = await currentBusinessId();
   const isOnline = typeof navigator !== "undefined" ? navigator.onLine : true;
+  const local = await getLocalItem<CatalogModelRow>("catalog_models", id);
+  const localPhotoPaths = local?.photo_paths ?? [];
+
+  async function queueOfflineDelete() {
+    await deleteLocalItem("catalog_models", id);
+    await addToSyncQueue({
+      entity: "catalog_model",
+      action: "delete",
+      payload: { id, business_id: businessId, photo_paths: localPhotoPaths },
+    });
+  }
 
   if (isOnline) {
     try {
-      let query = supabase.from("catalog_models").delete().eq("id", id);
-      if (businessId) query = query.eq("business_id", businessId);
-      const { error } = await query;
-      if (!error) {
-        deleteLocalItem("catalog_models", id).catch(() => {});
+      const rpc = await supabase.rpc("delete_catalog_model", { p_model_id: id });
+      if (!rpc.error) {
+        await deleteLocalItem("catalog_models", id);
+        await deleteStorageFiles(catalogRpcPhotoPaths(rpc.data, localPhotoPaths));
         return;
       }
-    } catch {
-      // Fallback
+      if (!isMissingDbRoutine(rpc.error)) {
+        const rpcMsg = (rpc.error.message ?? "").toLowerCase();
+        if (rpcMsg.includes("autoris") || rpcMsg.includes("permission") || rpcMsg.includes("row-level")) {
+          throw new Error(rpc.error.message || "Impossible de supprimer ce modèle.");
+        }
+      }
+    } catch (err) {
+      if (err instanceof Error && !isNetworkError(err)) {
+        const msg = err.message.toLowerCase();
+        if (msg.includes("autoris") || msg.includes("permission") || msg.includes("row-level")) {
+          throw err;
+        }
+      }
     }
+
+    let query = supabase.from("catalog_models").delete().eq("id", id);
+    if (businessId) query = query.eq("business_id", businessId);
+    let { data, error } = await query.select("id, photo_paths");
+
+    if (!error && (data ?? []).length === 0) {
+      const retry = await supabase.from("catalog_models").delete().eq("id", id).select("id, photo_paths");
+      data = retry.data;
+      error = retry.error;
+    }
+
+    if (error && isNetworkError(error)) {
+      await queueOfflineDelete();
+      return;
+    }
+
+    if (error) {
+      throw new Error(error.message || "Impossible de supprimer ce modèle.");
+    }
+
+    let deleted = (data ?? []) as Array<{ id: string; photo_paths?: string[] | null }>;
+
+    if (deleted.length === 0) {
+      let softQuery = supabase
+        .from("catalog_models")
+        .update({ is_active: false, updated_at: new Date().toISOString() })
+        .eq("id", id);
+      if (businessId) softQuery = softQuery.eq("business_id", businessId);
+      const soft = await softQuery.select("id, photo_paths");
+      if (soft.error && isNetworkError(soft.error)) {
+        await queueOfflineDelete();
+        return;
+      }
+      if (soft.error) {
+        throw new Error(soft.error.message || "Impossible de supprimer ce modèle.");
+      }
+      deleted = (soft.data ?? []) as Array<{ id: string; photo_paths?: string[] | null }>;
+    }
+
+    if (deleted.length === 0) {
+      throw new Error(
+        "Le modèle n'a pas pu être supprimé. Vérifiez que vous êtes bien connecté avec le compte de l'atelier.",
+      );
+    }
+
+    await deleteLocalItem("catalog_models", id);
+    const paths = deleted[0]?.photo_paths ?? localPhotoPaths;
+    await deleteStorageFiles(paths);
+    return;
   }
 
-  await deleteLocalItem("catalog_models", id);
-  await addToSyncQueue({
-    entity: "catalog_model",
-    action: "delete",
-    payload: { id, business_id: businessId },
-  });
+  await queueOfflineDelete();
 }
 
 export async function saveCatalogModelOffline(
@@ -818,6 +986,10 @@ export async function saveCatalogModelOffline(
     existingModel?.business_id ||
     (await currentBusinessId());
 
+  if (!businessId) {
+    throw new Error("Atelier introuvable. Rechargez la page puis réessayez.");
+  }
+
   const localModel: CatalogModelRow = {
     id: modelId,
     business_id: businessId,
@@ -829,26 +1001,56 @@ export async function saveCatalogModelOffline(
     photo_paths: (mData["photo_paths"] as string[]) ?? existingModel?.photo_paths ?? [],
     tags: (mData["tags"] as string[]) ?? existingModel?.tags ?? [],
     is_active: true,
-    created_at: existingModel?.created_at || new Date().toISOString(),
+    created_at:
+      existingModel?.created_at ||
+      (typeof mData["created_at"] === "string" ? mData["created_at"] : null) ||
+      new Date().toISOString(),
     updated_at: new Date().toISOString(),
   };
 
+  localModel.photo_paths = await materializeStoragePaths(businessId, localModel.photo_paths, "catalog");
+  const hasLocalOnlyPhotos = localModel.photo_paths.some((path) => path.startsWith("data:"));
   await setLocalItem("catalog_models", localModel);
 
-  if (isOnline && businessId) {
+  if (isOnline && businessId && !hasLocalOnlyPhotos) {
     try {
-      const { data, error } = await supabase
-        .from("catalog_models")
-        .upsert(localModel as never, { onConflict: "id" })
-        .select()
-        .single();
-      if (!error && data) {
-        const row = data as unknown as CatalogModelRow;
-        await setLocalItem("catalog_models", row);
-        return row;
+      const rpc = await supabase.rpc("save_catalog_model", {
+        p_model: localModel as unknown as Json,
+      });
+      if (!rpc.error) {
+        const row = catalogRpcRow(rpc.data);
+        if (row) {
+          await setLocalItem("catalog_models", row);
+          return row;
+        }
+      } else if (!isMissingDbRoutine(rpc.error) && !isNetworkError(rpc.error)) {
+        const rpcMsg = (rpc.error.message ?? "").toLowerCase();
+        if (rpcMsg.includes("autoris") || rpcMsg.includes("permission") || rpcMsg.includes("row-level")) {
+          throw new Error(rpc.error.message || "Impossible d'enregistrer le modèle.");
+        }
       }
-    } catch {
-      // ignore
+    } catch (err) {
+      if (err instanceof Error && !isNetworkError(err)) {
+        const msg = err.message.toLowerCase();
+        if (msg.includes("autoris") || msg.includes("permission") || msg.includes("row-level")) {
+          throw err;
+        }
+      }
+    }
+
+    const { data, error } = await supabase
+      .from("catalog_models")
+      .upsert(localModel as never, { onConflict: "id" })
+      .select()
+      .single();
+    if (error) {
+      if (!isNetworkError(error)) {
+        throw new Error(error.message || "Impossible d'enregistrer le modèle.");
+      }
+    } else if (data) {
+      const row = data as unknown as CatalogModelRow;
+      await setLocalItem("catalog_models", row);
+      return row;
     }
   }
 

@@ -14,7 +14,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Loader2, Plus, X, UploadCloud, Tag, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { useBusiness } from "@/hooks/use-business";
-import { uploadImage } from "@/hooks/use-signed-url";
+import { uploadImage, deleteStorageFiles } from "@/hooks/use-signed-url";
 import { CATALOG_CATEGORIES, type CatalogCategory } from "@/lib/domain";
 import { saveCatalogModelOffline, type CatalogModelRow } from "@/lib/queries";
 import { StoredImage } from "@/components/bits";
@@ -37,9 +37,10 @@ interface CatalogModelDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   model?: CatalogModelRow | null;
+  onSaved?: (model: CatalogModelRow) => void;
 }
 
-export function CatalogModelDialog({ open, onOpenChange, model }: CatalogModelDialogProps) {
+export function CatalogModelDialog({ open, onOpenChange, model, onSaved }: CatalogModelDialogProps) {
   const { data: business } = useBusiness();
   const queryClient = useQueryClient();
 
@@ -58,8 +59,6 @@ export function CatalogModelDialog({ open, onOpenChange, model }: CatalogModelDi
   const [tags, setTags] = useState<string[]>(model?.tags ?? []);
   const [tagInput, setTagInput] = useState("");
   const [uploading, setUploading] = useState(false);
-  const [upgradeOpen, setUpgradeOpen] = useState(false);
-  const [quotaReason, setQuotaReason] = useState("");
 
   // Synchronise whenever the dialog opens with a specific model
   function resetForm(m?: CatalogModelRow | null) {
@@ -73,12 +72,14 @@ export function CatalogModelDialog({ open, onOpenChange, model }: CatalogModelDi
     setTagInput("");
   }
 
-  // Dès que le dialogue s'ouvre ou que le modèle change, mettre à jour le formulaire
+  // Réinitialiser uniquement à l'ouverture ou au changement de modèle,
+  // jamais pendant une édition (ex. après suppression d'une photo).
   useEffect(() => {
     if (open) {
       resetForm(model);
     }
-  }, [open, model]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- model?.id suffit
+  }, [open, model?.id]);
 
   async function handleFileUpload(e: React.ChangeEvent<HTMLInputElement>) {
     const files = e.target.files;
@@ -92,6 +93,10 @@ export function CatalogModelDialog({ open, onOpenChange, model }: CatalogModelDi
         const file = files[i];
         if (file) {
           const path = await uploadImage(business.id, file, "catalog");
+          if (path.startsWith("data:") && typeof navigator !== "undefined" && navigator.onLine) {
+            toast.error(`La photo « ${file.name} » n'a pas pu être envoyée. Réessayez.`);
+            continue;
+          }
           newPaths.push(path);
         }
       }
@@ -106,9 +111,45 @@ export function CatalogModelDialog({ open, onOpenChange, model }: CatalogModelDi
     }
   }
 
-  function removePhoto(indexToRemove: number) {
-    setPhotoPaths((prev) => prev.filter((_, idx) => idx !== indexToRemove));
-    toast.info("Photo retirée du modèle");
+  async function removePhoto(indexToRemove: number) {
+    const previous = photoPaths;
+    const removed = previous[indexToRemove];
+    if (!removed) return;
+    const next = previous.filter((_, idx) => idx !== indexToRemove);
+    setPhotoPaths(next);
+
+    try {
+      if (isEdit && model?.id) {
+        const saved = await saveCatalogModelOffline(
+          {
+            business_id: business?.id ?? model.business_id,
+            name: name.trim() || model.name,
+            category,
+            description: description.trim() || null,
+            default_price: (() => {
+              const parsed = defaultPrice ? Number(defaultPrice) : model.default_price;
+              return parsed !== null && parsed !== undefined && !Number.isNaN(parsed) ? parsed : null;
+            })(),
+            fabric_needed: fabricNeeded.trim() || null,
+            photo_paths: next,
+            tags,
+            is_active: true,
+            created_at: model.created_at,
+          },
+          false,
+          model.id,
+        );
+        queryClient.invalidateQueries({ queryKey: ["catalog-models"] });
+        queryClient.invalidateQueries({ queryKey: ["public-catalog-models"] });
+        onSaved?.(saved);
+        toast.success("Photo retirée du modèle");
+      }
+      await deleteStorageFiles([removed]);
+    } catch (err) {
+      setPhotoPaths(previous);
+      const msg = err instanceof Error ? err.message : "Impossible de retirer cette photo";
+      toast.error(msg);
+    }
   }
 
   function addTag(tagToAdd: string) {
@@ -140,12 +181,22 @@ export function CatalogModelDialog({ open, onOpenChange, model }: CatalogModelDi
         photo_paths: photoPaths,
         tags,
         is_active: true,
+        created_at: model?.created_at,
       };
 
-      await saveCatalogModelOffline(payload, !isEdit, model?.id);
+      const saved = await saveCatalogModelOffline(payload, !isEdit, model?.id);
+      const removedPhotos = (model?.photo_paths ?? []).filter(
+        (path) => !photoPaths.includes(path),
+      );
+      if (removedPhotos.length > 0) {
+        await deleteStorageFiles(removedPhotos);
+      }
+      return saved;
     },
-    onSuccess: () => {
+    onSuccess: (saved) => {
       queryClient.invalidateQueries({ queryKey: ["catalog-models"] });
+      queryClient.invalidateQueries({ queryKey: ["public-catalog-models"] });
+      onSaved?.(saved);
       toast.success(isEdit ? "Modèle mis à jour avec succès" : "Modèle ajouté au catalogue !");
       onOpenChange(false);
       resetForm(null);
@@ -160,7 +211,6 @@ export function CatalogModelDialog({ open, onOpenChange, model }: CatalogModelDi
   });
 
   return (
-    <>
     <Dialog
       open={open}
       onOpenChange={(val) => {
@@ -280,9 +330,9 @@ export function CatalogModelDialog({ open, onOpenChange, model }: CatalogModelDi
               </span>
             </div>
 
-            <div className="flex flex-wrap items-center gap-2">
-              <label className="flex h-20 w-24 cursor-pointer flex-col items-center justify-center gap-1 rounded-xl border border-dashed border-primary/40 bg-primary/5 p-2 text-center transition-colors hover:bg-primary/10 active:scale-95">
-                <UploadCloud className="size-5 text-primary" />
+            <div className="flex flex-wrap items-center gap-3 pt-1 pr-1">
+              <label className="flex h-24 w-24 cursor-pointer flex-col items-center justify-center gap-1 rounded-xl border border-dashed border-primary/40 bg-primary/5 p-2 text-center transition-colors hover:bg-primary/10 active:scale-95">
+                <UploadCloud className="size-6 text-primary" />
                 <span className="text-[0.68rem] font-bold text-primary">
                   {uploading ? "Envoi..." : "+ Photo"}
                 </span>
@@ -299,33 +349,39 @@ export function CatalogModelDialog({ open, onOpenChange, model }: CatalogModelDi
               {photoPaths.map((path, idx) => (
                 <div
                   key={`${path}-${idx}`}
-                  className="relative group size-20 rounded-xl border border-border overflow-hidden bg-muted"
+                  className="relative size-24 overflow-visible rounded-xl"
                 >
-                  <StoredImage
-                    path={path}
-                    alt={`Photo modèle ${idx + 1}`}
-                    className="size-full object-cover"
-                  />
+                  <div className="relative size-24 overflow-hidden rounded-xl border border-border bg-muted">
+                    <StoredImage
+                      path={path}
+                      alt={`Photo modèle ${idx + 1}`}
+                      className="size-full object-cover"
+                    />
+                    {idx === 0 && (
+                      <span className="absolute bottom-0 inset-x-0 bg-primary/90 text-primary-foreground py-0.5 text-center text-[0.6rem] font-bold">
+                        Couverture
+                      </span>
+                    )}
+                  </div>
                   <button
                     type="button"
                     onClick={(e) => {
+                      e.preventDefault();
                       e.stopPropagation();
-                      removePhoto(idx);
+                      void removePhoto(idx);
                     }}
                     aria-label="Supprimer cette photo"
                     title="Supprimer cette photo"
-                    className="absolute top-1.5 right-1.5 flex size-7 items-center justify-center rounded-full bg-destructive text-destructive-foreground shadow-md transition-transform hover:scale-110 active:scale-90"
+                    className="absolute -top-2 -right-2 z-20 flex size-11 items-center justify-center rounded-full bg-destructive text-white shadow-lg ring-2 ring-background active:scale-90"
                   >
-                    <Trash2 className="size-3.5" />
+                    <Trash2 className="size-4" />
                   </button>
-                  {idx === 0 && (
-                    <span className="absolute bottom-0 inset-x-0 bg-primary/90 text-primary-foreground py-0.5 text-center text-[0.6rem] font-bold">
-                      Couverture
-                    </span>
-                  )}
                 </div>
               ))}
             </div>
+            <p className="text-[0.7rem] text-muted-foreground">
+              Appuyez sur la poubelle rouge pour retirer une photo. Sur un modèle déjà enregistré, le retrait est immédiat.
+            </p>
             {uploading && (
               <p className="flex items-center gap-1.5 text-xs text-primary animate-pulse">
                 <Loader2 className="size-3.5 animate-spin" /> Téléversement de l'image en cours...
@@ -406,20 +462,20 @@ export function CatalogModelDialog({ open, onOpenChange, model }: CatalogModelDi
           </div>
 
           {/* Boutons d'action */}
-          <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-border">
+          <div className="sticky bottom-0 z-10 flex items-center justify-end gap-2.5 border-t border-border bg-background pt-3 pb-[max(0.25rem,env(safe-area-inset-bottom))]">
             <Button
               type="button"
               variant="outline"
               onClick={() => onOpenChange(false)}
               disabled={saveMutation.isPending}
-              className="h-10 text-xs sm:text-sm font-semibold"
+              className="h-11 text-xs sm:text-sm font-semibold"
             >
               Annuler
             </Button>
             <Button
               type="submit"
               disabled={saveMutation.isPending || uploading}
-              className="h-10 text-xs sm:text-sm font-bold min-w-[7rem]"
+              className="h-11 text-xs sm:text-sm font-bold min-w-[7.5rem]"
             >
               {saveMutation.isPending ? (
                 <>

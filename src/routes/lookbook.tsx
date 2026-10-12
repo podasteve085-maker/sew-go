@@ -1,12 +1,9 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   Scissors,
-  Share2,
-  Phone,
   MessageCircle,
-  Eye,
   ChevronLeft,
   ChevronRight,
   X,
@@ -18,7 +15,7 @@ import {
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { fetchCatalogModels, type CatalogModelRow } from "@/lib/queries";
-import { CATALOG_CATEGORIES, catalogCategoryLabel } from "@/lib/domain";
+import { CATALOG_CATEGORIES, catalogCategoryLabel, copyTextToClipboard, lookbookAbsoluteUrl } from "@/lib/domain";
 import { fcfa, cleanPhone, waLink } from "@/lib/format";
 import { Button } from "@/components/ui/button";
 import { StoredImage } from "@/components/bits";
@@ -26,6 +23,15 @@ import { Dialog, DialogContent } from "@/components/ui/dialog";
 
 export const Route = createFileRoute("/lookbook")({
   ssr: false,
+  head: () => ({
+    meta: [
+      { title: "Catalogue & Lookbook — CouturPro" },
+      {
+        name: "description",
+        content: "Découvrez les modèles de confection sur mesure de l'atelier.",
+      },
+    ],
+  }),
   validateSearch: (search: Record<string, unknown>) => ({
     atelierId: typeof search["atelierId"] === "string" ? search["atelierId"] : undefined,
     modelId: typeof search["modelId"] === "string" ? search["modelId"] : undefined,
@@ -48,16 +54,28 @@ function PublicLookbookPage() {
   const [activeModel, setActiveModel] = useState<CatalogModelRow | null>(null);
   const [currentPhotoIndex, setCurrentPhotoIndex] = useState(0);
   const [copied, setCopied] = useState(false);
+  const openedSharedModel = useRef(false);
 
   // Charger les données de l'atelier si un ID est fourni
   const atelierQuery = useQuery({
     queryKey: ["public-atelier", atelierId],
     queryFn: async () => {
       if (!atelierId) return null;
+      const columns = "id, name, phone, whatsapp, address, city, currency, logo_url";
+      try {
+        const viewRes = await supabase
+          .from("atelier_lookbook_public")
+          .select(columns)
+          .eq("id", atelierId)
+          .maybeSingle();
+        if (!viewRes.error && viewRes.data) return viewRes.data;
+      } catch {
+        // Vue publique pas encore déployée : repli sur businesses
+      }
       try {
         const { data } = await supabase
           .from("businesses")
-          .select("id, name, phone, address, city, currency")
+          .select(columns)
           .eq("id", atelierId)
           .maybeSingle();
         return data;
@@ -69,14 +87,14 @@ function PublicLookbookPage() {
   });
 
   const atelierName = atelierQuery.data?.name || search.atelier || "Atelier CouturPro";
-  const atelierPhone = atelierQuery.data?.phone || search.phone || "";
+  const atelierPhone = atelierQuery.data?.whatsapp || atelierQuery.data?.phone || search.phone || "";
 
   // Charger les modèles du catalogue
   const modelsQuery = useQuery({
-    queryKey: ["public-catalog-models", atelierId, selectedCategory],
+    queryKey: ["public-catalog-models", atelierId],
     queryFn: async () => {
       if (atelierId) {
-        return await fetchCatalogModels(selectedCategory, atelierId);
+        return await fetchCatalogModels("all", atelierId, { publicAccess: true });
       }
       return [];
     },
@@ -84,6 +102,10 @@ function PublicLookbookPage() {
   });
 
   const allModels = modelsQuery.data ?? [];
+  const visibleModels = useMemo(() => {
+    if (selectedCategory === "all") return allModels;
+    return allModels.filter((m) => m.category === selectedCategory);
+  }, [allModels, selectedCategory]);
 
   // Si des paramètres d'un modèle partagé sont dans l'URL, créer un modèle virtuel si non chargé
   const featuredModel: CatalogModelRow | null = useMemo(() => {
@@ -110,9 +132,17 @@ function PublicLookbookPage() {
     return null;
   }, [allModels, targetModelId, search.name, search.price, search.fabric, search.desc, atelierId]);
 
+  useEffect(() => {
+    if (openedSharedModel.current || !targetModelId || !featuredModel) return;
+    if (featuredModel.id !== targetModelId) return;
+    openedSharedModel.current = true;
+    setActiveModel(featuredModel);
+    setCurrentPhotoIndex(0);
+  }, [featuredModel, targetModelId]);
+
   function handleOrderWhatsApp(model: CatalogModelRow | { name: string; default_price?: number | null }) {
     const rawPhone = cleanPhone(atelierPhone);
-    const priceTxt = model.default_price ? ` (${fcfa(model.default_price)})` : "";
+    const priceTxt = model.default_price ? ` (${fcfa(model.default_price, atelierQuery.data?.currency)})` : "";
     const msg = `Bonjour ${atelierName} ! 👋\n\nJ'ai découvert votre modèle *"${model.name}"*${priceTxt} sur votre catalogue en ligne.\nJe souhaiterais passer commande pour une confection sur mesure. Est-il disponible ?`;
     const wa = waLink(rawPhone, msg);
     if (wa) {
@@ -122,14 +152,18 @@ function PublicLookbookPage() {
     }
   }
 
-  function handleCopyPageLink() {
-    if (typeof window !== "undefined") {
-      navigator.clipboard.writeText(window.location.href).then(() => {
-        setCopied(true);
-        toast.success("Lien du catalogue copié !");
-        setTimeout(() => setCopied(false), 2500);
-      });
+  async function handleCopyPageLink() {
+    const link =
+      atelierId ? lookbookAbsoluteUrl(atelierId, targetModelId) : (typeof window !== "undefined" ? window.location.href : "");
+    if (!link) return;
+    const ok = await copyTextToClipboard(link);
+    if (!ok) {
+      toast.error("Impossible de copier le lien");
+      return;
     }
+    setCopied(true);
+    toast.success("Lien du catalogue copié !");
+    setTimeout(() => setCopied(false), 2500);
   }
 
   function openDetail(model: CatalogModelRow) {
@@ -160,7 +194,7 @@ function PublicLookbookPage() {
             <Button
               variant="outline"
               size="sm"
-              onClick={handleCopyPageLink}
+              onClick={() => void handleCopyPageLink()}
               className="h-8.5 text-xs font-semibold rounded-xl"
             >
               {copied ? <Check className="mr-1 size-3.5 text-success" /> : <Copy className="mr-1 size-3.5" />}
@@ -182,6 +216,15 @@ function PublicLookbookPage() {
       </header>
 
       <main className="mx-auto max-w-5xl px-3 sm:px-6 pt-4 sm:pt-6 space-y-6">
+        {!atelierId && (
+          <div className="card-soft p-8 text-center space-y-2">
+            <Scissors className="mx-auto size-12 text-muted-foreground/50 stroke-[1.5]" />
+            <h3 className="font-display text-base font-bold">Lien de catalogue incomplet</h3>
+            <p className="text-xs text-muted-foreground max-w-md mx-auto">
+              Demandez à l'atelier de vous renvoyer le lien de son lookbook pour voir les modèles et les photos.
+            </p>
+          </div>
+        )}
         {/* Modèle mis en avant si partagé via lien direct */}
         {featuredModel && (
           <section className="card-soft overflow-hidden border-2 border-primary/30 bg-primary/5 p-4 sm:p-6 shadow-sm">
@@ -218,7 +261,7 @@ function PublicLookbookPage() {
                 <div className="flex flex-wrap items-center justify-center md:justify-start gap-2 pt-1 text-xs sm:text-sm">
                   {featuredModel.default_price ? (
                     <span className="inline-flex items-center gap-1 rounded-xl bg-primary/10 px-3 py-1 font-bold text-primary">
-                      <Coins className="size-4" /> {fcfa(featuredModel.default_price)}
+                      <Coins className="size-4" /> {fcfa(featuredModel.default_price, atelierQuery.data?.currency)}
                     </span>
                   ) : null}
                   {featuredModel.fabric_needed ? (
@@ -276,7 +319,25 @@ function PublicLookbookPage() {
               <div key={i} className="card-soft h-56 animate-pulse bg-muted/60" />
             ))}
           </div>
-        ) : allModels.length === 0 && !featuredModel ? (
+        ) : modelsQuery.isError ? (
+          <div className="card-soft p-10 text-center space-y-3">
+            <Scissors className="mx-auto size-12 text-muted-foreground/50 stroke-[1.5]" />
+            <h3 className="font-display text-base font-bold">Catalogue momentanément indisponible</h3>
+            <p className="text-xs text-muted-foreground max-w-md mx-auto">
+              Impossible de charger les modèles de cet atelier. Vérifiez le lien reçu ou contactez l'atelier sur WhatsApp.
+            </p>
+            {atelierPhone && (
+              <a
+                href={waLink(cleanPhone(atelierPhone), `Bonjour ${atelierName}, je souhaite découvrir vos modèles !`)}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center gap-2 rounded-xl bg-success px-4 py-2 text-xs font-bold text-success-foreground"
+              >
+                <MessageCircle className="size-4" /> Écrire à l'atelier
+              </a>
+            )}
+          </div>
+        ) : visibleModels.length === 0 && !featuredModel ? (
           <div className="card-soft p-10 text-center space-y-3">
             <Scissors className="mx-auto size-12 text-muted-foreground/50 stroke-[1.5]" />
             <h3 className="font-display text-base font-bold">Catalogue en cours de mise à jour</h3>
@@ -296,7 +357,7 @@ function PublicLookbookPage() {
           </div>
         ) : (
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4">
-            {allModels.map((model) => {
+            {visibleModels.map((model) => {
               const coverPhoto = model.photo_paths?.[0];
               return (
                 <div
@@ -334,7 +395,7 @@ function PublicLookbookPage() {
                     <div className="mt-1 flex items-center justify-between text-xs">
                       {model.default_price ? (
                         <span className="font-bold text-primary text-xs sm:text-sm">
-                          {fcfa(model.default_price)}
+                          {fcfa(model.default_price, atelierQuery.data?.currency)}
                         </span>
                       ) : (
                         <span className="text-[0.68rem] text-muted-foreground font-medium">Sur mesure</span>
@@ -364,7 +425,7 @@ function PublicLookbookPage() {
       {/* Modal Plein Écran pour visualiser les photos du modèle */}
       {activeModel && (
         <Dialog open={Boolean(activeModel)} onOpenChange={() => setActiveModel(null)}>
-          <DialogContent className="max-h-[95vh] max-w-2xl overflow-hidden p-0 bg-card border-border">
+          <DialogContent className="max-h-[95vh] max-w-2xl overflow-hidden p-0 bg-card border-border [&>button]:hidden">
             <div className="relative flex flex-col">
               {/* Grand affichage photo */}
               <div className="relative aspect-4/3 sm:aspect-16/10 w-full bg-black/95 flex items-center justify-center overflow-hidden">
@@ -444,7 +505,7 @@ function PublicLookbookPage() {
                         Prix indicatif
                       </p>
                       <p className="font-display text-lg sm:text-xl font-bold text-primary">
-                        {fcfa(activeModel.default_price)}
+                        {fcfa(activeModel.default_price, atelierQuery.data?.currency)}
                       </p>
                     </div>
                   )}

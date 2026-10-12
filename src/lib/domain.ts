@@ -101,3 +101,91 @@ export function catalogCategoryLabel(category: string) {
   return CATALOG_CATEGORIES.find((c) => c.value === category)?.label ?? category;
 }
 
+/** Lien public court vers le lookbook d'un atelier (et éventuellement un modèle). */
+export function lookbookPath(atelierId: string, modelId?: string | null) {
+  const params = new URLSearchParams();
+  params.set("atelierId", atelierId);
+  if (modelId) params.set("modelId", modelId);
+  return `/lookbook?${params.toString()}`;
+}
+
+function publicAppOrigin() {
+  const fromEnv =
+    typeof import.meta !== "undefined"
+      ? String(import.meta.env?.["VITE_PUBLIC_APP_URL"] ?? "").trim()
+      : "";
+  if (fromEnv) return fromEnv.replace(/\/$/, "");
+  if (typeof window === "undefined") return "";
+  return window.location.origin;
+}
+
+export function lookbookAbsoluteUrl(atelierId: string, modelId?: string | null) {
+  return `${publicAppOrigin()}${lookbookPath(atelierId, modelId)}`;
+}
+
+/** Message WhatsApp : le lien https doit être seul sur sa ligne, sans markdown. */
+export function catalogShareMessage(opts: {
+  atelierName: string;
+  publicUrl: string;
+  modelName?: string | null;
+  priceText?: string | null;
+}) {
+  const atelier = opts.atelierName.trim() || "Notre atelier";
+  const url = opts.publicUrl.trim();
+  if (opts.modelName) {
+    const priceLine = opts.priceText ? `\n${opts.priceText}` : "";
+    return `✨ ${atelier} — ${opts.modelName}${priceLine}\n\nConfection sur mesure disponible dans notre atelier.\n\nVoir le modèle et les photos ici :\n${url}`;
+  }
+  return `✨ Catalogue & Lookbook — ${atelier}\n\nDécouvrez nos créations sur mesure ici :\n${url}`;
+}
+
+export function withCatalogShareUrl(message: string, publicUrl?: string | null) {
+  const url = (publicUrl ?? "").trim();
+  const text = message.trim();
+  if (!url) return text;
+  if (text.includes(url)) return text;
+  return `${text}\n\n${url}`;
+}
+
+export async function copyTextToClipboard(value: string): Promise<boolean> {
+  const text = value.trim();
+  if (!text || typeof navigator === "undefined") return false;
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch {
+    // repli execCommand
+  }
+  try {
+    const el = document.createElement("textarea");
+    el.value = text;
+    el.setAttribute("readonly", "");
+    el.style.position = "fixed";
+    el.style.left = "-9999px";
+    document.body.appendChild(el);
+    el.select();
+    const ok = document.execCommand("copy");
+    document.body.removeChild(el);
+    return ok;
+  } catch {
+    return false;
+  }
+}
+
+export async function openWhatsAppShare(message: string, publicUrl?: string) {
+  const url = (publicUrl ?? "").trim();
+  const fullMessage = withCatalogShareUrl(message, url);
+
+  // Copie le message complet (texte + lien) : WhatsApp mobile ignore souvent le champ `url`
+  // de l'API de partage, et le client doit pouvoir coller le lien si besoin.
+  await copyTextToClipboard(fullMessage);
+
+  const href = `https://wa.me/?text=${encodeURIComponent(fullMessage)}`;
+  if (typeof window !== "undefined") {
+    window.open(href, "_blank", "noopener,noreferrer");
+  }
+  return href;
+}
+

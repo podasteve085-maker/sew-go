@@ -633,6 +633,7 @@ function DraggableFab() {
     pathname.includes("/nouveau") ||
     pathname === "/abonnement" ||
     pathname === "/admin" ||
+    pathname.startsWith("/catalogue") ||
     pathname.startsWith("/clients/") ||
     pathname.startsWith("/commandes/");
 

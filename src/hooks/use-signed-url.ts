@@ -29,8 +29,14 @@ export function useSignedUrl(path: string | null | undefined) {
       const { data, error } = await supabase.storage
         .from(BUCKET)
         .createSignedUrl(path as string, 60 * 60);
-      if (error) throw error;
-      return data.signedUrl;
+      if (!error && data?.signedUrl) return data.signedUrl;
+
+      const isCatalogPhoto = String(path).includes("/catalog/");
+      if (isCatalogPhoto) {
+        const { data: publicData } = supabase.storage.from(BUCKET).getPublicUrl(path as string);
+        if (publicData?.publicUrl) return publicData.publicUrl;
+      }
+      throw error ?? new Error("Image indisponible");
     },
   });
 }
@@ -142,6 +148,52 @@ export function blobToDataUrl(blob: Blob): Promise<string> {
     reader.onloadend = () => resolve(reader.result as string);
     reader.readAsDataURL(blob);
   });
+}
+
+/** Téléverse un DataURL (repli hors-ligne) vers le bucket atelier. */
+export async function uploadDataUrl(
+  businessId: string,
+  dataUrl: string,
+  folder: string,
+): Promise<string | null> {
+  if (!dataUrl.startsWith("data:")) return dataUrl;
+  try {
+    const res = await fetch(dataUrl);
+    const blob = await res.blob();
+    const ext = blob.type.includes("webp")
+      ? "webp"
+      : blob.type.includes("png")
+        ? "png"
+        : "jpg";
+    const path = `${businessId}/${folder}/${uuid()}.${ext}`;
+    const { error } = await supabase.storage.from(BUCKET).upload(path, blob, {
+      cacheControl: "31536000, public, immutable",
+      contentType: blob.type || "image/jpeg",
+      upsert: false,
+    });
+    if (error) return null;
+    return path;
+  } catch {
+    return null;
+  }
+}
+
+export async function materializeStoragePaths(
+  businessId: string,
+  paths: string[],
+  folder: string,
+): Promise<string[]> {
+  const next: string[] = [];
+  for (const path of paths) {
+    if (typeof path !== "string" || !path) continue;
+    if (path.startsWith("data:")) {
+      const uploaded = await uploadDataUrl(businessId, path, folder);
+      next.push(uploaded || path);
+    } else {
+      next.push(path);
+    }
+  }
+  return next;
 }
 
 export async function uploadImage(businessId: string, file: File, folder: string): Promise<string> {
