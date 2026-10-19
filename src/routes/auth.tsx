@@ -18,11 +18,14 @@ import {
   Sparkles,
   Check,
   AlertCircle,
+  Smartphone,
+  Globe,
 } from "lucide-react";
 import { toast } from "sonner";
 
 import heroImage from "@/assets/hero-atelier.jpg";
 import { supabase } from "@/integrations/supabase/client";
+import { getPhoneValidationStatus, phoneToInternalEmail, isEmailIdentifier } from "@/lib/phone-utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -155,6 +158,32 @@ function AuthPage() {
   const [countdown, setCountdown] = useState(0);
   const [linkError, setLinkError] = useState<string | null>(null);
 
+  // Méthode de récupération ("phone" direct dans l'app par défaut, "email" pour ceux ayant un mail)
+  const [forgotMethod, setForgotMethod] = useState<"phone" | "email">("phone");
+  const [phoneRecoveryNumber, setPhoneRecoveryNumber] = useState("");
+  const [phoneRecoveryBusinessName, setPhoneRecoveryBusinessName] = useState("");
+  const [phoneRecoveryOwnerName, setPhoneRecoveryOwnerName] = useState("");
+  const [phoneRecoveryNewPassword, setPhoneRecoveryNewPassword] = useState("");
+  const [phoneRecoveryConfirmPassword, setPhoneRecoveryConfirmPassword] = useState("");
+  const [showPhoneNewPassword, setShowPhoneNewPassword] = useState(false);
+  const [showPhoneConfirmPassword, setShowPhoneConfirmPassword] = useState(false);
+  const [phoneRecoveryError, setPhoneRecoveryError] = useState<string | null>(null);
+
+  // État du téléphone d'inscription pour l'indicateur d'indicatif en direct
+  const [signUpPhone, setSignUpPhone] = useState("");
+
+  // Statuts de détection des indicatifs ouest-africains (Burkina, Côte d'Ivoire, Sénégal, Mali, etc.)
+  const signInPhoneStatus =
+    !isEmailIdentifier(signInEmail) && signInEmail.trim()
+      ? getPhoneValidationStatus(signInEmail)
+      : null;
+  const signUpPhoneStatus = signUpPhone.trim()
+    ? getPhoneValidationStatus(signUpPhone)
+    : null;
+  const recoveryPhoneStatus = phoneRecoveryNumber.trim()
+    ? getPhoneValidationStatus(phoneRecoveryNumber)
+    : null;
+
   const [failedAttempts, setFailedAttempts] = useState(() => {
     if (typeof window !== "undefined") {
       const saved = sessionStorage.getItem("couturpro_auth_failures");
@@ -257,7 +286,7 @@ function AuthPage() {
     };
   }, [logout, reconnect, searchMode, searchError, searchErrorCode, searchErrorDesc]);
 
-  // Connexion avec protection anti-brute force
+  // Connexion universelle (Téléphone ou Email) avec protection anti-brute force
   async function signIn(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     if (lockoutUntil && Date.now() < lockoutUntil) {
@@ -269,12 +298,35 @@ function AuthPage() {
     }
 
     const form = new FormData(e.currentTarget);
-    const emailVal = String(form.get("email")).trim();
+    const rawIdentifier = String(form.get("email") || signInEmail).trim();
     const passVal = String(form.get("password"));
 
+    if (!rawIdentifier) {
+      toast.error("Veuillez saisir votre numéro de téléphone ou votre email.");
+      return;
+    }
+
     setLoading(true);
+    let authEmail = rawIdentifier;
+
+    // Si l'utilisateur saisit un numéro de téléphone, résolution transparente vers l'email Supabase
+    if (!isEmailIdentifier(rawIdentifier)) {
+      try {
+        const { data: resolvedEmail } = await supabase.rpc("resolve_login_identifier", {
+          p_identifier: rawIdentifier,
+        });
+        if (resolvedEmail && typeof resolvedEmail === "string") {
+          authEmail = resolvedEmail;
+        } else {
+          authEmail = phoneToInternalEmail(rawIdentifier);
+        }
+      } catch {
+        authEmail = phoneToInternalEmail(rawIdentifier);
+      }
+    }
+
     const { error } = await supabase.auth.signInWithPassword({
-      email: emailVal,
+      email: authEmail,
       password: passVal,
     });
     setLoading(false);
@@ -299,10 +351,10 @@ function AuthPage() {
       }
 
       const lower = error.message.toLowerCase();
-      let description = "Email ou mot de passe incorrect.";
+      let description = "Identifiant ou mot de passe incorrect.";
       if (lower.includes("invalid login credentials") || lower.includes("invalid credentials")) {
         description =
-          "Email ou mot de passe incorrect. Vérifiez votre saisie ou utilisez le lien « Mot de passe oublié ? » ci-dessous.";
+          "Numéro/email ou mot de passe incorrect. Vérifiez votre saisie ou utilisez l'option « Mot de passe oublié ? » ci-dessous.";
       } else if (lower.includes("email not confirmed")) {
         description = "Votre compte n'est pas encore activé. Contactez l'administrateur.";
       } else if (lower.includes("too many requests") || lower.includes("rate limit")) {
@@ -323,12 +375,22 @@ function AuthPage() {
     navigate({ to: "/dashboard", replace: true });
   }
 
-  // Inscription
+  // Inscription (Téléphone requis, Email facultatif)
   async function signUp(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const form = new FormData(e.currentTarget);
-    const emailVal = String(form.get("email")).trim();
+    const bName = String(form.get("business_name") ?? "").trim();
+    const oName = String(form.get("owner_name") ?? "").trim();
+    const phoneVal = String(form.get("phone") ?? signUpPhone).trim();
+    const emailVal = String(form.get("email") ?? "").trim();
     const passwordVal = String(form.get("password"));
+
+    if (!phoneVal && !emailVal) {
+      toast.error("Numéro de téléphone requis", {
+        description: "Veuillez renseigner votre numéro de téléphone (WhatsApp / Appel).",
+      });
+      return;
+    }
 
     if (passwordVal.length < 6) {
       toast.error("Mot de passe trop court", {
@@ -338,26 +400,31 @@ function AuthPage() {
     }
 
     setLoading(true);
+    // Si pas d'email, on dérive l'identifiant interne sécurisé à partir du numéro
+    const authEmail = emailVal ? emailVal.toLowerCase().trim() : phoneToInternalEmail(phoneVal);
+
     const { data, error } = await supabase.auth.signUp({
-      email: emailVal,
+      email: authEmail,
       password: passwordVal,
       options: {
         emailRedirectTo: `${window.location.origin}/dashboard`,
         data: {
-          business_name: String(form.get("business_name") ?? "").trim(),
-          owner_name: String(form.get("owner_name") ?? "").trim(),
-          phone: String(form.get("phone") ?? "").trim(),
+          business_name: bName,
+          owner_name: oName,
+          phone: phoneVal,
+          raw_phone: phoneVal,
+          has_custom_email: Boolean(emailVal),
         },
       },
     });
 
     if (error) {
       setLoading(false);
+      const isAlready = error.message.includes("already") || error.message.includes("registered");
       toast.error("Inscription impossible", {
-        description:
-          error.message.includes("already") || error.message.includes("registered")
-            ? "Cet email a déjà un compte. Connectez-vous."
-            : error.message || "Vérifiez vos informations (mot de passe de 6 caractères minimum).",
+        description: isAlready
+          ? "Ce numéro ou email a déjà un compte. Connectez-vous avec votre mot de passe."
+          : error.message || "Vérifiez vos informations (mot de passe de 6 caractères minimum).",
       });
       return;
     }
@@ -372,20 +439,102 @@ function AuthPage() {
 
     // Fallback connexion immédiate
     const { error: signInErr } = await supabase.auth.signInWithPassword({
-      email: emailVal,
+      email: authEmail,
       password: passwordVal,
     });
     setLoading(false);
 
     if (signInErr) {
       toast.info("Atelier créé !", {
-        description: "Connectez-vous avec vos identifiants.",
+        description: "Connectez-vous avec votre numéro et mot de passe.",
       });
       return;
     }
 
     toast.success("Atelier créé avec succès !", { description: "Bienvenue sur CouturPro !" });
     navigate({ to: "/dashboard", replace: true });
+  }
+
+  // Réinitialisation DIRECTE dans l'app par numéro de téléphone (SANS email, SANS attente)
+  async function handleDirectPhoneReset(e: React.FormEvent) {
+    e.preventDefault();
+    setPhoneRecoveryError(null);
+
+    const num = phoneRecoveryNumber.trim();
+    const bName = phoneRecoveryBusinessName.trim();
+    const oName = phoneRecoveryOwnerName.trim();
+
+    if (!num) {
+      setPhoneRecoveryError("Veuillez saisir le numéro de téléphone de l'atelier.");
+      return;
+    }
+    if (!bName) {
+      setPhoneRecoveryError("Veuillez indiquer le nom exact de votre atelier pour confirmer votre identité.");
+      return;
+    }
+    if (phoneRecoveryNewPassword.length < 6) {
+      setPhoneRecoveryError("Le mot de passe doit comporter au moins 6 caractères.");
+      return;
+    }
+    if (phoneRecoveryNewPassword !== phoneRecoveryConfirmPassword) {
+      setPhoneRecoveryError("Les deux mots de passe ne sont pas identiques.");
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const { data, error } = await supabase.rpc("reset_password_by_phone_verification", {
+        p_phone: num,
+        p_business_name: bName,
+        p_owner_name: oName,
+        p_new_password: phoneRecoveryNewPassword,
+      });
+
+      if (error) {
+        setLoading(false);
+        const errMsg = error.message || "Impossible de réinitialiser le mot de passe.";
+        setPhoneRecoveryError(errMsg);
+        toast.error("Erreur de réinitialisation", { description: errMsg });
+        return;
+      }
+
+      const res = data as { success: boolean; email?: string; message?: string };
+      if (!res || !res.success) {
+        setLoading(false);
+        const errMsg = res?.message || "Les informations fournies ne correspondent pas à cet atelier.";
+        setPhoneRecoveryError(errMsg);
+        toast.error("Vérification échouée", { description: errMsg });
+        return;
+      }
+
+      // Mot de passe mis à jour en base Supabase avec succès !
+      // Auto-connexion directe de l'artisan
+      const authEmail = res.email || phoneToInternalEmail(num);
+      const { error: signInErr } = await supabase.auth.signInWithPassword({
+        email: authEmail,
+        password: phoneRecoveryNewPassword,
+      });
+
+      setLoading(false);
+
+      if (signInErr) {
+        toast.success("Mot de passe mis à jour avec succès !", {
+          description: "Connectez-vous maintenant avec votre nouveau mot de passe.",
+        });
+        setMode("tabs");
+        return;
+      }
+
+      toast.success("Mot de passe mis à jour avec succès !", {
+        description: "Bienvenue dans votre atelier CouturPro.",
+      });
+      navigate({ to: "/dashboard", replace: true });
+    } catch (err: unknown) {
+      setLoading(false);
+      const msg = err instanceof Error ? err.message : "Erreur inattendue";
+      setPhoneRecoveryError(msg);
+      toast.error("Erreur", { description: msg });
+    }
   }
 
   // Demande de réinitialisation
@@ -584,6 +733,7 @@ function AuthPage() {
                       setMode("tabs");
                       setResetSent(false);
                       setLinkError(null);
+                      setPhoneRecoveryError(null);
                     }}
                     className="flex size-8 items-center justify-center rounded-lg border hover:bg-muted text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
                     title="Retour à la connexion"
@@ -593,102 +743,303 @@ function AuthPage() {
                   <div>
                     <h2 className="font-display text-lg font-bold">Récupérer mon mot de passe</h2>
                     <p className="text-xs text-muted-foreground">
-                      Recevez un lien par email pour choisir un nouveau mot de passe
+                      Directement dans l'application ou par lien email
                     </p>
                   </div>
                 </div>
 
-                {linkError && (
-                  <div className="rounded-xl bg-destructive/10 border border-destructive/20 p-3 text-xs text-destructive flex items-start gap-2.5">
-                    <AlertCircle className="size-4 shrink-0 mt-0.5" />
-                    <p className="leading-snug">{linkError}</p>
-                  </div>
-                )}
+                {/* Sélecteur de méthode : Téléphone direct vs Email */}
+                <div className="grid grid-cols-2 p-1 bg-muted/60 rounded-xl gap-1 text-xs font-semibold">
+                  <button
+                    type="button"
+                    onClick={() => setForgotMethod("phone")}
+                    className={`py-2 px-3 rounded-lg flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                      forgotMethod === "phone"
+                        ? "bg-background text-foreground shadow-xs font-bold"
+                        : "text-muted-foreground hover:text-foreground"
+                    }`}
+                  >
+                    <Smartphone className="size-3.5" />
+                    <span>Par Téléphone (Direct)</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setForgotMethod("email")}
+                    className={`py-2 px-3 rounded-lg flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                      forgotMethod === "email"
+                        ? "bg-background text-foreground shadow-xs font-bold"
+                        : "text-muted-foreground hover:text-foreground"
+                    }`}
+                  >
+                    <Mail className="size-3.5" />
+                    <span>Par Email (Lien)</span>
+                  </button>
+                </div>
 
-                {resetSent ? (
-                  <div className="space-y-4 text-center py-2">
-                    <div className="mx-auto flex size-12 items-center justify-center rounded-full bg-emerald-50 text-emerald-600 dark:bg-emerald-950/40 dark:text-emerald-400">
-                      <CheckCircle2 className="size-6" />
-                    </div>
-                    <div className="space-y-1.5">
-                      <h3 className="text-sm font-semibold">Email envoyé avec succès !</h3>
-                      <p className="text-xs text-muted-foreground leading-relaxed">
-                        Un lien sécurisé a été envoyé à l'adresse <strong className="text-foreground">{resetEmail || signInEmail}</strong>.
-                      </p>
-                      <p className="text-[11px] text-amber-700 dark:text-amber-400 bg-amber-500/10 p-2.5 rounded-lg border border-amber-500/20">
-                        💡 <strong>Conseil :</strong> Si l'email n'apparaît pas dans 1 minute, pensez à vérifier votre dossier <strong>Spams ou Courrier indésirable</strong>.
+                {/* Méthode Téléphone directe */}
+                {forgotMethod === "phone" && (
+                  <form onSubmit={handleDirectPhoneReset} className="space-y-4">
+                    <div className="rounded-xl bg-primary/5 border border-primary/20 p-3 text-xs text-foreground/90 flex items-start gap-2.5">
+                      <ShieldCheck className="size-4 text-primary shrink-0 mt-0.5" />
+                      <p className="leading-snug">
+                        <strong>Récupération immédiate :</strong> Pas besoin d'email ni d'attendre un lien. Indiquez votre numéro et le nom de votre atelier pour enregistrer immédiatement votre nouveau mot de passe.
                       </p>
                     </div>
-                    <div className="pt-2 space-y-2">
-                      <Button
-                        type="button"
-                        variant="outline"
-                        className="w-full text-xs font-semibold h-10 cursor-pointer"
-                        disabled={loading || countdown > 0}
-                        onClick={handleResetPassword}
-                      >
-                        {loading ? (
-                          <Loader2 className="mr-2 size-4 animate-spin" />
-                        ) : countdown > 0 ? (
-                          `Renvoyer l'email (${countdown}s)`
-                        ) : (
-                          "Renvoyer le lien par email"
-                        )}
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        className="w-full text-xs text-muted-foreground hover:text-foreground cursor-pointer"
-                        onClick={() => {
-                          setMode("tabs");
-                          setResetSent(false);
-                          setLinkError(null);
-                        }}
-                      >
-                        ← Retour à la connexion
-                      </Button>
-                    </div>
-                  </div>
-                ) : (
-                  <form onSubmit={handleResetPassword} className="space-y-4">
+
+                    {phoneRecoveryError && (
+                      <div className="rounded-xl bg-destructive/10 border border-destructive/20 p-3 text-xs text-destructive flex items-start gap-2.5">
+                        <AlertCircle className="size-4 shrink-0 mt-0.5" />
+                        <p className="leading-snug">{phoneRecoveryError}</p>
+                      </div>
+                    )}
+
                     <div className="space-y-1.5">
-                      <Label htmlFor="reset-email">Email de votre atelier</Label>
+                      <Label htmlFor="rec-phone">Numéro de téléphone de votre atelier</Label>
                       <div className="relative">
                         <Input
-                          id="reset-email"
-                          type="email"
+                          id="rec-phone"
+                          type="tel"
+                          inputMode="tel"
                           required
-                          value={resetEmail || signInEmail}
-                          onChange={(e) => {
-                            setResetEmail(e.target.value);
-                            setSignInEmail(e.target.value);
-                          }}
-                          placeholder="exemple@couturpro.com"
-                          autoComplete="email"
+                          value={phoneRecoveryNumber}
+                          onChange={(e) => setPhoneRecoveryNumber(e.target.value)}
+                          placeholder="ex: 07 12 34 56 ou +225 07 12 34 56"
                           className="pl-9"
                         />
-                        <Mail className="size-4 text-muted-foreground absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                        <Phone className="size-4 text-muted-foreground absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                      </div>
+                      {recoveryPhoneStatus ? (
+                        <div className="text-[11px] flex items-center gap-1.5 px-2 py-1 rounded bg-muted/60 text-muted-foreground border border-border/50">
+                          <span>{recoveryPhoneStatus.flag}</span>
+                          <span className="font-medium text-foreground">{recoveryPhoneStatus.country}</span>
+                          <span>({recoveryPhoneStatus.dialCode})</span>
+                          <span>·</span>
+                          <span className={recoveryPhoneStatus.isValidLength ? "text-emerald-600 font-medium" : "text-muted-foreground"}>
+                            {recoveryPhoneStatus.isValidLength ? "Format standard" : "Non bloquant"}
+                          </span>
+                        </div>
+                      ) : phoneRecoveryNumber.trim() ? (
+                        <div className="text-[11px] text-muted-foreground flex items-center gap-1">
+                          <Globe className="size-3" />
+                          <span>Indicatif international libre (non bloquant)</span>
+                        </div>
+                      ) : null}
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <Label htmlFor="rec-bname">Nom exact de votre atelier</Label>
+                      <div className="relative">
+                        <Input
+                          id="rec-bname"
+                          type="text"
+                          required
+                          value={phoneRecoveryBusinessName}
+                          onChange={(e) => setPhoneRecoveryBusinessName(e.target.value)}
+                          placeholder="ex: Atelier Ibrahim Style"
+                          className="pl-9"
+                        />
+                        <Store className="size-4 text-muted-foreground absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
                       </div>
                       <p className="text-[11px] text-muted-foreground">
-                        Nous vous enverrons un lien sécurisé pour créer votre nouveau mot de passe.
+                        Utilisé pour confirmer que vous êtes bien le propriétaire de cet atelier.
                       </p>
                     </div>
 
-                    <Button type="submit" className="w-full font-bold shadow-xs cursor-pointer h-10" disabled={loading}>
-                      {loading && <Loader2 className="mr-2 size-4 animate-spin" />} Envoyer le lien par email
+                    <div className="space-y-1.5">
+                      <Label htmlFor="rec-oname">Nom du responsable (optionnel)</Label>
+                      <div className="relative">
+                        <Input
+                          id="rec-oname"
+                          type="text"
+                          value={phoneRecoveryOwnerName}
+                          onChange={(e) => setPhoneRecoveryOwnerName(e.target.value)}
+                          placeholder="ex: Ibrahim Ouédraogo"
+                          className="pl-9"
+                        />
+                        <User className="size-4 text-muted-foreground absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                      </div>
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <Label htmlFor="rec-newpass">Nouveau mot de passe (6 car. minimum)</Label>
+                      <div className="relative">
+                        <Input
+                          id="rec-newpass"
+                          type={showPhoneNewPassword ? "text" : "password"}
+                          required
+                          minLength={6}
+                          value={phoneRecoveryNewPassword}
+                          onChange={(e) => setPhoneRecoveryNewPassword(e.target.value)}
+                          placeholder="••••••••"
+                          className="pl-9 pr-10"
+                        />
+                        <Lock className="size-4 text-muted-foreground absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                        <button
+                          type="button"
+                          onClick={() => setShowPhoneNewPassword(!showPhoneNewPassword)}
+                          className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground cursor-pointer"
+                          title={showPhoneNewPassword ? "Masquer" : "Afficher"}
+                        >
+                          {showPhoneNewPassword ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <Label htmlFor="rec-confirmpass">Confirmer le nouveau mot de passe</Label>
+                      <div className="relative">
+                        <Input
+                          id="rec-confirmpass"
+                          type={showPhoneConfirmPassword ? "text" : "password"}
+                          required
+                          minLength={6}
+                          value={phoneRecoveryConfirmPassword}
+                          onChange={(e) => setPhoneRecoveryConfirmPassword(e.target.value)}
+                          placeholder="••••••••"
+                          className="pl-9 pr-10"
+                        />
+                        <Lock className="size-4 text-muted-foreground absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                        <button
+                          type="button"
+                          onClick={() => setShowPhoneConfirmPassword(!showPhoneConfirmPassword)}
+                          className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground cursor-pointer"
+                          title={showPhoneConfirmPassword ? "Masquer" : "Afficher"}
+                        >
+                          {showPhoneConfirmPassword ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+                        </button>
+                      </div>
+                      {phoneRecoveryConfirmPassword && phoneRecoveryNewPassword !== phoneRecoveryConfirmPassword && (
+                        <p className="text-[11px] text-destructive">
+                          Les deux mots de passe ne correspondent pas
+                        </p>
+                      )}
+                    </div>
+
+                    <Button
+                      type="submit"
+                      className="w-full font-bold shadow-xs cursor-pointer h-10 mt-2"
+                      disabled={
+                        loading ||
+                        !phoneRecoveryNumber.trim() ||
+                        !phoneRecoveryBusinessName.trim() ||
+                        phoneRecoveryNewPassword.length < 6 ||
+                        phoneRecoveryNewPassword !== phoneRecoveryConfirmPassword
+                      }
+                    >
+                      {loading && <Loader2 className="mr-2 size-4 animate-spin" />}
+                      Mettre à jour et me connecter
                     </Button>
 
                     <button
                       type="button"
                       onClick={() => {
                         setMode("tabs");
+                        setPhoneRecoveryError(null);
                         setLinkError(null);
                       }}
-                      className="w-full text-center text-xs text-muted-foreground hover:text-foreground transition-colors pt-2 cursor-pointer"
+                      className="w-full text-center text-xs text-muted-foreground hover:text-foreground transition-colors pt-1 cursor-pointer"
                     >
                       ← Retour à la connexion
                     </button>
                   </form>
+                )}
+
+                {/* Méthode Email avec lien */}
+                {forgotMethod === "email" && (
+                  <>
+                    {linkError && (
+                      <div className="rounded-xl bg-destructive/10 border border-destructive/20 p-3 text-xs text-destructive flex items-start gap-2.5">
+                        <AlertCircle className="size-4 shrink-0 mt-0.5" />
+                        <p className="leading-snug">{linkError}</p>
+                      </div>
+                    )}
+
+                    {resetSent ? (
+                      <div className="space-y-4 text-center py-2">
+                        <div className="mx-auto flex size-12 items-center justify-center rounded-full bg-emerald-50 text-emerald-600 dark:bg-emerald-950/40 dark:text-emerald-400">
+                          <CheckCircle2 className="size-6" />
+                        </div>
+                        <div className="space-y-1.5">
+                          <h3 className="text-sm font-semibold">Email envoyé avec succès !</h3>
+                          <p className="text-xs text-muted-foreground leading-relaxed">
+                            Un lien sécurisé a été envoyé à l'adresse <strong className="text-foreground">{resetEmail || signInEmail}</strong>.
+                          </p>
+                          <p className="text-[11px] text-amber-700 dark:text-amber-400 bg-amber-500/10 p-2.5 rounded-lg border border-amber-500/20">
+                            💡 <strong>Conseil :</strong> Si l'email n'apparaît pas dans 1 minute, pensez à vérifier votre dossier <strong>Spams ou Courrier indésirable</strong>.
+                          </p>
+                        </div>
+                        <div className="pt-2 space-y-2">
+                          <Button
+                            type="button"
+                            variant="outline"
+                            className="w-full text-xs font-semibold h-10 cursor-pointer"
+                            disabled={loading || countdown > 0}
+                            onClick={handleResetPassword}
+                          >
+                            {loading ? (
+                              <Loader2 className="mr-2 size-4 animate-spin" />
+                            ) : countdown > 0 ? (
+                              `Renvoyer l'email (${countdown}s)`
+                            ) : (
+                              "Renvoyer le lien par email"
+                            )}
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            className="w-full text-xs text-muted-foreground hover:text-foreground cursor-pointer"
+                            onClick={() => {
+                              setMode("tabs");
+                              setResetSent(false);
+                              setLinkError(null);
+                            }}
+                          >
+                            ← Retour à la connexion
+                          </Button>
+                        </div>
+                      </div>
+                    ) : (
+                      <form onSubmit={handleResetPassword} className="space-y-4">
+                        <div className="space-y-1.5">
+                          <Label htmlFor="reset-email">Email de votre atelier</Label>
+                          <div className="relative">
+                            <Input
+                              id="reset-email"
+                              type="email"
+                              required
+                              value={resetEmail || signInEmail}
+                              onChange={(e) => {
+                                setResetEmail(e.target.value);
+                                setSignInEmail(e.target.value);
+                              }}
+                              placeholder="exemple@couturpro.com"
+                              autoComplete="email"
+                              className="pl-9"
+                            />
+                            <Mail className="size-4 text-muted-foreground absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                          </div>
+                          <p className="text-[11px] text-muted-foreground">
+                            Nous vous enverrons un lien sécurisé pour créer votre nouveau mot de passe.
+                          </p>
+                        </div>
+
+                        <Button type="submit" className="w-full font-bold shadow-xs cursor-pointer h-10" disabled={loading}>
+                          {loading && <Loader2 className="mr-2 size-4 animate-spin" />} Envoyer le lien par email
+                        </Button>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setMode("tabs");
+                            setLinkError(null);
+                          }}
+                          className="w-full text-center text-xs text-muted-foreground hover:text-foreground transition-colors pt-2 cursor-pointer"
+                        >
+                          ← Retour à la connexion
+                        </button>
+                      </form>
+                    )}
+                  </>
                 )}
               </div>
             )}
@@ -713,30 +1064,54 @@ function AuthPage() {
                           Bon retour parmi nous 👋
                         </h1>
                         <p className="mt-1 text-xs text-muted-foreground">
-                          Entrez vos identifiants pour ouvrir votre atelier de couture.
+                          Connectez-vous avec votre numéro de téléphone ou email.
                         </p>
                       </div>
 
                       <form onSubmit={signIn} className="space-y-4">
                         <div className="space-y-1.5">
-                          <Label htmlFor="in-email">Email</Label>
+                          <Label htmlFor="in-email">Numéro de téléphone ou Email</Label>
                           <div className="relative">
                             <Input
                               id="in-email"
                               name="email"
-                              type="email"
+                              type="text"
                               required
                               value={signInEmail}
                               onChange={(e) => {
-                                setSignInEmail(e.target.value);
-                                setResetEmail(e.target.value);
+                                const val = e.target.value;
+                                setSignInEmail(val);
+                                setResetEmail(val);
+                                if (!isEmailIdentifier(val)) {
+                                  setPhoneRecoveryNumber(val);
+                                }
                               }}
-                              autoComplete="email"
-                              placeholder="atelier@example.com"
+                              autoComplete="username"
+                              placeholder="ex: 07 12 34 56 ou contact@atelier.com"
                               className="pl-9"
                             />
-                            <Mail className="size-4 text-muted-foreground absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                            {isEmailIdentifier(signInEmail) ? (
+                              <Mail className="size-4 text-muted-foreground absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                            ) : (
+                              <Smartphone className="size-4 text-muted-foreground absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                            )}
                           </div>
+                          {signInPhoneStatus ? (
+                            <div className="text-[11px] flex items-center gap-1.5 px-2 py-1 rounded bg-muted/60 text-muted-foreground border border-border/50">
+                              <span>{signInPhoneStatus.flag}</span>
+                              <span className="font-medium text-foreground">{signInPhoneStatus.country}</span>
+                              <span>({signInPhoneStatus.dialCode})</span>
+                              <span>·</span>
+                              <span className={signInPhoneStatus.isValidLength ? "text-emerald-600 font-medium" : "text-muted-foreground"}>
+                                {signInPhoneStatus.isValidLength ? "Numéro conforme" : "Format libre (non bloquant)"}
+                              </span>
+                            </div>
+                          ) : !isEmailIdentifier(signInEmail) && signInEmail.trim() ? (
+                            <div className="text-[11px] text-muted-foreground flex items-center gap-1">
+                              <Globe className="size-3" />
+                              <span>Connexion par numéro de téléphone</span>
+                            </div>
+                          ) : null}
                         </div>
 
                         <div className="space-y-1.5">
@@ -745,8 +1120,16 @@ function AuthPage() {
                             <button
                               type="button"
                               onClick={() => {
-                                setResetEmail(signInEmail);
+                                if (isEmailIdentifier(signInEmail)) {
+                                  setResetEmail(signInEmail);
+                                  setForgotMethod("email");
+                                } else {
+                                  setPhoneRecoveryNumber(signInEmail);
+                                  setForgotMethod("phone");
+                                }
                                 setResetSent(false);
+                                setPhoneRecoveryError(null);
+                                setLinkError(null);
                                 setMode("forgot");
                               }}
                               className="text-xs text-primary font-medium hover:underline cursor-pointer"
@@ -789,7 +1172,7 @@ function AuthPage() {
                           Créez votre atelier ✨
                         </h1>
                         <p className="mt-1 text-xs text-muted-foreground">
-                          Gratuit, sans engagement et prêt en 30 secondes.
+                          Gratuit, sans engagement et utilisable immédiatement.
                         </p>
                       </div>
 
@@ -829,27 +1212,55 @@ function AuthPage() {
                               id="up-phone"
                               name="phone"
                               inputMode="tel"
-                              placeholder="+225 07 00 00 00 / +226 70 00 00 00"
+                              required
+                              value={signUpPhone}
+                              onChange={(e) => setSignUpPhone(e.target.value)}
+                              placeholder="+226 70 00 00 00 / +225 07 00 00 00"
                               className="pl-9"
                             />
                             <Phone className="size-4 text-muted-foreground absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
                           </div>
+                          {signUpPhoneStatus ? (
+                            <div className="text-[11px] flex items-center gap-1.5 px-2 py-1 rounded bg-muted/60 text-muted-foreground border border-border/50">
+                              <span>{signUpPhoneStatus.flag}</span>
+                              <span className="font-medium text-foreground">{signUpPhoneStatus.country}</span>
+                              <span>({signUpPhoneStatus.dialCode})</span>
+                              <span>·</span>
+                              <span className={signUpPhoneStatus.isValidLength ? "text-emerald-600 font-medium" : "text-muted-foreground"}>
+                                {signUpPhoneStatus.isValidLength ? "Numéro conforme" : "Format libre (non bloquant)"}
+                              </span>
+                            </div>
+                          ) : signUpPhone.trim() ? (
+                            <div className="text-[11px] text-muted-foreground flex items-center gap-1">
+                              <Globe className="size-3" />
+                              <span>Indicatif international libre (non bloquant)</span>
+                            </div>
+                          ) : (
+                            <p className="text-[11px] text-muted-foreground">
+                              Détection automatique des indicatifs ouest-africains (Burkina, Côte d'Ivoire, Sénégal, Mali, etc.).
+                            </p>
+                          )}
                         </div>
 
                         <div className="space-y-1.5">
-                          <Label htmlFor="up-email">Email professionnel</Label>
+                          <div className="flex items-center justify-between">
+                            <Label htmlFor="up-email">Email professionnel</Label>
+                            <span className="text-[11px] text-muted-foreground italic">Optionnel</span>
+                          </div>
                           <div className="relative">
                             <Input
                               id="up-email"
                               name="email"
                               type="email"
-                              required
                               autoComplete="email"
-                              placeholder="contact@atelier.com"
+                              placeholder="Optionnel si vous n'en avez pas"
                               className="pl-9"
                             />
                             <Mail className="size-4 text-muted-foreground absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
                           </div>
+                          <p className="text-[11px] text-muted-foreground">
+                            💡 Si vous n'avez pas d'email, votre numéro de téléphone suffit amplement pour tout gérer.
+                          </p>
                         </div>
 
                         <div className="space-y-1.5">
