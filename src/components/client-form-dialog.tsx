@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Loader2, Image as ImageIcon, Camera, ChevronDown, Check, UserPlus, Phone, MessageSquare, MapPin, X } from "lucide-react";
+import { Loader2, Image as ImageIcon, Camera, ChevronDown, Check, UserPlus, Phone, MessageSquare, MapPin, X, ShieldCheck } from "lucide-react";
 import { toast } from "sonner";
 
 import { uploadImage } from "@/hooks/use-signed-url";
@@ -394,6 +394,12 @@ export function ClientFormDialog({
                 )}
               </button>
             )}
+          </div>
+
+          {/* Mention de confidentialité RGPD */}
+          <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground/90 bg-muted/40 rounded-lg p-2.5">
+            <ShieldCheck className="size-3.5 text-emerald-600 shrink-0" />
+            <span>Données confidentielles : enregistrées exclusivement pour les confections de votre atelier.</span>
           </div>
 
           <DialogFooter className="flex flex-col-reverse sm:flex-row gap-2 pt-2 border-t border-border/70">

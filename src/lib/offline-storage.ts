@@ -268,3 +268,48 @@ export async function getSyncQueueCount(): Promise<number> {
     req.onerror = () => reject(req.error);
   });
 }
+
+/**
+ * Purge intégrale de la base de données locale IndexedDB (Protection Vie Privée / Déconnexion).
+ * Efface tous les enregistrements personnels (clients, mesures, commandes, atelier)
+ * pour éviter toute fuite sur appareils partagés ou publics.
+ */
+export async function clearOfflineDatabase(): Promise<void> {
+  if (typeof window === "undefined" || !("indexedDB" in window)) {
+    return;
+  }
+
+  try {
+    if (dbPromise) {
+      const db = await dbPromise;
+      db.close();
+      dbPromise = null;
+    }
+
+    await new Promise<void>((resolve, reject) => {
+      const req = indexedDB.deleteDatabase(DB_NAME);
+      req.onsuccess = () => resolve();
+      req.onerror = () => reject(req.error);
+      req.onblocked = () => {
+        // En cas de blocage, forcer la résolution pour ne pas geler la déconnexion
+        resolve();
+      };
+    });
+  } catch {
+    // Si la suppression de base échoue, tentative de vidage table par table
+    try {
+      const db = await getDB();
+      const stores = Array.from(db.objectStoreNames);
+      if (stores.length > 0) {
+        const tx = db.transaction(stores, "readwrite");
+        for (const storeName of stores) {
+          tx.objectStore(storeName).clear();
+        }
+      }
+    } catch {
+      // Ignorer pour ne pas bloquer le flux
+    }
+  } finally {
+    dbPromise = null;
+  }
+}

@@ -14,6 +14,7 @@ import { Route as AuthenticatedRouteRouteImport } from './routes/_authenticated/
 import { Route as AppRouteImport } from './routes/app'
 import { Route as AuthRouteImport } from './routes/auth'
 import { Route as LookbookRouteImport } from './routes/lookbook'
+import { Route as PolitiqueConfidentialiteRouteImport } from './routes/politique-confidentialite'
 import { Route as AuthenticatedAbonnementRouteImport } from './routes/_authenticated/abonnement'
 import { Route as AuthenticatedAdminRouteImport } from './routes/_authenticated/admin'
 import { Route as AuthenticatedAtelierRouteImport } from './routes/_authenticated/atelier'
@@ -53,6 +54,12 @@ const LookbookRoute = LookbookRouteImport.update({
   path: '/lookbook',
   getParentRoute: () => rootRouteImport,
 } as any)
+const PolitiqueConfidentialiteRoute =
+  PolitiqueConfidentialiteRouteImport.update({
+    id: '/politique-confidentialite',
+    path: '/politique-confidentialite',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const AuthenticatedAbonnementRoute = AuthenticatedAbonnementRouteImport.update({
   id: '/abonnement',
   path: '/abonnement',
@@ -135,6 +142,7 @@ export interface FileRoutesByFullPath {
   '/app': typeof AppRouteWithChildren
   '/auth': typeof AuthRoute
   '/lookbook': typeof LookbookRoute
+  '/politique-confidentialite': typeof PolitiqueConfidentialiteRoute
   '/abonnement': typeof AuthenticatedAbonnementRoute
   '/admin': typeof AuthenticatedAdminRoute
   '/atelier': typeof AuthenticatedAtelierRoute
@@ -154,6 +162,7 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/auth': typeof AuthRoute
   '/lookbook': typeof LookbookRoute
+  '/politique-confidentialite': typeof PolitiqueConfidentialiteRoute
   '/abonnement': typeof AuthenticatedAbonnementRoute
   '/admin': typeof AuthenticatedAdminRoute
   '/atelier': typeof AuthenticatedAtelierRoute
@@ -176,6 +185,7 @@ export interface FileRoutesById {
   '/app': typeof AppRouteWithChildren
   '/auth': typeof AuthRoute
   '/lookbook': typeof LookbookRoute
+  '/politique-confidentialite': typeof PolitiqueConfidentialiteRoute
   '/_authenticated/abonnement': typeof AuthenticatedAbonnementRoute
   '/_authenticated/admin': typeof AuthenticatedAdminRoute
   '/_authenticated/atelier': typeof AuthenticatedAtelierRoute
@@ -198,6 +208,7 @@ export interface FileRouteTypes {
     | '/app'
     | '/auth'
     | '/lookbook'
+    | '/politique-confidentialite'
     | '/abonnement'
     | '/admin'
     | '/atelier'
@@ -217,6 +228,7 @@ export interface FileRouteTypes {
     | '/'
     | '/auth'
     | '/lookbook'
+    | '/politique-confidentialite'
     | '/abonnement'
     | '/admin'
     | '/atelier'
@@ -238,6 +250,7 @@ export interface FileRouteTypes {
     | '/app'
     | '/auth'
     | '/lookbook'
+    | '/politique-confidentialite'
     | '/_authenticated/abonnement'
     | '/_authenticated/admin'
     | '/_authenticated/atelier'
@@ -260,6 +273,7 @@ export interface RootRouteChildren {
   AppRoute: typeof AppRouteWithChildren
   AuthRoute: typeof AuthRoute
   LookbookRoute: typeof LookbookRoute
+  PolitiqueConfidentialiteRoute: typeof PolitiqueConfidentialiteRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -297,6 +311,13 @@ declare module '@tanstack/react-router' {
       path: '/lookbook'
       fullPath: '/lookbook'
       preLoaderRoute: typeof LookbookRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/politique-confidentialite': {
+      id: '/politique-confidentialite'
+      path: '/politique-confidentialite'
+      fullPath: '/politique-confidentialite'
+      preLoaderRoute: typeof PolitiqueConfidentialiteRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/_authenticated/abonnement': {
@@ -451,6 +472,7 @@ const rootRouteChildren: RootRouteChildren = {
   AppRoute: AppRouteWithChildren,
   AuthRoute: AuthRoute,
   LookbookRoute: LookbookRoute,
+  PolitiqueConfidentialiteRoute: PolitiqueConfidentialiteRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

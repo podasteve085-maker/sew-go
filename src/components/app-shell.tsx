@@ -31,6 +31,7 @@ import { ORDER_STATUS, type OrderStatus } from "@/lib/domain";
 import { Button } from "@/components/ui/button";
 import { StoredImage } from "@/components/bits";
 import { UpgradeDialog } from "@/components/upgrade-dialog";
+import { clearOfflineDatabase } from "@/lib/offline-storage";
 import { isProOrAdmin, getSubscriptionStatus, isSubscriptionExpired } from "@/lib/quotas";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { toast } from "sonner";
@@ -604,7 +605,13 @@ function SignOutButton({
           // ignore — certains navigateurs restreignent l'accès en mode privé
         }
       }
-      // 5. Rechargement dur pour détruire tout état mémoire React/TanStack
+      // 5. Purge intégrale de la base de données locale IndexedDB (anti-fuite sur poste partagé)
+      try {
+        await clearOfflineDatabase();
+      } catch {
+        // ignore
+      }
+      // 6. Rechargement dur pour détruire tout état mémoire React/TanStack
       window.location.href = "/auth?logout=true";
     }
   }

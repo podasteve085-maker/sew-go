@@ -1,8 +1,9 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useState, useEffect } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Pencil, Plus, Ruler, Trash2, Loader2, Copy, MessageCircle, Crown, Eye } from "lucide-react";
+import { ArrowLeft, Pencil, Plus, Ruler, Trash2, Loader2, Copy, MessageCircle, Crown, Eye, Download } from "lucide-react";
 import { toast } from "sonner";
+import { exportSingleClientJson } from "@/lib/export-data";
 
 import { supabase } from "@/integrations/supabase/client";
 import { useBusiness } from "@/hooks/use-business";
@@ -135,6 +136,21 @@ function ClientDetail() {
     },
   });
 
+  const [exporting, setExporting] = useState(false);
+
+  async function handleExportClientData() {
+    if (!client.data) return;
+    setExporting(true);
+    try {
+      await exportSingleClientJson(clientId, fullName(client.data), business?.id);
+      toast.success("Dossier personnel du client exporté avec succès (JSON)");
+    } catch {
+      toast.error("Échec de l'exportation du dossier client");
+    } finally {
+      setExporting(false);
+    }
+  }
+
   if (client.isLoading) {
     return <Skeleton className="h-64 w-full rounded-xl" />;
   }
@@ -231,6 +247,17 @@ function ClientDetail() {
             </div>
           </div>
           <div className="flex items-center gap-2 self-end sm:self-start">
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={exporting}
+              onClick={handleExportClientData}
+              className="h-8 text-xs font-semibold"
+              title="Exporter le dossier personnel complet du client (RGPD Art. 15)"
+            >
+              {exporting ? <Loader2 className="mr-1 size-3.5 animate-spin" /> : <Download className="mr-1 size-3.5 text-primary" />}
+              Dossier RGPD
+            </Button>
             <Button
               variant="outline"
               size="sm"

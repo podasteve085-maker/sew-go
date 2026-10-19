@@ -1,8 +1,20 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Loader2, Plus, Trash2, Image as ImageIcon, KeyRound, LogOut } from "lucide-react";
+import { Loader2, Plus, Trash2, Image as ImageIcon, KeyRound, LogOut, ShieldCheck, Download, AlertTriangle, FileSpreadsheet, ExternalLink } from "lucide-react";
 import { toast } from "sonner";
+import { clearOfflineDatabase } from "@/lib/offline-storage";
+import { exportCompleteWorkshopJson, exportClientsCsv, exportMeasurementsCsv } from "@/lib/export-data";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
 import { supabase } from "@/integrations/supabase/client";
 import { useBusiness } from "@/hooks/use-business";
@@ -284,7 +296,9 @@ function WorkshopPage() {
       <Templates businessId={business.id} />
       <ThemeSettingsSection />
       <PasswordChangeSection />
+      <PrivacyDataProtectionSection business={business} />
       <SessionSignOutSection />
+      <DangerZoneAccountDeletionSection business={business} />
     </div>
   );
 }
@@ -613,6 +627,11 @@ function SessionSignOutSection() {
           // ignore
         }
       }
+      try {
+        await clearOfflineDatabase();
+      } catch {
+        // ignore
+      }
       window.location.href = "/auth";
     }
   }
@@ -624,7 +643,7 @@ function SessionSignOutSection() {
         <h2 className="font-display text-sm font-bold">Session & Déconnexion</h2>
       </div>
       <p className="text-xs text-muted-foreground leading-relaxed">
-        Déconnectez-vous de votre compte atelier sur cet appareil. Vos données resteront sauvegardées en toute sécurité.
+        Déconnectez-vous de votre compte atelier sur cet appareil. Vos données resteront sauvegardées en toute sécurité sur le serveur et le cache local sera assaini.
       </p>
       <Button
         variant="destructive"
@@ -637,6 +656,244 @@ function SessionSignOutSection() {
         {loading ? "Déconnexion..." : "Se déconnecter de l'atelier"}
       </Button>
     </section>
+  );
+}
+
+function PrivacyDataProtectionSection({ business }: { business: { id: string; name: string } }) {
+  const [exportingJson, setExportingJson] = useState(false);
+  const [exportingClients, setExportingClients] = useState(false);
+  const [exportingMeasures, setExportingMeasures] = useState(false);
+
+  async function handleExportJson() {
+    setExportingJson(true);
+    try {
+      await exportCompleteWorkshopJson(business.id, business.name);
+      toast.success("Archive complète RGPD téléchargée avec succès");
+    } catch {
+      toast.error("Échec de l'exportation des données");
+    } finally {
+      setExportingJson(false);
+    }
+  }
+
+  async function handleExportClients() {
+    setExportingClients(true);
+    try {
+      await exportClientsCsv(business.id, business.name);
+      toast.success("Fichier clients CSV téléchargé avec succès");
+    } catch {
+      toast.error("Échec de l'exportation des clients");
+    } finally {
+      setExportingClients(false);
+    }
+  }
+
+  async function handleExportMeasures() {
+    setExportingMeasures(true);
+    try {
+      await exportMeasurementsCsv(business.id, business.name);
+      toast.success("Carnet de mesures CSV téléchargé avec succès");
+    } catch {
+      toast.error("Échec de l'exportation des mesures");
+    } finally {
+      setExportingMeasures(false);
+    }
+  }
+
+  return (
+    <section className="card-soft space-y-4 p-5">
+      <div className="flex items-center gap-2">
+        <ShieldCheck className="size-5 text-emerald-600" />
+        <h2 className="font-display text-sm font-bold">Protection des Données Personnelles & Conformité (RGPD)</h2>
+      </div>
+      <p className="text-xs text-muted-foreground leading-relaxed">
+        Conformément aux normes internationales et au RGPD, vous disposez d'un droit d'accès, d'exportation intégrale (portabilité) et de suppression de vos données et de celles de vos clients. Vos informations sont strictement étanches et protégées.
+      </p>
+
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-1">
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          disabled={exportingJson}
+          onClick={handleExportJson}
+          className="text-xs font-semibold justify-start h-auto py-2.5 px-3"
+        >
+          {exportingJson ? <Loader2 className="mr-2 size-4 animate-spin" /> : <Download className="mr-2 size-4 text-primary shrink-0" />}
+          <div className="text-left">
+            <div className="font-bold">Archive Complète</div>
+            <div className="text-[0.65rem] text-muted-foreground">Format JSON (Art. 20 RGPD)</div>
+          </div>
+        </Button>
+
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          disabled={exportingClients}
+          onClick={handleExportClients}
+          className="text-xs font-semibold justify-start h-auto py-2.5 px-3"
+        >
+          {exportingClients ? <Loader2 className="mr-2 size-4 animate-spin" /> : <FileSpreadsheet className="mr-2 size-4 text-emerald-600 shrink-0" />}
+          <div className="text-left">
+            <div className="font-bold">Clients (CSV / Excel)</div>
+            <div className="text-[0.65rem] text-muted-foreground">Contacts et adresses</div>
+          </div>
+        </Button>
+
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          disabled={exportingMeasures}
+          onClick={handleExportMeasures}
+          className="text-xs font-semibold justify-start h-auto py-2.5 px-3"
+        >
+          {exportingMeasures ? <Loader2 className="mr-2 size-4 animate-spin" /> : <Download className="mr-2 size-4 text-amber-600 shrink-0" />}
+          <div className="text-left">
+            <div className="font-bold">Mesures (CSV / Excel)</div>
+            <div className="text-[0.65rem] text-muted-foreground">Gabarits et relevés</div>
+          </div>
+        </Button>
+      </div>
+
+      <div className="pt-2 flex items-center justify-between text-xs text-muted-foreground border-t border-border/50">
+        <span>Règlement de confidentialité & sécurité active</span>
+        <a
+          href="/politique-confidentialite"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex items-center gap-1 text-primary hover:underline font-medium"
+        >
+          Consulter la politique de confidentialité <ExternalLink className="size-3" />
+        </a>
+      </div>
+    </section>
+  );
+}
+
+function DangerZoneAccountDeletionSection({ business }: { business: { id: string; name: string } }) {
+  const queryClient = useQueryClient();
+  const [openDialog, setOpenDialog] = useState(false);
+  const [confirmName, setConfirmName] = useState("");
+  const [deleting, setDeleting] = useState(false);
+
+  async function handlePermanentDelete() {
+    if (confirmName.trim().toLowerCase() !== business.name.trim().toLowerCase()) {
+      toast.error("Le nom saisi ne correspond pas au nom de votre atelier.");
+      return;
+    }
+
+    setDeleting(true);
+    try {
+      // 1. Appel RPC sécurisée pour suppression atomique en cascade
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { error } = await (supabase.rpc as any)("delete_business_and_all_data", {
+        p_business_id: business.id,
+      });
+
+      if (error) {
+        throw error;
+      }
+
+      toast.success("Atelier et données personnelles définitivement supprimés.");
+
+      // 2. Vider le cache de requêtes
+      await queryClient.cancelQueries();
+      queryClient.clear();
+
+      // 3. Purger le stockage local IndexedDB
+      await clearOfflineDatabase();
+
+      // 4. Déconnexion Supabase
+      try {
+        await supabase.auth.signOut({ scope: "global" });
+      } catch {
+        await supabase.auth.signOut();
+      }
+
+      // 5. Nettoyage mémoire navigateur
+      if (typeof window !== "undefined") {
+        try {
+          localStorage.clear();
+          sessionStorage.clear();
+        } catch {
+          // ignore
+        }
+      }
+
+      window.location.href = "/auth?account_deleted=true";
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Erreur de suppression";
+      toast.error(`Impossible de supprimer l'atelier : ${msg}`);
+      setDeleting(false);
+    }
+  }
+
+  return (
+    <>
+      <section className="card-soft space-y-3 p-5 border-destructive/30 bg-destructive/5">
+        <div className="flex items-center gap-2 text-destructive">
+          <AlertTriangle className="size-4.5" />
+          <h2 className="font-display text-sm font-bold">Zone de Danger — Suppression Définitive de l'Atelier</h2>
+        </div>
+        <p className="text-xs text-muted-foreground leading-relaxed">
+          Droit à l'effacement (Art. 17 RGPD) : Cette action détruira <strong>irrémédiablement</strong> votre atelier, tous vos clients, l'intégralité de leurs mensurations, vos commandes, paiements, photos et transactions. Cette opération est immédiate et irréversible.
+        </p>
+        <Button
+          variant="destructive"
+          size="sm"
+          onClick={() => setOpenDialog(true)}
+          className="font-bold cursor-pointer"
+        >
+          <Trash2 className="mr-2 size-4" /> Supprimer définitivement mon atelier
+        </Button>
+      </section>
+
+      <AlertDialog open={openDialog} onOpenChange={setOpenDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="text-destructive flex items-center gap-2">
+              <AlertTriangle className="size-5 shrink-0" /> Confirmation de destruction totale
+            </AlertDialogTitle>
+            <AlertDialogDescription className="space-y-3 text-xs text-left">
+              <p>
+                Êtes-vous absolument certain de vouloir détruire l'atelier <strong>« {business.name} »</strong> et l'intégralité de ses données ?
+              </p>
+              <p className="font-semibold text-destructive">
+                Toutes vos données clients, mensurations, photos et commandes seront définitivement effacées sans possibilité de récupération.
+              </p>
+              <div className="space-y-1.5 pt-2">
+                <Label htmlFor="confirm-del-biz" className="text-foreground font-semibold">
+                  Pour confirmer, tapez exactement le nom de votre atelier :
+                </Label>
+                <Input
+                  id="confirm-del-biz"
+                  value={confirmName}
+                  onChange={(e) => setConfirmName(e.target.value)}
+                  placeholder={business.name}
+                  autoComplete="off"
+                  className="font-mono text-xs"
+                />
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleting}>Annuler</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(e) => {
+                e.preventDefault();
+                handlePermanentDelete();
+              }}
+              disabled={deleting || confirmName.trim().toLowerCase() !== business.name.trim().toLowerCase()}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              {deleting && <Loader2 className="mr-2 size-4 animate-spin" />} Détruire définitivement
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </>
   );
 }
 

@@ -78,7 +78,7 @@ function PublicLookbookPage() {
       try {
         const viewRes = await supabase
           .from("atelier_lookbook_public")
-          .select(columns)
+          .select("id, name, city, currency, logo_url")
           .eq("id", atelierId)
           .maybeSingle();
         if (!viewRes.error && viewRes.data) return viewRes.data;
@@ -425,6 +425,15 @@ function PublicLookbookPage() {
           </div>
         )}
       </main>
+
+      <footer className="border-t border-border/70 py-6 text-center text-xs text-muted-foreground mt-12 space-y-1.5">
+        <p>Catalogue propulsé par <strong>CouturPro</strong> · Confection artisanale sur mesure</p>
+        <p>
+          <a href="/politique-confidentialite" className="text-primary hover:underline font-medium">
+            Politique de Confidentialité & Protection des Données
+          </a>
+        </p>
+      </footer>
 
       {/* Modal Plein Écran pour visualiser les photos du modèle */}
       {activeModel && (

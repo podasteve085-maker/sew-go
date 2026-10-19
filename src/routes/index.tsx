@@ -19,15 +19,20 @@ import { supabase } from "@/integrations/supabase/client";
 export const Route = createFileRoute("/")({
   ssr: false,
   beforeLoad: async () => {
-    // Si l'utilisateur est déjà connecté ou a un atelier local, aller directement au tableau de bord (comme WhatsApp)
+    // Si l'utilisateur est déjà connecté ou a un atelier local hors-ligne légitime, aller directement au tableau de bord
     if (typeof window !== "undefined") {
       try {
         const { data: sessionData } = await supabase.auth.getSession();
         if (sessionData?.session?.user) {
           throw redirect({ to: "/dashboard" });
         }
-        if (localStorage.getItem("couturpro_current_business_id")) {
-          throw redirect({ to: "/dashboard" });
+        // Mode secours hors-ligne strict (PWA)
+        if (typeof navigator !== "undefined" && !navigator.onLine) {
+          const offlineBiz = localStorage.getItem("couturpro_current_business_id");
+          const offlineUserId = localStorage.getItem("couturpro_current_user_id");
+          if (offlineBiz && offlineUserId) {
+            throw redirect({ to: "/dashboard" });
+          }
         }
       } catch (e) {
         if (e && typeof e === "object" && "to" in e) {
@@ -93,10 +98,15 @@ function Landing() {
 
   useEffect(() => {
     if (typeof window !== "undefined") {
-      const bizId = localStorage.getItem("couturpro_current_business_id");
       supabase.auth.getSession().then(({ data }) => {
-        if (data?.session?.user || bizId) {
+        if (data?.session?.user) {
           navigate({ to: "/dashboard", replace: true });
+        } else if (typeof navigator !== "undefined" && !navigator.onLine) {
+          const offlineBiz = localStorage.getItem("couturpro_current_business_id");
+          const offlineUserId = localStorage.getItem("couturpro_current_user_id");
+          if (offlineBiz && offlineUserId) {
+            navigate({ to: "/dashboard", replace: true });
+          }
         }
       });
     }
@@ -208,8 +218,13 @@ function Landing() {
         </section>
       </main>
 
-      <footer className="border-t border-border py-8 text-center text-sm text-muted-foreground">
-        CouturPro — La solution de gestion pour les couturiers, tailleurs et créateurs de mode en Afrique et à l'international.
+      <footer className="border-t border-border py-8 text-center text-sm text-muted-foreground space-y-2">
+        <p>CouturPro — La solution de gestion pour les couturiers, tailleurs et créateurs de mode en Afrique et à l'international.</p>
+        <p className="text-xs">
+          <Link to="/politique-confidentialite" className="text-primary hover:underline font-medium">
+            Politique de Confidentialité & Protection des Données (RGPD)
+          </Link>
+        </p>
       </footer>
     </div>
   );

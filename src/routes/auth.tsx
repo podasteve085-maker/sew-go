@@ -719,10 +719,15 @@ function AuthPage() {
           </div>
 
           {/* Pied gauche : Sécurité & isolation */}
-          <div className="mt-8 pt-6 border-t border-border/60 text-center">
+          <div className="mt-8 pt-6 border-t border-border/60 text-center space-y-1.5">
             <div className="inline-flex items-center gap-2 text-xs text-muted-foreground">
               <ShieldCheck className="size-4 text-primary shrink-0" />
               <span>Données 100% privées & isolées · Chaque atelier dispose de son espace exclusif</span>
+            </div>
+            <div>
+              <Link to="/politique-confidentialite" className="text-[11px] text-muted-foreground hover:text-primary underline">
+                Politique de confidentialité & Protection des données (RGPD)
+              </Link>
             </div>
           </div>
         </div>
