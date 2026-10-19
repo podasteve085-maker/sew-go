@@ -320,6 +320,7 @@ ALTER TABLE public.payments ADD CONSTRAINT payments_amount_positive CHECK (amoun
 
 DROP POLICY IF EXISTS "enforce_atelier_image_mime" ON storage.objects;
 CREATE POLICY "enforce_atelier_image_mime" ON storage.objects
+  AS RESTRICTIVE
   FOR INSERT TO authenticated
   WITH CHECK (
     bucket_id = 'atelier' AND (
