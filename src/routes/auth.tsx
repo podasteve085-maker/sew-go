@@ -39,9 +39,6 @@ export const Route = createFileRoute("/auth")({
         if (sessionData?.session?.user) {
           throw redirect({ to: "/dashboard" });
         }
-        if (localStorage.getItem("couturpro_current_business_id")) {
-          throw redirect({ to: "/dashboard" });
-        }
       } catch (e) {
         if (e && typeof e === "object" && "to" in e) {
           throw e;
@@ -90,8 +87,21 @@ function AuthPage() {
   const [resetSent, setResetSent] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [showSignUpPassword, setShowSignUpPassword] = useState(false);
-  const [failedAttempts, setFailedAttempts] = useState(0);
-  const [lockoutUntil, setLockoutUntil] = useState<number | null>(null);
+  const [failedAttempts, setFailedAttempts] = useState(() => {
+    if (typeof window !== "undefined") {
+      const saved = sessionStorage.getItem("couturpro_auth_failures");
+      return saved ? parseInt(saved, 10) || 0 : 0;
+    }
+    return 0;
+  });
+  const [lockoutUntil, setLockoutUntil] = useState<number | null>(() => {
+    if (typeof window !== "undefined") {
+      const saved = sessionStorage.getItem("couturpro_auth_lockout");
+      const num = saved ? parseInt(saved, 10) : null;
+      if (num && num > Date.now()) return num;
+    }
+    return null;
+  });
 
   useEffect(() => {
     // 1. Détection immédiate du jeton de récupération dans le hash de l'URL (#type=recovery)
@@ -115,10 +125,10 @@ function AuthPage() {
       return;
     }
 
-    // 3. Si l'utilisateur est déjà connecté, redirection immédiate vers le tableau de bord
+    // 3. Si l'utilisateur est déjà connecté avec une session Supabase active et valide
     if (typeof window !== "undefined") {
       supabase.auth.getSession().then(({ data }) => {
-        if (data?.session?.user || localStorage.getItem("couturpro_current_business_id")) {
+        if (data?.session?.user) {
           navigate({ to: "/dashboard", replace: true });
         }
       });
@@ -163,8 +173,16 @@ function AuthPage() {
     if (error) {
       const nextFailures = failedAttempts + 1;
       setFailedAttempts(nextFailures);
+      try {
+        sessionStorage.setItem("couturpro_auth_failures", String(nextFailures));
+      } catch {}
+
       if (nextFailures >= 5) {
-        setLockoutUntil(Date.now() + 60 * 1000); // 60s cooldown
+        const lockoutTime = Date.now() + 60 * 1000; // 60s cooldown
+        setLockoutUntil(lockoutTime);
+        try {
+          sessionStorage.setItem("couturpro_auth_lockout", String(lockoutTime));
+        } catch {}
         toast.error("Compte temporairement bloqué", {
           description: "5 tentatives infructueuses consécutives. Veuillez patienter 60 secondes.",
         });
@@ -189,6 +207,10 @@ function AuthPage() {
 
     setFailedAttempts(0);
     setLockoutUntil(null);
+    try {
+      sessionStorage.removeItem("couturpro_auth_failures");
+      sessionStorage.removeItem("couturpro_auth_lockout");
+    } catch {}
     navigate({ to: "/dashboard", replace: true });
   }
 

@@ -56,59 +56,51 @@ export function UpgradeDialog({
   const upgradeMutation = useMutation({
     mutationFn: async () => {
       if (!business) throw new Error("Atelier introuvable");
-
-      // Calcul de la nouvelle date d'expiration
-      // Si l'abonnement actuel est déjà valide et non expiré, on prolonge à partir de la date existante
-      const baseDate =
-        business.plan_expires_at && new Date(business.plan_expires_at).getTime() > Date.now()
-          ? new Date(business.plan_expires_at)
-          : new Date();
-
-      const daysToAdd = planInfo.durationDays;
-      const expiresAt = new Date(baseDate.getTime() + daysToAdd * 24 * 60 * 60 * 1000);
-
-      // 1. Sauvegarde locale immédiate (résilience totale hors-ligne et réactivité instantanée)
-      if (typeof window !== "undefined") {
-        try {
-          localStorage.setItem(
-            `couturpro_sub_${business.id}`,
-            JSON.stringify({
-              plan: selectedPlan,
-              expires_at: expiresAt.toISOString(),
-            })
-          );
-        } catch {
-          // ignore
-        }
+      if (!phone || phone.trim().length < 8) {
+        throw new Error("Veuillez saisir un numéro de téléphone valide pour le paiement Mobile Money.");
       }
 
-      // 2. Mise à jour de l'atelier sur Supabase
-      try {
-        await (supabase.from("businesses") as any)
-          .update({
-            plan: selectedPlan,
-            plan_status: "active",
-            plan_expires_at: expiresAt.toISOString(),
-          })
-          .eq("id", business.id);
-      } catch (err) {
-        console.warn("[UpgradeDialog] Mise à jour en ligne différée :", err);
+      // Initiation sécurisée d'une transaction d'abonnement
+      // Le statut 'pending' est forcé par la base de données et seul le webhook bancaire sécurisé
+      // ou l'administrateur peut acter le paiement 'completed' et renouveler les droits de l'atelier.
+      const txId = typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+        ? crypto.randomUUID()
+        : `tx_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+
+      const { error: txError } = await (supabase.from("payment_transactions") as any).insert({
+        business_id: business.id,
+        plan: selectedPlan,
+        provider: provider,
+        amount: amount,
+        provider_tx_id: txId,
+        status: "pending",
+        metadata: {
+          phone: phone.trim(),
+          plan_name: planInfo.name,
+          duration_days: planInfo.durationDays,
+          initiated_at: new Date().toISOString(),
+        },
+      });
+
+      if (txError) {
+        throw new Error(txError.message || "Erreur lors de l'enregistrement de l'ordre de paiement.");
       }
+
+      return { txId };
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["business"] });
-      queryClient.invalidateQueries({ queryKey: ["clients"] });
-      queryClient.invalidateQueries({ queryKey: ["orders"] });
-      queryClient.invalidateQueries({ queryKey: ["catalog-models"] });
+      queryClient.invalidateQueries({ queryKey: ["payment_transactions"] });
 
-      toast.success("🎉 Félicitations Maître Couturier !", {
-        description: `Votre atelier est activé en formule ${planInfo.name} (${fcfa(amount)}). Toutes les limites sont levées !`,
+      toast.success("Ordre de paiement initié avec succès !", {
+        description: `Un débit Mobile Money de ${fcfa(amount)} pour la formule ${planInfo.name} a été envoyé au ${phone}. Validez le push USSD sur votre téléphone.`,
+        duration: 8000,
       });
       onOpenChange(false);
     },
     onError: (err: unknown) => {
       const msg = err instanceof Error ? err.message : "Erreur de paiement";
-      toast.error("Impossible de finaliser l'activation", { description: msg });
+      toast.error("Impossible d'initier le paiement", { description: msg });
     },
   });
 

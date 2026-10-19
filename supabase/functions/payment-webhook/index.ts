@@ -67,11 +67,24 @@ serve(async (req: Request) => {
   const webhookSecret = Deno.env.get("PAYMENT_WEBHOOK_SECRET");
 
   if (!supabaseUrl || !serviceRoleKey) {
-    console.error("Configuration Supabase manquante dans l'Edge Function");
-    return new Response(JSON.stringify({ error: "Erreur serveur interne" }), {
+    console.error("[payment-webhook] Configuration Supabase manquante dans l'Edge Function");
+    return new Response(JSON.stringify({ error: "Erreur serveur interne : configuration de base de données manquante" }), {
       status: 500,
       headers: { "Content-Type": "application/json" },
     });
+  }
+
+  // Règle de sécurité FinTech stricte : Fail-Closed
+  // Si le secret de webhook n'est pas configuré, l'endpoint refuse catégoriquement toute requête
+  if (!webhookSecret) {
+    console.error("[payment-webhook] Sécurité critique : PAYMENT_WEBHOOK_SECRET n'est pas configuré !");
+    return new Response(
+      JSON.stringify({ error: "Service indisponible : configuration cryptographique du webhook incomplète" }),
+      {
+        status: 500,
+        headers: { "Content-Type": "application/json" },
+      }
+    );
   }
 
   const supabase = createClient(supabaseUrl, serviceRoleKey);
@@ -81,38 +94,41 @@ serve(async (req: Request) => {
     const signatureHeader = req.headers.get("x-signature") || req.headers.get("x-webhook-signature");
     const timestampHeader = req.headers.get("x-timestamp") || req.headers.get("x-webhook-timestamp");
 
-    // 1. Protection contre les attaques par rejeu (Replay Attacks)
-    if (timestampHeader) {
-      const requestTime = parseInt(timestampHeader, 10);
-      const currentTime = Math.floor(Date.now() / 1000);
-      // Rejeter toute requête plus vieille que 5 minutes (300 secondes)
-      if (isNaN(requestTime) || Math.abs(currentTime - requestTime) > 300) {
-        return new Response(JSON.stringify({ error: "Horodatage expiré ou invalide" }), {
-          status: 401,
-          headers: { "Content-Type": "application/json" },
-        });
-      }
+    // 1. Horodatage obligatoire et protection anti-rejeu (Replay Attacks)
+    if (!timestampHeader) {
+      return new Response(JSON.stringify({ error: "En-tête d'horodatage (x-timestamp) obligatoire" }), {
+        status: 401,
+        headers: { "Content-Type": "application/json" },
+      });
     }
 
-    // 2. Vérification cryptographique de la signature HMAC
-    if (webhookSecret) {
-      if (!signatureHeader) {
-        return new Response(JSON.stringify({ error: "Signature manquante" }), {
-          status: 401,
-          headers: { "Content-Type": "application/json" },
-        });
-      }
-      const messageToSign = timestampHeader ? `${timestampHeader}.${rawBody}` : rawBody;
-      const expectedSignature = await computeHmacSha256(webhookSecret, messageToSign);
+    const requestTime = parseInt(timestampHeader, 10);
+    const currentTime = Math.floor(Date.now() / 1000);
+    // Rejeter toute requête plus vieille que 5 minutes (300 secondes) ou située dans le futur (> 60s)
+    if (isNaN(requestTime) || (currentTime - requestTime) > 300 || (requestTime - currentTime) > 60) {
+      return new Response(JSON.stringify({ error: "Horodatage expiré ou invalide" }), {
+        status: 401,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
 
-      if (!timingSafeEqual(signatureHeader, expectedSignature)) {
-        return new Response(JSON.stringify({ error: "Signature HMAC invalide" }), {
-          status: 401,
-          headers: { "Content-Type": "application/json" },
-        });
-      }
-    } else {
-      console.warn("ATTENTION: PAYMENT_WEBHOOK_SECRET n'est pas encore défini en production!");
+    // 2. Vérification cryptographique obligatoire de la signature HMAC SHA-256
+    if (!signatureHeader) {
+      return new Response(JSON.stringify({ error: "Signature cryptographique manquante (x-signature)" }), {
+        status: 401,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+
+    const messageToSign = `${timestampHeader}.${rawBody}`;
+    const expectedSignature = await computeHmacSha256(webhookSecret, messageToSign);
+
+    if (!timingSafeEqual(signatureHeader, expectedSignature)) {
+      console.warn("[payment-webhook] Rejet : tentative de signature HMAC invalide");
+      return new Response(JSON.stringify({ error: "Signature HMAC invalide" }), {
+        status: 401,
+        headers: { "Content-Type": "application/json" },
+      });
     }
 
     // 3. Décodage du payload de paiement
