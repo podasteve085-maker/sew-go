@@ -143,9 +143,9 @@ function ClientDetail() {
     setExporting(true);
     try {
       await exportSingleClientJson(clientId, fullName(client.data), business?.id);
-      toast.success("Dossier personnel du client exporté avec succès (JSON)");
+      toast.success("Fiche client téléchargée avec succès");
     } catch {
-      toast.error("Échec de l'exportation du dossier client");
+      toast.error("Échec du téléchargement de la fiche client");
     } finally {
       setExporting(false);
     }
@@ -253,10 +253,10 @@ function ClientDetail() {
               disabled={exporting}
               onClick={handleExportClientData}
               className="h-8 text-xs font-semibold"
-              title="Exporter le dossier personnel complet du client (RGPD Art. 15)"
+              title="Télécharger toutes les informations et mesures de ce client (fichier de secours)"
             >
               {exporting ? <Loader2 className="mr-1 size-3.5 animate-spin" /> : <Download className="mr-1 size-3.5 text-primary" />}
-              Dossier RGPD
+              Exporter fiche
             </Button>
             <Button
               variant="outline"

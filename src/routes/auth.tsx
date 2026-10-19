@@ -16,6 +16,8 @@ import {
   User,
   Phone,
   Sparkles,
+  Check,
+  AlertCircle,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -29,10 +31,24 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 export const Route = createFileRoute("/auth")({
   ssr: false,
   beforeLoad: async ({ search }) => {
-    // Si l'utilisateur a explicitement demandé à se déconnecter ou changer de compte, on ne redirige pas
+    // 1. Si l'utilisateur a explicitement demandé à se déconnecter ou changer de compte, on ne redirige pas
     if (search.logout || search.reconnect) {
       return;
     }
+
+    // 2. Si on est dans un flux de réinitialisation de mot de passe (mode reset/update_password, code PKCE, ou hash #type=recovery),
+    // on NE DOIT PAS rediriger vers /dashboard afin de laisser l'utilisateur choisir son nouveau mot de passe !
+    const isResetSearch =
+      search.mode === "reset" || search.mode === "update_password" || Boolean(search.code);
+    const isResetHash =
+      typeof window !== "undefined" &&
+      (window.location.hash.includes("type=recovery") || window.location.hash.includes("access_token"));
+
+    if (isResetSearch || isResetHash) {
+      return;
+    }
+
+    // 3. Redirection standard vers le dashboard si une session valide préexistante est active
     if (typeof window !== "undefined") {
       try {
         const { data: sessionData } = await supabase.auth.getSession();
@@ -48,11 +64,43 @@ export const Route = createFileRoute("/auth")({
   },
   validateSearch: (
     search: Record<string, unknown>,
-  ): { logout?: boolean; reconnect?: boolean; tab?: "signin" | "signup" } => {
-    const res: { logout?: boolean; reconnect?: boolean; tab?: "signin" | "signup" } = {};
+  ): {
+    logout?: boolean;
+    reconnect?: boolean;
+    tab?: "signin" | "signup";
+    mode?: "tabs" | "forgot" | "reset" | "update_password";
+    code?: string;
+    error?: string;
+    error_code?: string;
+    error_description?: string;
+  } => {
+    const res: {
+      logout?: boolean;
+      reconnect?: boolean;
+      tab?: "signin" | "signup";
+      mode?: "tabs" | "forgot" | "reset" | "update_password";
+      code?: string;
+      error?: string;
+      error_code?: string;
+      error_description?: string;
+    } = {};
     if (search["logout"] === true || search["logout"] === "true") res.logout = true;
     if (search["reconnect"] === true || search["reconnect"] === "true") res.reconnect = true;
     if (search["tab"] === "signup" || search["tab"] === "signin") res.tab = search["tab"];
+    if (
+      search["mode"] === "forgot" ||
+      search["mode"] === "reset" ||
+      search["mode"] === "update_password" ||
+      search["mode"] === "tabs"
+    ) {
+      res.mode = search["mode"];
+    }
+    if (typeof search["code"] === "string" && search["code"].trim()) {
+      res.code = search["code"].trim();
+    }
+    if (typeof search["error"] === "string") res.error = search["error"];
+    if (typeof search["error_code"] === "string") res.error_code = search["error_code"];
+    if (typeof search["error_description"] === "string") res.error_description = search["error_description"];
     return res;
   },
   head: () => ({
@@ -75,10 +123,25 @@ export const Route = createFileRoute("/auth")({
 });
 
 function AuthPage() {
-  const { logout, reconnect, tab } = Route.useSearch();
+  const search = Route.useSearch();
+  const {
+    logout,
+    reconnect,
+    tab,
+    mode: searchMode,
+    error: searchError,
+    error_code: searchErrorCode,
+    error_description: searchErrorDesc,
+  } = search;
+
   const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
-  const [mode, setMode] = useState<"tabs" | "forgot" | "update_password">("tabs");
+  const [mode, setMode] = useState<"tabs" | "forgot" | "update_password">(() => {
+    if (searchMode === "forgot") return "forgot";
+    if (searchMode === "reset" || searchMode === "update_password") return "update_password";
+    return "tabs";
+  });
+
   // Champs formulaires
   const [signInEmail, setSignInEmail] = useState("");
   const [resetEmail, setResetEmail] = useState("");
@@ -86,7 +149,12 @@ function AuthPage() {
   const [confirmPassword, setConfirmPassword] = useState("");
   const [resetSent, setResetSent] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
+  const [showNewPassword, setShowNewPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [showSignUpPassword, setShowSignUpPassword] = useState(false);
+  const [countdown, setCountdown] = useState(0);
+  const [linkError, setLinkError] = useState<string | null>(null);
+
   const [failedAttempts, setFailedAttempts] = useState(() => {
     if (typeof window !== "undefined") {
       const saved = sessionStorage.getItem("couturpro_auth_failures");
@@ -94,6 +162,7 @@ function AuthPage() {
     }
     return 0;
   });
+
   const [lockoutUntil, setLockoutUntil] = useState<number | null>(() => {
     if (typeof window !== "undefined") {
       const saved = sessionStorage.getItem("couturpro_auth_lockout");
@@ -103,38 +172,78 @@ function AuthPage() {
     return null;
   });
 
+  // Compte à rebours de renvoi d'email (cooldown anti-spam / anti rate-limit)
   useEffect(() => {
-    // 1. Détection immédiate du jeton de récupération dans le hash de l'URL (#type=recovery)
-    const hash = typeof window !== "undefined" ? window.location.hash : "";
-    if (hash.includes("type=recovery")) {
-      setMode("update_password");
+    if (countdown <= 0) return;
+    const timer = setInterval(() => {
+      setCountdown((prev) => (prev > 0 ? prev - 1 : 0));
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [countdown]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    const hash = window.location.hash || "";
+
+    // 1. Détection des erreurs dans le lien (ex: #error=access_denied&error_code=otp_expired)
+    let detectedError = searchErrorDesc || searchError || null;
+    let detectedErrorCode = searchErrorCode || null;
+
+    if (hash.includes("error=")) {
+      const hashParams = new URLSearchParams(hash.replace(/^#/, ""));
+      detectedError = hashParams.get("error_description") || hashParams.get("error") || detectedError;
+      detectedErrorCode = hashParams.get("error_code") || detectedErrorCode;
+    }
+
+    if (detectedError || detectedErrorCode) {
+      let friendlyMsg = "Ce lien de réinitialisation est invalide ou a expiré.";
+      if (
+        detectedErrorCode === "otp_expired" ||
+        (detectedError && (detectedError.toLowerCase().includes("expired") || detectedError.toLowerCase().includes("invalid")))
+      ) {
+        friendlyMsg = "Ce lien a expiré ou a déjà été utilisé. Saisissez votre email ci-dessous pour en recevoir un nouveau.";
+      }
+      setLinkError(friendlyMsg);
+      setMode("forgot");
+      toast.error("Lien non valide", { description: friendlyMsg });
+      try {
+        window.history.replaceState(null, "", window.location.pathname);
+      } catch {}
       return;
     }
 
-    // 2. Si l'utilisateur demande explicitement une déconnexion pour changer de compte
+    // 2. Détection du flux de récupération (hash ou search)
+    const isRecovery =
+      hash.includes("type=recovery") ||
+      searchMode === "reset" ||
+      searchMode === "update_password" ||
+      Boolean(search.code && (searchMode === "reset" || hash.includes("type=recovery")));
+
+    if (isRecovery) {
+      setMode("update_password");
+      // On reste en mode réinitialisation de mot de passe, PAS de redirection vers /dashboard
+      return;
+    }
+
+    // 3. Déconnexion explicite demandée
     if (logout || reconnect) {
-      if (typeof window !== "undefined") {
-        try {
-          localStorage.clear();
-          sessionStorage.clear();
-        } catch {
-          // ignore
-        }
-      }
+      try {
+        localStorage.clear();
+        sessionStorage.clear();
+      } catch {}
       supabase.auth.signOut({ scope: "global" }).catch(() => {});
       return;
     }
 
-    // 3. Si l'utilisateur est déjà connecté avec une session Supabase active et valide
-    if (typeof window !== "undefined") {
-      supabase.auth.getSession().then(({ data }) => {
-        if (data?.session?.user) {
-          navigate({ to: "/dashboard", replace: true });
-        }
-      });
-    }
+    // 4. Si déjà connecté sans flux de récupération, rediriger vers /dashboard
+    supabase.auth.getSession().then(({ data }) => {
+      if (data?.session?.user && mode !== "update_password" && !isRecovery) {
+        navigate({ to: "/dashboard", replace: true });
+      }
+    });
 
-    // 4. Écoute des événements de récupération de mot de passe
+    // 5. Écoute de l'événement Supabase de récupération de mot de passe
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((event) => {
@@ -146,7 +255,7 @@ function AuthPage() {
     return () => {
       subscription.unsubscribe();
     };
-  }, [logout, reconnect]);
+  }, [logout, reconnect, searchMode, searchError, searchErrorCode, searchErrorDesc]);
 
   // Connexion avec protection anti-brute force
   async function signIn(e: React.FormEvent<HTMLFormElement>) {
@@ -221,9 +330,9 @@ function AuthPage() {
     const emailVal = String(form.get("email")).trim();
     const passwordVal = String(form.get("password"));
 
-    if (passwordVal.length < 8 || !/\d/.test(passwordVal) || !/[a-zA-Z]/.test(passwordVal)) {
-      toast.error("Mot de passe insuffisant", {
-        description: "Le mot de passe doit comporter au moins 8 caractères, incluant au moins une lettre et un chiffre.",
+    if (passwordVal.length < 6) {
+      toast.error("Mot de passe trop court", {
+        description: "Le mot de passe doit comporter au moins 6 caractères.",
       });
       return;
     }
@@ -284,27 +393,32 @@ function AuthPage() {
     e.preventDefault();
     const emailToReset = (resetEmail || signInEmail).trim();
     if (!emailToReset) {
-      toast.error("Veuillez indiquer votre adresse email.");
+      toast.error("Veuillez indiquer l'adresse email de votre atelier.");
       return;
     }
 
     setLoading(true);
+    setLinkError(null);
+    const redirectUrl = `${window.location.origin}/auth?mode=reset`;
     const { error } = await supabase.auth.resetPasswordForEmail(emailToReset, {
-      redirectTo: `${window.location.origin}/auth`,
+      redirectTo: redirectUrl,
     });
     setLoading(false);
 
     if (error) {
       const lower = error.message.toLowerCase();
       let description = error.message;
-      if (lower.includes("rate limit") || lower.includes("too many")) {
-        description = "Trop de demandes en peu de temps. Veuillez patienter quelques minutes.";
+      if (lower.includes("rate limit") || lower.includes("too many") || lower.includes("over_email_send_rate_limit")) {
+        description = "Trop de demandes d'envoi d'email. Veuillez patienter 1 minute avant de réessayer.";
+      } else if (lower.includes("invalid email")) {
+        description = "Format d'adresse email non valide. Vérifiez votre saisie.";
       }
       toast.error("Impossible d'envoyer l'email", { description });
     } else {
       setResetSent(true);
-      toast.success("Email envoyé !", {
-        description: `Un lien a été envoyé à ${emailToReset}. Vérifiez votre boîte et vos spams.`,
+      setCountdown(60);
+      toast.success("Email envoyé avec succès !", {
+        description: `Un lien a été envoyé à ${emailToReset}. Vérifiez votre boîte mail et vos spams.`,
       });
     }
   }
@@ -313,12 +427,12 @@ function AuthPage() {
   async function handleUpdatePassword(e: React.FormEvent) {
     e.preventDefault();
     if (!newPassword) {
-      toast.error("Veuillez saisir un mot de passe.");
+      toast.error("Veuillez saisir votre nouveau mot de passe.");
       return;
     }
-    if (newPassword.length < 8 || !/\d/.test(newPassword) || !/[a-zA-Z]/.test(newPassword)) {
-      toast.error("Mot de passe insuffisant", {
-        description: "Le mot de passe doit comporter au moins 8 caractères, incluant au moins une lettre et un chiffre.",
+    if (newPassword.length < 6) {
+      toast.error("Mot de passe trop court", {
+        description: "Le mot de passe doit comporter au moins 6 caractères.",
       });
       return;
     }
@@ -336,12 +450,12 @@ function AuthPage() {
       return;
     }
 
-    toast.success("Mot de passe mis à jour avec succès !", {
-      description: "Connexion à votre atelier...",
+    toast.success("Nouveau mot de passe enregistré avec succès !", {
+      description: "Connexion à votre espace atelier...",
     });
 
     if (typeof window !== "undefined" && window.history.replaceState) {
-      window.history.replaceState(null, "", window.location.pathname);
+      window.history.replaceState(null, "", "/auth");
     }
     navigate({ to: "/dashboard", replace: true });
   }
@@ -383,7 +497,7 @@ function AuthPage() {
                   <div>
                     <h2 className="font-display text-lg font-bold">Nouveau mot de passe</h2>
                     <p className="text-xs text-muted-foreground">
-                      Choisissez un mot de passe sécurisé pour votre atelier.
+                      Choisissez un mot de passe pour votre atelier (6 caractères minimum).
                     </p>
                   </div>
                 </div>
@@ -394,7 +508,7 @@ function AuthPage() {
                     <div className="relative">
                       <Input
                         id="new-password"
-                        type={showPassword ? "text" : "password"}
+                        type={showNewPassword ? "text" : "password"}
                         required
                         minLength={6}
                         value={newPassword}
@@ -405,31 +519,56 @@ function AuthPage() {
                       />
                       <button
                         type="button"
-                        onClick={() => setShowPassword(!showPassword)}
+                        onClick={() => setShowNewPassword(!showNewPassword)}
                         className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground cursor-pointer"
-                        title={showPassword ? "Masquer" : "Afficher"}
+                        title={showNewPassword ? "Masquer" : "Afficher"}
                       >
-                        {showPassword ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+                        {showNewPassword ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
                       </button>
                     </div>
                   </div>
 
                   <div className="space-y-1.5">
                     <Label htmlFor="confirm-password">Confirmez le nouveau mot de passe</Label>
-                    <Input
-                      id="confirm-password"
-                      type={showPassword ? "text" : "password"}
-                      required
-                      minLength={6}
-                      value={confirmPassword}
-                      onChange={(e) => setConfirmPassword(e.target.value)}
-                      placeholder="Retapez le mot de passe"
-                      autoComplete="new-password"
-                    />
+                    <div className="relative">
+                      <Input
+                        id="confirm-password"
+                        type={showConfirmPassword ? "text" : "password"}
+                        required
+                        minLength={6}
+                        value={confirmPassword}
+                        onChange={(e) => setConfirmPassword(e.target.value)}
+                        placeholder="Retapez le mot de passe"
+                        autoComplete="new-password"
+                        className="pr-10"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground cursor-pointer"
+                        title={showConfirmPassword ? "Masquer" : "Afficher"}
+                      >
+                        {showConfirmPassword ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+                      </button>
+                    </div>
+                    {confirmPassword && newPassword === confirmPassword && (
+                      <p className="text-[11px] text-emerald-600 font-medium flex items-center gap-1 pt-0.5">
+                        <Check className="size-3.5" /> Les deux mots de passe sont identiques
+                      </p>
+                    )}
+                    {confirmPassword && newPassword !== confirmPassword && (
+                      <p className="text-[11px] text-destructive font-medium pt-0.5">
+                        Les deux mots de passe ne correspondent pas
+                      </p>
+                    )}
                   </div>
 
-                  <Button type="submit" className="w-full font-bold shadow-xs cursor-pointer h-10" disabled={loading}>
-                    {loading && <Loader2 className="mr-2 size-4 animate-spin" />} Enregistrer le mot de passe
+                  <Button
+                    type="submit"
+                    className="w-full font-bold shadow-xs cursor-pointer h-10"
+                    disabled={loading || !newPassword || newPassword.length < 6 || newPassword !== confirmPassword}
+                  >
+                    {loading && <Loader2 className="mr-2 size-4 animate-spin" />} Enregistrer mon nouveau mot de passe
                   </Button>
                 </form>
               </div>
@@ -444,6 +583,7 @@ function AuthPage() {
                     onClick={() => {
                       setMode("tabs");
                       setResetSent(false);
+                      setLinkError(null);
                     }}
                     className="flex size-8 items-center justify-center rounded-lg border hover:bg-muted text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
                     title="Retour à la connexion"
@@ -451,35 +591,61 @@ function AuthPage() {
                     <ArrowLeft className="size-4" />
                   </button>
                   <div>
-                    <h2 className="font-display text-lg font-bold">Mot de passe oublié ?</h2>
+                    <h2 className="font-display text-lg font-bold">Récupérer mon mot de passe</h2>
                     <p className="text-xs text-muted-foreground">
-                      Récupérez l'accès à votre compte atelier
+                      Recevez un lien par email pour choisir un nouveau mot de passe
                     </p>
                   </div>
                 </div>
+
+                {linkError && (
+                  <div className="rounded-xl bg-destructive/10 border border-destructive/20 p-3 text-xs text-destructive flex items-start gap-2.5">
+                    <AlertCircle className="size-4 shrink-0 mt-0.5" />
+                    <p className="leading-snug">{linkError}</p>
+                  </div>
+                )}
 
                 {resetSent ? (
                   <div className="space-y-4 text-center py-2">
                     <div className="mx-auto flex size-12 items-center justify-center rounded-full bg-emerald-50 text-emerald-600 dark:bg-emerald-950/40 dark:text-emerald-400">
                       <CheckCircle2 className="size-6" />
                     </div>
-                    <div className="space-y-1">
-                      <h3 className="text-sm font-semibold">Email envoyé !</h3>
+                    <div className="space-y-1.5">
+                      <h3 className="text-sm font-semibold">Email envoyé avec succès !</h3>
                       <p className="text-xs text-muted-foreground leading-relaxed">
-                        Consultez votre boîte <strong className="text-foreground">{resetEmail || signInEmail}</strong> (vérifiez aussi vos spams). Cliquez sur le lien pour choisir votre nouveau mot de passe.
+                        Un lien sécurisé a été envoyé à l'adresse <strong className="text-foreground">{resetEmail || signInEmail}</strong>.
+                      </p>
+                      <p className="text-[11px] text-amber-700 dark:text-amber-400 bg-amber-500/10 p-2.5 rounded-lg border border-amber-500/20">
+                        💡 <strong>Conseil :</strong> Si l'email n'apparaît pas dans 1 minute, pensez à vérifier votre dossier <strong>Spams ou Courrier indésirable</strong>.
                       </p>
                     </div>
-                    <div className="pt-2">
+                    <div className="pt-2 space-y-2">
                       <Button
                         type="button"
                         variant="outline"
-                        className="w-full cursor-pointer"
+                        className="w-full text-xs font-semibold h-10 cursor-pointer"
+                        disabled={loading || countdown > 0}
+                        onClick={handleResetPassword}
+                      >
+                        {loading ? (
+                          <Loader2 className="mr-2 size-4 animate-spin" />
+                        ) : countdown > 0 ? (
+                          `Renvoyer l'email (${countdown}s)`
+                        ) : (
+                          "Renvoyer le lien par email"
+                        )}
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        className="w-full text-xs text-muted-foreground hover:text-foreground cursor-pointer"
                         onClick={() => {
                           setMode("tabs");
                           setResetSent(false);
+                          setLinkError(null);
                         }}
                       >
-                        Retour à la connexion
+                        ← Retour à la connexion
                       </Button>
                     </div>
                   </div>
@@ -504,17 +670,20 @@ function AuthPage() {
                         <Mail className="size-4 text-muted-foreground absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
                       </div>
                       <p className="text-[11px] text-muted-foreground">
-                        Nous vous enverrons un lien sécurisé pour redéfinir votre mot de passe.
+                        Nous vous enverrons un lien sécurisé pour créer votre nouveau mot de passe.
                       </p>
                     </div>
 
                     <Button type="submit" className="w-full font-bold shadow-xs cursor-pointer h-10" disabled={loading}>
-                      {loading && <Loader2 className="mr-2 size-4 animate-spin" />} Envoyer le lien de réinitialisation
+                      {loading && <Loader2 className="mr-2 size-4 animate-spin" />} Envoyer le lien par email
                     </Button>
 
                     <button
                       type="button"
-                      onClick={() => setMode("tabs")}
+                      onClick={() => {
+                        setMode("tabs");
+                        setLinkError(null);
+                      }}
                       className="w-full text-center text-xs text-muted-foreground hover:text-foreground transition-colors pt-2 cursor-pointer"
                     >
                       ← Retour à la connexion

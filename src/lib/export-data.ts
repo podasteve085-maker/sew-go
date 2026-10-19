@@ -157,7 +157,7 @@ export async function exportCompleteWorkshopJson(businessId: string, businessNam
   const jsonStr = JSON.stringify(exportArchive, null, 2);
   const blob = new Blob([jsonStr], { type: "application/json;charset=utf-8" });
   const dateStr = new Date().toISOString().slice(0, 10);
-  const filename = `couturpro_archive_rgpd_${sanitizeFilename(businessName)}_${dateStr}.json`;
+  const filename = `couturpro_sauvegarde_${sanitizeFilename(businessName)}_${dateStr}.json`;
 
   downloadBlob(blob, filename);
   await logAudit(businessId, "DATA_PORTABILITY_EXPORT_JSON", {

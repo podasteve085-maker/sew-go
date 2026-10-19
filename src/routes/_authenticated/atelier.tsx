@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Loader2, Plus, Trash2, Image as ImageIcon, KeyRound, LogOut, ShieldCheck, Download, AlertTriangle, FileSpreadsheet, ExternalLink } from "lucide-react";
+import { Loader2, Plus, Trash2, Image as ImageIcon, KeyRound, LogOut, ShieldCheck, Download, AlertTriangle, FileSpreadsheet, ExternalLink, Eye, EyeOff, Check } from "lucide-react";
 import { toast } from "sonner";
 import { clearOfflineDatabase } from "@/lib/offline-storage";
 import { exportCompleteWorkshopJson, exportClientsCsv, exportMeasurementsCsv } from "@/lib/export-data";
@@ -515,6 +515,8 @@ function Templates({ businessId }: { businessId: string }) {
 function PasswordChangeSection() {
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirm, setShowConfirm] = useState(false);
   const [saving, setSaving] = useState(false);
 
   async function handleSubmit(e: React.FormEvent) {
@@ -541,10 +543,13 @@ function PasswordChangeSection() {
       return;
     }
 
-    toast.success("Mot de passe modifié avec succès !");
+    toast.success("Votre mot de passe a bien été modifié !");
     setPassword("");
     setConfirm("");
   }
+
+  const isMatching = confirm && password === confirm;
+  const isMismatch = confirm && password !== confirm;
 
   return (
     <section className="card-soft space-y-4 p-5">
@@ -555,32 +560,66 @@ function PasswordChangeSection() {
       <p className="text-xs text-muted-foreground">
         Changez le mot de passe de connexion à votre espace atelier CouturPro.
       </p>
-      <form onSubmit={handleSubmit} className="space-y-3 max-w-md">
+      <form onSubmit={handleSubmit} className="space-y-3.5 max-w-md">
         <div className="space-y-1.5">
           <Label htmlFor="chg-pass">Nouveau mot de passe</Label>
-          <Input
-            id="chg-pass"
-            type="password"
-            minLength={6}
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            placeholder="Minimum 6 caractères"
-            autoComplete="new-password"
-          />
+          <div className="relative">
+            <Input
+              id="chg-pass"
+              type={showPassword ? "text" : "password"}
+              minLength={6}
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder="Minimum 6 caractères"
+              autoComplete="new-password"
+              className="pr-10"
+            />
+            <button
+              type="button"
+              onClick={() => setShowPassword(!showPassword)}
+              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground cursor-pointer"
+              title={showPassword ? "Masquer" : "Afficher"}
+            >
+              {showPassword ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+            </button>
+          </div>
         </div>
+
         <div className="space-y-1.5">
-          <Label htmlFor="chg-confirm">Confirmer le mot de passe</Label>
-          <Input
-            id="chg-confirm"
-            type="password"
-            minLength={6}
-            value={confirm}
-            onChange={(e) => setConfirm(e.target.value)}
-            placeholder="Retapez le mot de passe"
-            autoComplete="new-password"
-          />
+          <Label htmlFor="chg-confirm">Confirmer le nouveau mot de passe</Label>
+          <div className="relative">
+            <Input
+              id="chg-confirm"
+              type={showConfirm ? "text" : "password"}
+              minLength={6}
+              value={confirm}
+              onChange={(e) => setConfirm(e.target.value)}
+              placeholder="Retapez le mot de passe"
+              autoComplete="new-password"
+              className="pr-10"
+            />
+            <button
+              type="button"
+              onClick={() => setShowConfirm(!showConfirm)}
+              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground cursor-pointer"
+              title={showConfirm ? "Masquer" : "Afficher"}
+            >
+              {showConfirm ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+            </button>
+          </div>
+          {isMatching && (
+            <p className="text-[11px] text-emerald-600 font-medium flex items-center gap-1 pt-0.5">
+              <Check className="size-3.5" /> Les deux mots de passe correspondent
+            </p>
+          )}
+          {isMismatch && (
+            <p className="text-[11px] text-destructive font-medium pt-0.5">
+              Les deux mots de passe sont différents
+            </p>
+          )}
         </div>
-        <Button type="submit" disabled={saving || !password}>
+
+        <Button type="submit" disabled={saving || !password || password.length < 6 || password !== confirm}>
           {saving && <Loader2 className="mr-2 size-4 animate-spin" />} Enregistrer le mot de passe
         </Button>
       </form>
@@ -668,9 +707,9 @@ function PrivacyDataProtectionSection({ business }: { business: { id: string; na
     setExportingJson(true);
     try {
       await exportCompleteWorkshopJson(business.id, business.name);
-      toast.success("Archive complète RGPD téléchargée avec succès");
+      toast.success("Sauvegarde complète téléchargée avec succès");
     } catch {
-      toast.error("Échec de l'exportation des données");
+      toast.error("Échec de la sauvegarde des données");
     } finally {
       setExportingJson(false);
     }
@@ -680,9 +719,9 @@ function PrivacyDataProtectionSection({ business }: { business: { id: string; na
     setExportingClients(true);
     try {
       await exportClientsCsv(business.id, business.name);
-      toast.success("Fichier clients CSV téléchargé avec succès");
+      toast.success("Fichier clients téléchargé avec succès");
     } catch {
-      toast.error("Échec de l'exportation des clients");
+      toast.error("Échec du téléchargement des clients");
     } finally {
       setExportingClients(false);
     }
@@ -692,9 +731,9 @@ function PrivacyDataProtectionSection({ business }: { business: { id: string; na
     setExportingMeasures(true);
     try {
       await exportMeasurementsCsv(business.id, business.name);
-      toast.success("Carnet de mesures CSV téléchargé avec succès");
+      toast.success("Carnet de mesures téléchargé avec succès");
     } catch {
-      toast.error("Échec de l'exportation des mesures");
+      toast.error("Échec du téléchargement des mesures");
     } finally {
       setExportingMeasures(false);
     }
@@ -704,10 +743,10 @@ function PrivacyDataProtectionSection({ business }: { business: { id: string; na
     <section className="card-soft space-y-4 p-5">
       <div className="flex items-center gap-2">
         <ShieldCheck className="size-5 text-emerald-600" />
-        <h2 className="font-display text-sm font-bold">Protection des Données Personnelles & Conformité (RGPD)</h2>
+        <h2 className="font-display text-sm font-bold">Sauvegarde & Export des Données</h2>
       </div>
       <p className="text-xs text-muted-foreground leading-relaxed">
-        Conformément aux normes internationales et au RGPD, vous disposez d'un droit d'accès, d'exportation intégrale (portabilité) et de suppression de vos données et de celles de vos clients. Vos informations sont strictement étanches et protégées.
+        Téléchargez une copie de vos données (clients, mesures, commandes) pour les conserver en sécurité sur votre appareil. Vos données d'atelier vous appartiennent entièrement.
       </p>
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-1">
@@ -721,8 +760,8 @@ function PrivacyDataProtectionSection({ business }: { business: { id: string; na
         >
           {exportingJson ? <Loader2 className="mr-2 size-4 animate-spin" /> : <Download className="mr-2 size-4 text-primary shrink-0" />}
           <div className="text-left">
-            <div className="font-bold">Archive Complète</div>
-            <div className="text-[0.65rem] text-muted-foreground">Format JSON (Art. 20 RGPD)</div>
+            <div className="font-bold">Sauvegarde Complète</div>
+            <div className="text-[0.65rem] text-muted-foreground">Toutes les données de l'atelier (JSON)</div>
           </div>
         </Button>
 
@@ -736,8 +775,8 @@ function PrivacyDataProtectionSection({ business }: { business: { id: string; na
         >
           {exportingClients ? <Loader2 className="mr-2 size-4 animate-spin" /> : <FileSpreadsheet className="mr-2 size-4 text-emerald-600 shrink-0" />}
           <div className="text-left">
-            <div className="font-bold">Clients (CSV / Excel)</div>
-            <div className="text-[0.65rem] text-muted-foreground">Contacts et adresses</div>
+            <div className="font-bold">Liste des Clients</div>
+            <div className="text-[0.65rem] text-muted-foreground">Fichier Excel (contacts & adresses)</div>
           </div>
         </Button>
 
@@ -751,8 +790,8 @@ function PrivacyDataProtectionSection({ business }: { business: { id: string; na
         >
           {exportingMeasures ? <Loader2 className="mr-2 size-4 animate-spin" /> : <Download className="mr-2 size-4 text-amber-600 shrink-0" />}
           <div className="text-left">
-            <div className="font-bold">Mesures (CSV / Excel)</div>
-            <div className="text-[0.65rem] text-muted-foreground">Gabarits et relevés</div>
+            <div className="font-bold">Carnet de Mesures</div>
+            <div className="text-[0.65rem] text-muted-foreground">Fichier Excel (gabarits & relevés)</div>
           </div>
         </Button>
       </div>
@@ -835,10 +874,10 @@ function DangerZoneAccountDeletionSection({ business }: { business: { id: string
       <section className="card-soft space-y-3 p-5 border-destructive/30 bg-destructive/5">
         <div className="flex items-center gap-2 text-destructive">
           <AlertTriangle className="size-4.5" />
-          <h2 className="font-display text-sm font-bold">Zone de Danger — Suppression Définitive de l'Atelier</h2>
+          <h2 className="font-display text-sm font-bold">Zone Sensible — Suppression Définitive de l'Atelier</h2>
         </div>
         <p className="text-xs text-muted-foreground leading-relaxed">
-          Droit à l'effacement (Art. 17 RGPD) : Cette action détruira <strong>irrémédiablement</strong> votre atelier, tous vos clients, l'intégralité de leurs mensurations, vos commandes, paiements, photos et transactions. Cette opération est immédiate et irréversible.
+          Attention : Cette action détruira <strong>irrémédiablement</strong> votre atelier, tous vos clients, leurs mensurations, vos commandes, paiements, photos et transactions. Cette opération est immédiate et irréversible.
         </p>
         <Button
           variant="destructive"
