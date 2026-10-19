@@ -241,7 +241,9 @@ $$;
 GRANT EXECUTE ON FUNCTION public.get_public_lookbook_atelier(uuid) TO anon, authenticated;
 
 -- Vue publique sécurisée : restreinte sans données de contact personnelles brutes en masse
-CREATE OR REPLACE VIEW public.atelier_lookbook_public AS
+-- Note : DROP VIEW CASCADE préalable obligatoire en PostgreSQL quand le nombre ou le nom des colonnes change
+DROP VIEW IF EXISTS public.atelier_lookbook_public CASCADE;
+CREATE VIEW public.atelier_lookbook_public AS
   SELECT id, name, city, currency, logo_url
   FROM public.businesses;
 
