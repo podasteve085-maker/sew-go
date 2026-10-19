@@ -62,6 +62,19 @@ function PublicLookbookPage() {
     queryFn: async () => {
       if (!atelierId) return null;
       const columns = "id, name, phone, whatsapp, address, city, currency, logo_url";
+      // 1. Appel via la fonction RPC sécurisée et scopée par identifiant strict
+      try {
+        const { data, error } = await supabase.rpc("get_public_lookbook_atelier", {
+          p_atelier_id: atelierId,
+        });
+        if (!error && Array.isArray(data) && data.length > 0) {
+          return data[0];
+        }
+      } catch {
+        // Repli si la fonction n'est pas encore migrée
+      }
+
+      // 2. Repli sur la vue publique restreinte
       try {
         const viewRes = await supabase
           .from("atelier_lookbook_public")
@@ -70,18 +83,9 @@ function PublicLookbookPage() {
           .maybeSingle();
         if (!viewRes.error && viewRes.data) return viewRes.data;
       } catch {
-        // Vue publique pas encore déployée : repli sur businesses
+        // Vue publique pas encore déployée
       }
-      try {
-        const { data } = await supabase
-          .from("businesses")
-          .select(columns)
-          .eq("id", atelierId)
-          .maybeSingle();
-        return data;
-      } catch {
-        return null;
-      }
+      return null;
     },
     enabled: Boolean(atelierId),
   });

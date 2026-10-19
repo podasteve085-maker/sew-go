@@ -90,6 +90,8 @@ function AuthPage() {
   const [resetSent, setResetSent] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [showSignUpPassword, setShowSignUpPassword] = useState(false);
+  const [failedAttempts, setFailedAttempts] = useState(0);
+  const [lockoutUntil, setLockoutUntil] = useState<number | null>(null);
 
   useEffect(() => {
     // 1. Détection immédiate du jeton de récupération dans le hash de l'URL (#type=recovery)
@@ -109,7 +111,7 @@ function AuthPage() {
           // ignore
         }
       }
-      supabase.auth.signOut({ scope: "local" }).catch(() => {});
+      supabase.auth.signOut({ scope: "global" }).catch(() => {});
       return;
     }
 
@@ -136,9 +138,17 @@ function AuthPage() {
     };
   }, [logout, reconnect]);
 
-  // Connexion
+  // Connexion avec protection anti-brute force
   async function signIn(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
+    if (lockoutUntil && Date.now() < lockoutUntil) {
+      const remainingSec = Math.ceil((lockoutUntil - Date.now()) / 1000);
+      toast.error("Tentatives excessives", {
+        description: `Sécurité anti-brute-force : veuillez patienter ${remainingSec} secondes avant de retenter.`,
+      });
+      return;
+    }
+
     const form = new FormData(e.currentTarget);
     const emailVal = String(form.get("email")).trim();
     const passVal = String(form.get("password"));
@@ -151,6 +161,16 @@ function AuthPage() {
     setLoading(false);
 
     if (error) {
+      const nextFailures = failedAttempts + 1;
+      setFailedAttempts(nextFailures);
+      if (nextFailures >= 5) {
+        setLockoutUntil(Date.now() + 60 * 1000); // 60s cooldown
+        toast.error("Compte temporairement bloqué", {
+          description: "5 tentatives infructueuses consécutives. Veuillez patienter 60 secondes.",
+        });
+        return;
+      }
+
       const lower = error.message.toLowerCase();
       let description = "Email ou mot de passe incorrect.";
       if (lower.includes("invalid login credentials") || lower.includes("invalid credentials")) {
@@ -167,6 +187,8 @@ function AuthPage() {
       return;
     }
 
+    setFailedAttempts(0);
+    setLockoutUntil(null);
     navigate({ to: "/dashboard", replace: true });
   }
 
@@ -176,6 +198,13 @@ function AuthPage() {
     const form = new FormData(e.currentTarget);
     const emailVal = String(form.get("email")).trim();
     const passwordVal = String(form.get("password"));
+
+    if (passwordVal.length < 8 || !/\d/.test(passwordVal) || !/[a-zA-Z]/.test(passwordVal)) {
+      toast.error("Mot de passe insuffisant", {
+        description: "Le mot de passe doit comporter au moins 8 caractères, incluant au moins une lettre et un chiffre.",
+      });
+      return;
+    }
 
     setLoading(true);
     const { data, error } = await supabase.auth.signUp({
@@ -265,8 +294,10 @@ function AuthPage() {
       toast.error("Veuillez saisir un mot de passe.");
       return;
     }
-    if (newPassword.length < 6) {
-      toast.error("Le mot de passe doit contenir au moins 6 caractères.");
+    if (newPassword.length < 8 || !/\d/.test(newPassword) || !/[a-zA-Z]/.test(newPassword)) {
+      toast.error("Mot de passe insuffisant", {
+        description: "Le mot de passe doit comporter au moins 8 caractères, incluant au moins une lettre et un chiffre.",
+      });
       return;
     }
     if (newPassword !== confirmPassword) {

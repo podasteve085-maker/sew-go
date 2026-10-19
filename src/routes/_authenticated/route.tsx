@@ -15,11 +15,11 @@ export const Route = createFileRoute("/_authenticated")({
       // ignore
     }
 
-    // 2. Mode secours hors-ligne (si le token a été purgé mais que l'atelier est actif)
-    if (typeof window !== "undefined") {
+    // 2. Mode secours hors-ligne (strictement si hors-ligne réseau ET utilisateur en cache légitime)
+    if (typeof window !== "undefined" && typeof navigator !== "undefined" && !navigator.onLine) {
       const offlineBiz = localStorage.getItem("couturpro_current_business_id");
-      if (offlineBiz) {
-        const offlineUserId = localStorage.getItem("couturpro_current_user_id") || "offline_user";
+      const offlineUserId = localStorage.getItem("couturpro_current_user_id");
+      if (offlineBiz && offlineUserId) {
         return { user: { id: offlineUserId } };
       }
     }

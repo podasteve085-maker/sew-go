@@ -79,19 +79,8 @@ export function useBusiness() {
 
         const rawData = data as unknown as Record<string, unknown>;
 
-        // Récupérer le plan depuis Supabase ou le cache local
-        let localSub: { plan?: SubscriptionPlan; expires_at?: string | null } | null = null;
-        if (typeof window !== "undefined") {
-          try {
-            const rawSub = localStorage.getItem(`couturpro_sub_${data.id}`);
-            if (rawSub) localSub = JSON.parse(rawSub);
-          } catch {
-            // ignore
-          }
-        }
-
-        const plan = (rawData["plan"] as SubscriptionPlan) || localSub?.plan || "free";
-        const planExpiresAt = (rawData["plan_expires_at"] as string) || localSub?.expires_at || null;
+        const plan = (rawData["plan"] as SubscriptionPlan) || "free";
+        const planExpiresAt = (rawData["plan_expires_at"] as string) || null;
 
         let planStatus: SubscriptionStatus = "active";
         if (rawData["is_admin"]) {

@@ -55,9 +55,13 @@ export async function compressImage(
   file: File,
   options: ImageCompressionOptions = {}
 ): Promise<{ blob: Blob; ext: string; contentType: string }> {
-  if (!file.type.startsWith("image/") || file.type.includes("svg")) {
-    const ext = file.name.split(".").pop()?.toLowerCase() || "bin";
-    return { blob: file, ext, contentType: file.type || "application/octet-stream" };
+  const rawType = (file.type || "").toLowerCase();
+  const ALLOWED_MIME_TYPES = ["image/jpeg", "image/png", "image/webp", "image/avif"];
+  if (!ALLOWED_MIME_TYPES.includes(rawType)) {
+    throw new Error("Type de fichier non autorisé. Seules les images JPG, PNG et WebP sont acceptées.");
+  }
+  if (file.size > 10 * 1024 * 1024) {
+    throw new Error("L'image est trop volumineuse (maximum 10 Mo).");
   }
 
   const { maxWidth = 1200, maxHeight = 1200, quality = 0.8 } = options;
@@ -197,10 +201,15 @@ export async function materializeStoragePaths(
 }
 
 export async function uploadImage(businessId: string, file: File, folder: string): Promise<string> {
+  // Sécurisation stricte contre le path traversal
+  const safeBusinessId = businessId.replace(/[^a-zA-Z0-9_-]/g, "");
+  const allowedFolders = ["atelier", "clients", "orders", "catalog"];
+  const safeFolder = allowedFolders.includes(folder) ? folder : "misc";
+
   // Ajustement précis selon le dossier pour économie d'espace maximale :
   // - "atelier" (logo) ou "clients" (avatar) : format compact 400x400
   // - "orders" ou "catalog" : format haute définition équilibré 1280x1280
-  const isAvatarOrLogo = folder === "atelier" || folder === "clients";
+  const isAvatarOrLogo = safeFolder === "atelier" || safeFolder === "clients";
   const compressionConfig: ImageCompressionOptions = isAvatarOrLogo
     ? { maxWidth: 400, maxHeight: 400, quality: 0.82 }
     : { maxWidth: 1280, maxHeight: 1280, quality: 0.78 };
@@ -213,7 +222,7 @@ export async function uploadImage(businessId: string, file: File, folder: string
     return await blobToDataUrl(blob);
   }
 
-  const path = `${businessId}/${folder}/${uuid()}.${ext}`;
+  const path = `${safeBusinessId}/${safeFolder}/${uuid()}.${ext}`;
 
   try {
     // Cache immutable 1 an : le navigateur ne retélécharge jamais une photo existante (0 egress)
