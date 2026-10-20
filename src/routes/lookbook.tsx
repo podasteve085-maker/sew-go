@@ -11,6 +11,8 @@ import {
   Sparkles,
   Copy,
   Check,
+  Rotate3d,
+  Maximize2,
 } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
@@ -19,6 +21,7 @@ import { CATALOG_CATEGORIES, catalogCategoryLabel, copyTextToClipboard, lookbook
 import { fcfa, cleanPhone, waLink } from "@/lib/format";
 import { Button } from "@/components/ui/button";
 import { StoredImage } from "@/components/bits";
+import { CatalogLightbox } from "@/components/catalog-lightbox";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 
 export const Route = createFileRoute("/lookbook")({
@@ -53,6 +56,7 @@ function PublicLookbookPage() {
   const [selectedCategory, setSelectedCategory] = useState<string>("all");
   const [activeModel, setActiveModel] = useState<CatalogModelRow | null>(null);
   const [currentPhotoIndex, setCurrentPhotoIndex] = useState(0);
+  const [lightboxOpen, setLightboxOpen] = useState(false);
   const [copied, setCopied] = useState(false);
   const [touchStartX, setTouchStartX] = useState<number | null>(null);
   const openedSharedModel = useRef(false);
@@ -460,19 +464,21 @@ function PublicLookbookPage() {
       {/* Modal Plein Écran pour visualiser les photos du modèle */}
       {activeModel && (
         <Dialog open={Boolean(activeModel)} onOpenChange={() => setActiveModel(null)}>
-          <DialogContent className="max-h-[95vh] max-w-2xl overflow-hidden p-0 bg-card border-border [&>button]:hidden">
+          <DialogContent className="max-h-[96vh] max-w-3xl overflow-y-auto p-0 bg-card border-border rounded-2xl [&>button]:hidden">
             <div className="relative flex flex-col">
-              {/* Grand affichage photo avec swipe mobile */}
+              {/* Grand affichage photo avec aperçu agrandi, gestes tactiles et ouverture plein écran */}
               <div
                 onTouchStart={handleTouchStart}
                 onTouchEnd={handleTouchEnd}
-                className="relative aspect-4/3 sm:aspect-16/10 w-full bg-black/95 flex items-center justify-center overflow-hidden select-none"
+                onClick={() => setLightboxOpen(true)}
+                className="relative h-[48vh] sm:h-[58vh] min-h-[360px] max-h-[580px] w-full bg-neutral-950 flex items-center justify-center overflow-hidden select-none cursor-zoom-in group"
+                title="Cliquer pour afficher en plein écran et zoomer"
               >
                 {activeModel.photo_paths && activeModel.photo_paths.length > 0 ? (
                   <StoredImage
                     path={activeModel.photo_paths[currentPhotoIndex] || activeModel.photo_paths[0]}
                     alt={activeModel.name}
-                    className="size-full object-contain transition-all duration-300"
+                    className="size-full object-contain transition-all duration-300 group-hover:scale-[1.01]"
                   />
                 ) : (
                   <div className="flex flex-col items-center justify-center gap-2 text-white/60">
@@ -483,74 +489,107 @@ function PublicLookbookPage() {
 
                 {/* Badge compteur de photos (haut-gauche) */}
                 {activeModel.photo_paths && activeModel.photo_paths.length > 0 && (
-                  <span className="absolute top-3 left-3 rounded-full bg-black/75 backdrop-blur-md px-2.5 py-1 text-[0.7rem] font-bold text-white shadow-xs">
+                  <span className="absolute top-3 left-3 rounded-full bg-black/75 backdrop-blur-md px-2.5 py-1 text-[0.7rem] font-bold text-white shadow-xs z-10">
                     📸 {currentPhotoIndex + 1} / {activeModel.photo_paths.length}
                   </span>
                 )}
 
+                {/* Boutons d'actions haut-droite : Plein écran, 360 & Fermer */}
+                <div
+                  className="absolute top-3 right-3 flex items-center gap-1.5 z-10"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <button
+                    type="button"
+                    onClick={() => setLightboxOpen(true)}
+                    className="flex items-center gap-1 rounded-full bg-black/75 backdrop-blur-md px-2.5 py-1 text-[0.7rem] font-bold text-white hover:bg-black active:scale-95 transition-all shadow-md"
+                    title="Agrandir en plein écran"
+                  >
+                    <Maximize2 className="size-3.5 text-primary" />
+                    <span className="hidden sm:inline">Plein écran</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setLightboxOpen(true)}
+                    className="flex items-center gap-1 rounded-full bg-black/75 backdrop-blur-md px-2.5 py-1 text-[0.7rem] font-bold text-white hover:bg-black active:scale-95 transition-all shadow-md"
+                    title="Vue 360°"
+                  >
+                    <Rotate3d className="size-3.5 text-primary" />
+                    <span className="hidden sm:inline">Vue 360°</span>
+                  </button>
+                  <button
+                    type="button"
+                    aria-label="Fermer"
+                    onClick={() => setActiveModel(null)}
+                    className="flex size-8 items-center justify-center rounded-full bg-black/75 text-white hover:bg-black active:scale-95 shadow-md"
+                  >
+                    <X className="size-4" />
+                  </button>
+                </div>
+
+                {/* Navigation entre photos (flèches latérales) */}
                 {activeModel.photo_paths && activeModel.photo_paths.length > 1 && (
                   <>
                     <button
                       type="button"
                       aria-label="Photo précédente"
-                      onClick={() =>
+                      onClick={(e) => {
+                        e.stopPropagation();
                         setCurrentPhotoIndex((prev) =>
                           prev === 0 ? activeModel.photo_paths.length - 1 : prev - 1,
-                        )
-                      }
-                      className="absolute left-2.5 top-1/2 -translate-y-1/2 flex size-10 items-center justify-center rounded-full bg-black/60 text-white hover:bg-black/80 active:scale-95 transition-all shadow-md"
+                        );
+                      }}
+                      className="absolute left-2.5 top-1/2 -translate-y-1/2 flex size-10 items-center justify-center rounded-full bg-black/60 text-white hover:bg-black/80 active:scale-95 transition-all shadow-md z-10"
                     >
                       <ChevronLeft className="size-6" />
                     </button>
                     <button
                       type="button"
                       aria-label="Photo suivante"
-                      onClick={() =>
+                      onClick={(e) => {
+                        e.stopPropagation();
                         setCurrentPhotoIndex((prev) =>
                           prev === activeModel.photo_paths.length - 1 ? 0 : prev + 1,
-                        )
-                      }
-                      className="absolute right-2.5 top-1/2 -translate-y-1/2 flex size-10 items-center justify-center rounded-full bg-black/60 text-white hover:bg-black/80 active:scale-95 transition-all shadow-md"
+                        );
+                      }}
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 flex size-10 items-center justify-center rounded-full bg-black/60 text-white hover:bg-black/80 active:scale-95 transition-all shadow-md z-10"
                     >
                       <ChevronRight className="size-6" />
                     </button>
-
-                    {/* Bande de miniatures interactive */}
-                    <div className="absolute bottom-2 inset-x-2 flex items-center justify-center gap-1.5 overflow-x-auto py-1 px-2 scrollbar-none z-10">
-                      {activeModel.photo_paths.map((p, i) => (
-                        <button
-                          key={i}
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setCurrentPhotoIndex(i);
-                          }}
-                          className={`relative size-10 sm:size-12 shrink-0 overflow-hidden rounded-lg border-2 transition-all shadow-xs ${
-                            i === currentPhotoIndex
-                              ? "border-primary ring-2 ring-primary/60 scale-105"
-                              : "border-white/40 opacity-70 hover:opacity-100"
-                          }`}
-                        >
-                          <StoredImage
-                            path={p}
-                            alt={`Miniature ${i + 1}`}
-                            className="size-full object-cover"
-                          />
-                        </button>
-                      ))}
-                    </div>
                   </>
                 )}
 
-                <button
-                  type="button"
-                  aria-label="Fermer"
-                  onClick={() => setActiveModel(null)}
-                  className="absolute top-3 right-3 flex size-8 items-center justify-center rounded-full bg-black/70 text-white hover:bg-black active:scale-95 shadow-md"
-                >
-                  <X className="size-4" />
-                </button>
+                {/* Indication visuelle d'agrandissement en bas de l'image */}
+                <div className="absolute bottom-2 inset-x-0 flex justify-center pointer-events-none z-10">
+                  <span className="rounded-full bg-black/70 backdrop-blur-xs px-3 py-0.5 text-[10px] font-medium text-white/90 shadow-xs flex items-center gap-1.5">
+                    <Maximize2 className="size-2.5 text-primary" /> Toucher l'image pour agrandir & zoomer
+                  </span>
+                </div>
               </div>
+
+              {/* Bande de miniatures séparée EN DESSOUS (ne masque plus le bas du vêtement) */}
+              {activeModel.photo_paths && activeModel.photo_paths.length > 1 && (
+                <div className="flex items-center gap-2 overflow-x-auto p-2.5 bg-neutral-900 border-b border-border/40 scrollbar-none">
+                  {activeModel.photo_paths.map((p, i) => (
+                    <button
+                      key={i}
+                      type="button"
+                      onClick={() => setCurrentPhotoIndex(i)}
+                      className={`relative size-12 sm:size-14 shrink-0 overflow-hidden rounded-xl border-2 transition-all shadow-xs ${
+                        i === currentPhotoIndex
+                          ? "border-primary ring-2 ring-primary/60 scale-105"
+                          : "border-white/30 opacity-70 hover:opacity-100"
+                      }`}
+                    >
+                      <StoredImage
+                        path={p}
+                        alt={`Miniature ${i + 1}`}
+                        className="size-full object-cover"
+                      />
+                    </button>
+                  ))}
+                </div>
+              )}
 
               {/* Détails du modèle */}
               <div className="p-4 sm:p-5 space-y-3">
@@ -599,6 +638,23 @@ function PublicLookbookPage() {
             </div>
           </DialogContent>
         </Dialog>
+      )}
+
+      {/* Visionneuse Plein Écran immersive avec Zoom, Pan, Swipe et Mode 360° */}
+      {activeModel && (
+        <CatalogLightbox
+          open={lightboxOpen}
+          onClose={() => setLightboxOpen(false)}
+          photos={activeModel.photo_paths || []}
+          initialIndex={currentPhotoIndex}
+          modelName={activeModel.name}
+          categoryLabel={catalogCategoryLabel(activeModel.category)}
+          priceFormatted={
+            activeModel.default_price
+              ? fcfa(activeModel.default_price, atelierQuery.data?.currency)
+              : null
+          }
+        />
       )}
     </div>
   );

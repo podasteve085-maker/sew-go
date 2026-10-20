@@ -22,12 +22,15 @@ import {
   Grid3X3,
   ArrowUpDown,
   Image as ImageIcon,
+  Rotate3d,
+  Maximize2,
 } from "lucide-react";
 import { toast } from "sonner";
 
 import { useBusiness } from "@/hooks/use-business";
 import { checkCatalogPhotosQuota } from "@/lib/quotas";
 import { UpgradeDialog } from "@/components/upgrade-dialog";
+import { CatalogLightbox } from "@/components/catalog-lightbox";
 import {
   fetchCatalogModels,
   deleteCatalogModel,
@@ -90,6 +93,7 @@ function CataloguePage() {
   // Mode Présentation Plein Écran pour le client
   const [presentationModel, setPresentationModel] = useState<CatalogModelRow | null>(null);
   const [currentPhotoIndex, setCurrentPhotoIndex] = useState(0);
+  const [lightboxOpen, setLightboxOpen] = useState(false);
 
   const modelsQuery = useQuery({
     queryKey: ["catalog-models", business?.id],
@@ -695,19 +699,21 @@ function CataloguePage() {
       {/* Mode Présentation Plein Écran pour le client */}
       {presentationModel && (
         <Dialog open={Boolean(presentationModel)} onOpenChange={() => setPresentationModel(null)}>
-          <DialogContent className="max-h-[95vh] max-w-2xl overflow-hidden p-0 bg-card border-border [&>button]:hidden">
+          <DialogContent className="max-h-[96vh] max-w-3xl overflow-y-auto p-0 bg-card border-border rounded-2xl [&>button]:hidden">
             <div className="relative flex flex-col">
-              {/* Grand affichage photo avec gestes tactiles (swipe mobile) */}
+              {/* Grand affichage photo avec aperçu agrandi, gestes tactiles et ouverture plein écran */}
               <div
                 onTouchStart={handleTouchStart}
                 onTouchEnd={handleTouchEnd}
-                className="relative aspect-4/3 sm:aspect-16/10 w-full bg-black/95 flex items-center justify-center overflow-hidden select-none"
+                onClick={() => setLightboxOpen(true)}
+                className="relative h-[48vh] sm:h-[58vh] min-h-[360px] max-h-[580px] w-full bg-neutral-950 flex items-center justify-center overflow-hidden select-none cursor-zoom-in group"
+                title="Cliquer pour afficher en plein écran et zoomer"
               >
                 {presentationModel.photo_paths && presentationModel.photo_paths.length > 0 ? (
                   <StoredImage
                     path={presentationModel.photo_paths[currentPhotoIndex] || presentationModel.photo_paths[0]}
                     alt={presentationModel.name}
-                    className="size-full object-contain transition-all duration-300"
+                    className="size-full object-contain transition-all duration-300 group-hover:scale-[1.01]"
                   />
                 ) : (
                   <div className="flex flex-col items-center justify-center gap-2 text-white/60">
@@ -718,76 +724,107 @@ function CataloguePage() {
 
                 {/* Badge compteur de photos (haut-gauche) */}
                 {presentationModel.photo_paths && presentationModel.photo_paths.length > 0 && (
-                  <span className="absolute top-3 left-3 rounded-full bg-black/75 backdrop-blur-md px-2.5 py-1 text-[0.7rem] font-bold text-white shadow-xs">
+                  <span className="absolute top-3 left-3 rounded-full bg-black/75 backdrop-blur-md px-2.5 py-1 text-[0.7rem] font-bold text-white shadow-xs z-10">
                     📸 {currentPhotoIndex + 1} / {presentationModel.photo_paths.length}
                   </span>
                 )}
 
-                {/* Navigation entre photos */}
+                {/* Boutons d'actions haut-droite : Plein écran, 360 & Fermer */}
+                <div
+                  className="absolute top-3 right-3 flex items-center gap-1.5 z-10"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <button
+                    type="button"
+                    onClick={() => setLightboxOpen(true)}
+                    className="flex items-center gap-1 rounded-full bg-black/75 backdrop-blur-md px-2.5 py-1 text-[0.7rem] font-bold text-white hover:bg-black active:scale-95 transition-all shadow-md"
+                    title="Agrandir en plein écran"
+                  >
+                    <Maximize2 className="size-3.5 text-primary" />
+                    <span className="hidden sm:inline">Plein écran</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setLightboxOpen(true)}
+                    className="flex items-center gap-1 rounded-full bg-black/75 backdrop-blur-md px-2.5 py-1 text-[0.7rem] font-bold text-white hover:bg-black active:scale-95 transition-all shadow-md"
+                    title="Vue 360°"
+                  >
+                    <Rotate3d className="size-3.5 text-primary" />
+                    <span className="hidden sm:inline">Vue 360°</span>
+                  </button>
+                  <button
+                    type="button"
+                    aria-label="Fermer"
+                    onClick={() => setPresentationModel(null)}
+                    className="flex size-8 items-center justify-center rounded-full bg-black/75 text-white hover:bg-black active:scale-95 shadow-md"
+                  >
+                    <X className="size-4" />
+                  </button>
+                </div>
+
+                {/* Navigation entre photos (flèches latérales) */}
                 {presentationModel.photo_paths && presentationModel.photo_paths.length > 1 && (
                   <>
                     <button
                       type="button"
                       aria-label="Photo précédente"
-                      onClick={() =>
+                      onClick={(e) => {
+                        e.stopPropagation();
                         setCurrentPhotoIndex((prev) =>
                           prev === 0 ? presentationModel.photo_paths.length - 1 : prev - 1,
-                        )
-                      }
-                      className="absolute left-2.5 top-1/2 -translate-y-1/2 flex size-10 items-center justify-center rounded-full bg-black/60 text-white hover:bg-black/80 active:scale-95 transition-all shadow-md"
+                        );
+                      }}
+                      className="absolute left-2.5 top-1/2 -translate-y-1/2 flex size-10 items-center justify-center rounded-full bg-black/60 text-white hover:bg-black/80 active:scale-95 transition-all shadow-md z-10"
                     >
                       <ChevronLeft className="size-6" />
                     </button>
                     <button
                       type="button"
                       aria-label="Photo suivante"
-                      onClick={() =>
+                      onClick={(e) => {
+                        e.stopPropagation();
                         setCurrentPhotoIndex((prev) =>
                           prev === presentationModel.photo_paths.length - 1 ? 0 : prev + 1,
-                        )
-                      }
-                      className="absolute right-2.5 top-1/2 -translate-y-1/2 flex size-10 items-center justify-center rounded-full bg-black/60 text-white hover:bg-black/80 active:scale-95 transition-all shadow-md"
+                        );
+                      }}
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 flex size-10 items-center justify-center rounded-full bg-black/60 text-white hover:bg-black/80 active:scale-95 transition-all shadow-md z-10"
                     >
                       <ChevronRight className="size-6" />
                     </button>
-
-                    {/* Bande de miniatures interactive */}
-                    <div className="absolute bottom-2 inset-x-2 flex items-center justify-center gap-1.5 overflow-x-auto py-1 px-2 scrollbar-none z-10">
-                      {presentationModel.photo_paths.map((p, i) => (
-                        <button
-                          key={i}
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setCurrentPhotoIndex(i);
-                          }}
-                          className={`relative size-10 sm:size-12 shrink-0 overflow-hidden rounded-lg border-2 transition-all shadow-xs ${
-                            i === currentPhotoIndex
-                              ? "border-primary ring-2 ring-primary/60 scale-105"
-                              : "border-white/40 opacity-70 hover:opacity-100"
-                          }`}
-                        >
-                          <StoredImage
-                            path={p}
-                            alt={`Miniature ${i + 1}`}
-                            className="size-full object-cover"
-                          />
-                        </button>
-                      ))}
-                    </div>
                   </>
                 )}
 
-                {/* Bouton fermer */}
-                <button
-                  type="button"
-                  aria-label="Fermer"
-                  onClick={() => setPresentationModel(null)}
-                  className="absolute top-3 right-3 flex size-8 items-center justify-center rounded-full bg-black/75 text-white hover:bg-black active:scale-95 shadow-md"
-                >
-                  <X className="size-4" />
-                </button>
+                {/* Indication visuelle d'agrandissement en bas de l'image */}
+                <div className="absolute bottom-2 inset-x-0 flex justify-center pointer-events-none z-10">
+                  <span className="rounded-full bg-black/70 backdrop-blur-xs px-3 py-0.5 text-[10px] font-medium text-white/90 shadow-xs flex items-center gap-1.5">
+                    <Maximize2 className="size-2.5 text-primary" /> Toucher l'image pour agrandir & zoomer
+                  </span>
+                </div>
               </div>
+
+              {/* Bande de miniatures séparée EN DESSOUS (ne masque plus le bas du vêtement) */}
+              {presentationModel.photo_paths && presentationModel.photo_paths.length > 1 && (
+                <div className="flex items-center gap-2 overflow-x-auto p-2.5 bg-neutral-900 border-b border-border/40 scrollbar-none">
+                  {presentationModel.photo_paths.map((p, i) => (
+                    <button
+                      key={i}
+                      type="button"
+                      onClick={() => setCurrentPhotoIndex(i)}
+                      className={`relative size-12 sm:size-14 shrink-0 overflow-hidden rounded-xl border-2 transition-all shadow-xs ${
+                        i === currentPhotoIndex
+                          ? "border-primary ring-2 ring-primary/60 scale-105"
+                          : "border-white/30 opacity-70 hover:opacity-100"
+                      }`}
+                    >
+                      <StoredImage
+                        path={p}
+                        alt={`Miniature ${i + 1}`}
+                        className="size-full object-cover"
+                      />
+                    </button>
+                  ))}
+                </div>
+              )}
 
               {/* Détails du modèle */}
               <div className="p-4 sm:p-5 space-y-3">
@@ -874,6 +911,23 @@ function CataloguePage() {
             </div>
           </DialogContent>
         </Dialog>
+      )}
+
+      {/* Visionneuse Plein Écran immersive avec Zoom, Pan, Swipe et Mode 360° */}
+      {presentationModel && (
+        <CatalogLightbox
+          open={lightboxOpen}
+          onClose={() => setLightboxOpen(false)}
+          photos={presentationModel.photo_paths || []}
+          initialIndex={currentPhotoIndex}
+          modelName={presentationModel.name}
+          categoryLabel={catalogCategoryLabel(presentationModel.category)}
+          priceFormatted={
+            presentationModel.default_price
+              ? fcfa(presentationModel.default_price, business?.currency)
+              : null
+          }
+        />
       )}
 
       {/* Boîte de dialogue de confirmation de suppression */}
