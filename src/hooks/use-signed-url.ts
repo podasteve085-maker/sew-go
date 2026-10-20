@@ -253,13 +253,13 @@ export async function uploadImage(businessId: string, file: File, folder: string
   // Profils de compression adaptatifs haute efficacité :
   // - "atelier" (logo) ou "clients" (avatar) : format compact 400x400 (15-30 Ko)
   // - "orders" (croquis, tissus, confections) : 1400x1400, qualité 0.80 (50-80 Ko)
-  // - "catalog" (photos modèles lookbook) : 1600x1600, qualité 0.82 (70-120 Ko, rendu cristallin des broderies et wax)
+  // - "catalog" (photos modèles lookbook) : 2048x2048, qualité 0.86 (rendu ultra-net et cristallin des wax, broderies et coutures fines, ~100-180 Ko)
   const isAvatarOrLogo = safeFolder === "atelier" || safeFolder === "clients";
   const isCatalog = safeFolder === "catalog";
   const compressionConfig: ImageCompressionOptions = isAvatarOrLogo
     ? { maxWidth: 400, maxHeight: 400, quality: 0.82 }
     : isCatalog
-      ? { maxWidth: 1600, maxHeight: 1600, quality: 0.82 }
+      ? { maxWidth: 2048, maxHeight: 2048, quality: 0.86 }
       : { maxWidth: 1400, maxHeight: 1400, quality: 0.80 };
 
   const { blob, ext, contentType } = await compressImage(file, compressionConfig);

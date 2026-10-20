@@ -49,7 +49,6 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { StoredImage, EmptyState } from "@/components/bits";
 import { CatalogModelDialog } from "@/components/catalog-model-dialog";
-import { Dialog, DialogContent } from "@/components/ui/dialog";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -88,12 +87,11 @@ function CataloguePage() {
   const [upgradeOpen, setUpgradeOpen] = useState(false);
   const [layoutMode, setLayoutMode] = useState<"grid" | "compact">("grid");
   const [sortBy, setSortBy] = useState<"newest" | "name" | "price_asc" | "price_desc">("newest");
-  const [touchStartX, setTouchStartX] = useState<number | null>(null);
 
-  // Mode Présentation Plein Écran pour le client
-  const [presentationModel, setPresentationModel] = useState<CatalogModelRow | null>(null);
-  const [currentPhotoIndex, setCurrentPhotoIndex] = useState(0);
+  // Visionneuse Plein Écran immersive
   const [lightboxOpen, setLightboxOpen] = useState(false);
+  const [lightboxModelIndex, setLightboxModelIndex] = useState(0);
+  const [lightboxPhotoIndex, setLightboxPhotoIndex] = useState(0);
 
   const modelsQuery = useQuery({
     queryKey: ["catalog-models", business?.id],
@@ -151,29 +149,7 @@ function CataloguePage() {
     return counts;
   }, [allModels]);
 
-  // Handlers pour le swipe tactile sur smartphone dans la visionneuse
-  function handleTouchStart(e: React.TouchEvent) {
-    setTouchStartX(e.touches[0]?.clientX ?? null);
-  }
 
-  function handleTouchEnd(e: React.TouchEvent) {
-    if (touchStartX === null || !presentationModel || !presentationModel.photo_paths || presentationModel.photo_paths.length <= 1) {
-      setTouchStartX(null);
-      return;
-    }
-    const touchEndX = e.changedTouches[0]?.clientX ?? 0;
-    const diff = touchEndX - touchStartX;
-    const SWIPE_THRESHOLD = 45;
-
-    if (diff > SWIPE_THRESHOLD) {
-      // Glissement droite -> photo précédente
-      setCurrentPhotoIndex((prev) => (prev === 0 ? presentationModel.photo_paths.length - 1 : prev - 1));
-    } else if (diff < -SWIPE_THRESHOLD) {
-      // Glissement gauche -> photo suivante
-      setCurrentPhotoIndex((prev) => (prev === presentationModel.photo_paths.length - 1 ? 0 : prev + 1));
-    }
-    setTouchStartX(null);
-  }
 
   const deleteMutation = useMutation({
     mutationFn: (id: string) => deleteCatalogModel(id),
@@ -200,9 +176,11 @@ function CataloguePage() {
     setDialogOpen(true);
   }
 
-  function openPresentation(model: CatalogModelRow) {
-    setPresentationModel(model);
-    setCurrentPhotoIndex(0);
+  function openPresentation(model: CatalogModelRow, photoIdx = 0) {
+    const idx = sortedAndFilteredModels.findIndex((m) => m.id === model.id);
+    setLightboxModelIndex(idx >= 0 ? idx : 0);
+    setLightboxPhotoIndex(photoIdx);
+    setLightboxOpen(true);
   }
 
   function catalogPublicUrl(modelId?: string) {
@@ -690,245 +668,22 @@ function CataloguePage() {
         model={editingModel}
         onSaved={(saved) => {
           setEditingModel(saved);
-          if (presentationModel?.id === saved.id) {
-            setPresentationModel(saved);
-          }
         }}
       />
 
-      {/* Mode Présentation Plein Écran pour le client */}
-      {presentationModel && (
-        <Dialog open={Boolean(presentationModel)} onOpenChange={() => setPresentationModel(null)}>
-          <DialogContent className="max-h-[96vh] max-w-3xl overflow-y-auto p-0 bg-card border-border rounded-2xl [&>button]:hidden">
-            <div className="relative flex flex-col">
-              {/* Grand affichage photo avec aperçu agrandi, gestes tactiles et ouverture plein écran */}
-              <div
-                onTouchStart={handleTouchStart}
-                onTouchEnd={handleTouchEnd}
-                onClick={() => setLightboxOpen(true)}
-                className="relative h-[48vh] sm:h-[58vh] min-h-[360px] max-h-[580px] w-full bg-neutral-950 flex items-center justify-center overflow-hidden select-none cursor-zoom-in group"
-                title="Cliquer pour afficher en plein écran et zoomer"
-              >
-                {presentationModel.photo_paths && presentationModel.photo_paths.length > 0 ? (
-                  <StoredImage
-                    path={presentationModel.photo_paths[currentPhotoIndex] || presentationModel.photo_paths[0]}
-                    alt={presentationModel.name}
-                    className="size-full object-contain transition-all duration-300 group-hover:scale-[1.01]"
-                  />
-                ) : (
-                  <div className="flex flex-col items-center justify-center gap-2 text-white/60">
-                    <Scissors className="size-16" />
-                    <p className="text-sm">Pas de photo disponible</p>
-                  </div>
-                )}
-
-                {/* Badge compteur de photos (haut-gauche) */}
-                {presentationModel.photo_paths && presentationModel.photo_paths.length > 0 && (
-                  <span className="absolute top-3 left-3 rounded-full bg-black/75 backdrop-blur-md px-2.5 py-1 text-[0.7rem] font-bold text-white shadow-xs z-10">
-                    📸 {currentPhotoIndex + 1} / {presentationModel.photo_paths.length}
-                  </span>
-                )}
-
-                {/* Boutons d'actions haut-droite : Plein écran, 360 & Fermer */}
-                <div
-                  className="absolute top-3 right-3 flex items-center gap-1.5 z-10"
-                  onClick={(e) => e.stopPropagation()}
-                >
-                  <button
-                    type="button"
-                    onClick={() => setLightboxOpen(true)}
-                    className="flex items-center gap-1 rounded-full bg-black/75 backdrop-blur-md px-2.5 py-1 text-[0.7rem] font-bold text-white hover:bg-black active:scale-95 transition-all shadow-md"
-                    title="Agrandir en plein écran"
-                  >
-                    <Maximize2 className="size-3.5 text-primary" />
-                    <span className="hidden sm:inline">Plein écran</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setLightboxOpen(true)}
-                    className="flex items-center gap-1 rounded-full bg-black/75 backdrop-blur-md px-2.5 py-1 text-[0.7rem] font-bold text-white hover:bg-black active:scale-95 transition-all shadow-md"
-                    title="Vue 360°"
-                  >
-                    <Rotate3d className="size-3.5 text-primary" />
-                    <span className="hidden sm:inline">Vue 360°</span>
-                  </button>
-                  <button
-                    type="button"
-                    aria-label="Fermer"
-                    onClick={() => setPresentationModel(null)}
-                    className="flex size-8 items-center justify-center rounded-full bg-black/75 text-white hover:bg-black active:scale-95 shadow-md"
-                  >
-                    <X className="size-4" />
-                  </button>
-                </div>
-
-                {/* Navigation entre photos (flèches latérales) */}
-                {presentationModel.photo_paths && presentationModel.photo_paths.length > 1 && (
-                  <>
-                    <button
-                      type="button"
-                      aria-label="Photo précédente"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setCurrentPhotoIndex((prev) =>
-                          prev === 0 ? presentationModel.photo_paths.length - 1 : prev - 1,
-                        );
-                      }}
-                      className="absolute left-2.5 top-1/2 -translate-y-1/2 flex size-10 items-center justify-center rounded-full bg-black/60 text-white hover:bg-black/80 active:scale-95 transition-all shadow-md z-10"
-                    >
-                      <ChevronLeft className="size-6" />
-                    </button>
-                    <button
-                      type="button"
-                      aria-label="Photo suivante"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setCurrentPhotoIndex((prev) =>
-                          prev === presentationModel.photo_paths.length - 1 ? 0 : prev + 1,
-                        );
-                      }}
-                      className="absolute right-2.5 top-1/2 -translate-y-1/2 flex size-10 items-center justify-center rounded-full bg-black/60 text-white hover:bg-black/80 active:scale-95 transition-all shadow-md z-10"
-                    >
-                      <ChevronRight className="size-6" />
-                    </button>
-                  </>
-                )}
-
-                {/* Indication visuelle d'agrandissement en bas de l'image */}
-                <div className="absolute bottom-2 inset-x-0 flex justify-center pointer-events-none z-10">
-                  <span className="rounded-full bg-black/70 backdrop-blur-xs px-3 py-0.5 text-[10px] font-medium text-white/90 shadow-xs flex items-center gap-1.5">
-                    <Maximize2 className="size-2.5 text-primary" /> Toucher l'image pour agrandir & zoomer
-                  </span>
-                </div>
-              </div>
-
-              {/* Bande de miniatures séparée EN DESSOUS (ne masque plus le bas du vêtement) */}
-              {presentationModel.photo_paths && presentationModel.photo_paths.length > 1 && (
-                <div className="flex items-center gap-2 overflow-x-auto p-2.5 bg-neutral-900 border-b border-border/40 scrollbar-none">
-                  {presentationModel.photo_paths.map((p, i) => (
-                    <button
-                      key={i}
-                      type="button"
-                      onClick={() => setCurrentPhotoIndex(i)}
-                      className={`relative size-12 sm:size-14 shrink-0 overflow-hidden rounded-xl border-2 transition-all shadow-xs ${
-                        i === currentPhotoIndex
-                          ? "border-primary ring-2 ring-primary/60 scale-105"
-                          : "border-white/30 opacity-70 hover:opacity-100"
-                      }`}
-                    >
-                      <StoredImage
-                        path={p}
-                        alt={`Miniature ${i + 1}`}
-                        className="size-full object-cover"
-                      />
-                    </button>
-                  ))}
-                </div>
-              )}
-
-              {/* Détails du modèle */}
-              <div className="p-4 sm:p-5 space-y-3">
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <span className="inline-block rounded-full bg-primary/10 px-2.5 py-0.5 text-xs font-bold text-primary">
-                      {catalogCategoryLabel(presentationModel.category)}
-                    </span>
-                    <h2 className="mt-1 font-display text-lg sm:text-xl font-bold text-foreground">
-                      {presentationModel.name}
-                    </h2>
-                  </div>
-                  {presentationModel.default_price && (
-                    <div className="text-right">
-                      <p className="text-[0.65rem] uppercase font-bold text-muted-foreground">
-                        Prix indicatif
-                      </p>
-                      <p className="font-display text-lg sm:text-xl font-bold text-primary">
-                        {fcfa(presentationModel.default_price, business?.currency)}
-                      </p>
-                    </div>
-                  )}
-                </div>
-
-                {presentationModel.fabric_needed && (
-                  <p className="text-xs sm:text-sm font-medium text-muted-foreground flex items-center gap-1.5">
-                    <span>🧵 Tissu recommandé :</span>
-                    <span className="font-bold text-foreground">
-                      {presentationModel.fabric_needed}
-                    </span>
-                  </p>
-                )}
-
-                {presentationModel.description && (
-                  <p className="text-xs sm:text-sm text-muted-foreground whitespace-pre-line leading-relaxed">
-                    {presentationModel.description}
-                  </p>
-                )}
-
-                <div className="grid grid-cols-2 gap-2 pt-2 border-t border-border">
-                  <Button
-                    size="lg"
-                    onClick={() => {
-                      setPresentationModel(null);
-                      handleOrderFromModel(presentationModel);
-                    }}
-                    className="col-span-2 font-bold h-11 rounded-xl shadow-xs"
-                  >
-                    <Scissors className="mr-2 size-4" /> Commander ce modèle
-                  </Button>
-                  <Button
-                    size="lg"
-                    onClick={() => void handleShareWhatsApp(presentationModel)}
-                    className="col-span-2 h-11 font-bold rounded-xl bg-success text-success-foreground hover:bg-success/90 shadow-xs"
-                  >
-                    <Share2 className="mr-1.5 size-4" /> Envoyer au client
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="lg"
-                    onClick={() => {
-                      const m = presentationModel;
-                      setPresentationModel(null);
-                      handleEdit(m);
-                    }}
-                    className="h-11 rounded-xl font-semibold"
-                  >
-                    <Edit className="mr-1.5 size-4" /> Modifier
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="lg"
-                    onClick={() => {
-                      const m = presentationModel;
-                      setPresentationModel(null);
-                      setModelToDelete(m);
-                    }}
-                    className="h-11 rounded-xl font-semibold border-destructive/40 text-destructive hover:bg-destructive/10"
-                  >
-                    <Trash2 className="mr-1.5 size-4" /> Supprimer
-                  </Button>
-                </div>
-              </div>
-            </div>
-          </DialogContent>
-        </Dialog>
-      )}
-
-      {/* Visionneuse Plein Écran immersive avec Zoom, Pan, Swipe et Mode 360° */}
-      {presentationModel && (
-        <CatalogLightbox
-          open={lightboxOpen}
-          onClose={() => setLightboxOpen(false)}
-          photos={presentationModel.photo_paths || []}
-          initialIndex={currentPhotoIndex}
-          modelName={presentationModel.name}
-          categoryLabel={catalogCategoryLabel(presentationModel.category)}
-          priceFormatted={
-            presentationModel.default_price
-              ? fcfa(presentationModel.default_price, business?.currency)
-              : null
-          }
-        />
-      )}
+      {/* Visionneuse Plein Écran immersive de la taille du téléphone avec slalom entre modèles et rotation 360° */}
+      <CatalogLightbox
+        open={lightboxOpen}
+        onClose={() => setLightboxOpen(false)}
+        models={sortedAndFilteredModels}
+        initialModelIndex={lightboxModelIndex}
+        initialPhotoIndex={lightboxPhotoIndex}
+        categoryLabel={(cat) => catalogCategoryLabel(cat)}
+        formatPrice={(price) => fcfa(price, business?.currency)}
+        onOrder={(m) => handleOrderFromModel(m as CatalogModelRow)}
+        onShare={(m) => void handleShareWhatsApp(m as CatalogModelRow)}
+        onEdit={(m) => handleEdit(m as CatalogModelRow)}
+      />
 
       {/* Boîte de dialogue de confirmation de suppression */}
       <AlertDialog

@@ -22,7 +22,6 @@ import { fcfa, cleanPhone, waLink } from "@/lib/format";
 import { Button } from "@/components/ui/button";
 import { StoredImage } from "@/components/bits";
 import { CatalogLightbox } from "@/components/catalog-lightbox";
-import { Dialog, DialogContent } from "@/components/ui/dialog";
 
 export const Route = createFileRoute("/lookbook")({
   ssr: false,
@@ -54,33 +53,11 @@ function PublicLookbookPage() {
   const targetModelId = search.modelId;
 
   const [selectedCategory, setSelectedCategory] = useState<string>("all");
-  const [activeModel, setActiveModel] = useState<CatalogModelRow | null>(null);
-  const [currentPhotoIndex, setCurrentPhotoIndex] = useState(0);
   const [lightboxOpen, setLightboxOpen] = useState(false);
+  const [lightboxModelIndex, setLightboxModelIndex] = useState(0);
+  const [lightboxPhotoIndex, setLightboxPhotoIndex] = useState(0);
   const [copied, setCopied] = useState(false);
-  const [touchStartX, setTouchStartX] = useState<number | null>(null);
   const openedSharedModel = useRef(false);
-
-  function handleTouchStart(e: React.TouchEvent) {
-    setTouchStartX(e.touches[0]?.clientX ?? null);
-  }
-
-  function handleTouchEnd(e: React.TouchEvent) {
-    if (touchStartX === null || !activeModel || !activeModel.photo_paths || activeModel.photo_paths.length <= 1) {
-      setTouchStartX(null);
-      return;
-    }
-    const touchEndX = e.changedTouches[0]?.clientX ?? 0;
-    const diff = touchEndX - touchStartX;
-    const SWIPE_THRESHOLD = 45;
-
-    if (diff > SWIPE_THRESHOLD) {
-      setCurrentPhotoIndex((prev) => (prev === 0 ? activeModel.photo_paths.length - 1 : prev - 1));
-    } else if (diff < -SWIPE_THRESHOLD) {
-      setCurrentPhotoIndex((prev) => (prev === activeModel.photo_paths.length - 1 ? 0 : prev + 1));
-    }
-    setTouchStartX(null);
-  }
 
   // Charger les données de l'atelier si un ID est fourni
   const atelierQuery = useQuery({
@@ -162,13 +139,19 @@ function PublicLookbookPage() {
     return null;
   }, [allModels, targetModelId, search.name, search.price, search.fabric, search.desc, atelierId]);
 
+  function openDetail(model: CatalogModelRow, photoIdx = 0) {
+    const idx = visibleModels.findIndex((m) => m.id === model.id);
+    setLightboxModelIndex(idx >= 0 ? idx : 0);
+    setLightboxPhotoIndex(photoIdx);
+    setLightboxOpen(true);
+  }
+
   useEffect(() => {
     if (openedSharedModel.current || !targetModelId || !featuredModel) return;
     if (featuredModel.id !== targetModelId) return;
     openedSharedModel.current = true;
-    setActiveModel(featuredModel);
-    setCurrentPhotoIndex(0);
-  }, [featuredModel, targetModelId]);
+    openDetail(featuredModel as CatalogModelRow);
+  }, [featuredModel, targetModelId, visibleModels]);
 
   function handleOrderWhatsApp(model: CatalogModelRow | { name: string; default_price?: number | null }) {
     const rawPhone = cleanPhone(atelierPhone);
@@ -194,11 +177,6 @@ function PublicLookbookPage() {
     setCopied(true);
     toast.success("Lien du catalogue copié !");
     setTimeout(() => setCopied(false), 2500);
-  }
-
-  function openDetail(model: CatalogModelRow) {
-    setActiveModel(model);
-    setCurrentPhotoIndex(0);
   }
 
   return (
@@ -461,201 +439,17 @@ function PublicLookbookPage() {
         </p>
       </footer>
 
-      {/* Modal Plein Écran pour visualiser les photos du modèle */}
-      {activeModel && (
-        <Dialog open={Boolean(activeModel)} onOpenChange={() => setActiveModel(null)}>
-          <DialogContent className="max-h-[96vh] max-w-3xl overflow-y-auto p-0 bg-card border-border rounded-2xl [&>button]:hidden">
-            <div className="relative flex flex-col">
-              {/* Grand affichage photo avec aperçu agrandi, gestes tactiles et ouverture plein écran */}
-              <div
-                onTouchStart={handleTouchStart}
-                onTouchEnd={handleTouchEnd}
-                onClick={() => setLightboxOpen(true)}
-                className="relative h-[48vh] sm:h-[58vh] min-h-[360px] max-h-[580px] w-full bg-neutral-950 flex items-center justify-center overflow-hidden select-none cursor-zoom-in group"
-                title="Cliquer pour afficher en plein écran et zoomer"
-              >
-                {activeModel.photo_paths && activeModel.photo_paths.length > 0 ? (
-                  <StoredImage
-                    path={activeModel.photo_paths[currentPhotoIndex] || activeModel.photo_paths[0]}
-                    alt={activeModel.name}
-                    className="size-full object-contain transition-all duration-300 group-hover:scale-[1.01]"
-                  />
-                ) : (
-                  <div className="flex flex-col items-center justify-center gap-2 text-white/60">
-                    <Scissors className="size-16" />
-                    <p className="text-sm">Pas de photo disponible</p>
-                  </div>
-                )}
-
-                {/* Badge compteur de photos (haut-gauche) */}
-                {activeModel.photo_paths && activeModel.photo_paths.length > 0 && (
-                  <span className="absolute top-3 left-3 rounded-full bg-black/75 backdrop-blur-md px-2.5 py-1 text-[0.7rem] font-bold text-white shadow-xs z-10">
-                    📸 {currentPhotoIndex + 1} / {activeModel.photo_paths.length}
-                  </span>
-                )}
-
-                {/* Boutons d'actions haut-droite : Plein écran, 360 & Fermer */}
-                <div
-                  className="absolute top-3 right-3 flex items-center gap-1.5 z-10"
-                  onClick={(e) => e.stopPropagation()}
-                >
-                  <button
-                    type="button"
-                    onClick={() => setLightboxOpen(true)}
-                    className="flex items-center gap-1 rounded-full bg-black/75 backdrop-blur-md px-2.5 py-1 text-[0.7rem] font-bold text-white hover:bg-black active:scale-95 transition-all shadow-md"
-                    title="Agrandir en plein écran"
-                  >
-                    <Maximize2 className="size-3.5 text-primary" />
-                    <span className="hidden sm:inline">Plein écran</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setLightboxOpen(true)}
-                    className="flex items-center gap-1 rounded-full bg-black/75 backdrop-blur-md px-2.5 py-1 text-[0.7rem] font-bold text-white hover:bg-black active:scale-95 transition-all shadow-md"
-                    title="Vue 360°"
-                  >
-                    <Rotate3d className="size-3.5 text-primary" />
-                    <span className="hidden sm:inline">Vue 360°</span>
-                  </button>
-                  <button
-                    type="button"
-                    aria-label="Fermer"
-                    onClick={() => setActiveModel(null)}
-                    className="flex size-8 items-center justify-center rounded-full bg-black/75 text-white hover:bg-black active:scale-95 shadow-md"
-                  >
-                    <X className="size-4" />
-                  </button>
-                </div>
-
-                {/* Navigation entre photos (flèches latérales) */}
-                {activeModel.photo_paths && activeModel.photo_paths.length > 1 && (
-                  <>
-                    <button
-                      type="button"
-                      aria-label="Photo précédente"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setCurrentPhotoIndex((prev) =>
-                          prev === 0 ? activeModel.photo_paths.length - 1 : prev - 1,
-                        );
-                      }}
-                      className="absolute left-2.5 top-1/2 -translate-y-1/2 flex size-10 items-center justify-center rounded-full bg-black/60 text-white hover:bg-black/80 active:scale-95 transition-all shadow-md z-10"
-                    >
-                      <ChevronLeft className="size-6" />
-                    </button>
-                    <button
-                      type="button"
-                      aria-label="Photo suivante"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setCurrentPhotoIndex((prev) =>
-                          prev === activeModel.photo_paths.length - 1 ? 0 : prev + 1,
-                        );
-                      }}
-                      className="absolute right-2.5 top-1/2 -translate-y-1/2 flex size-10 items-center justify-center rounded-full bg-black/60 text-white hover:bg-black/80 active:scale-95 transition-all shadow-md z-10"
-                    >
-                      <ChevronRight className="size-6" />
-                    </button>
-                  </>
-                )}
-
-                {/* Indication visuelle d'agrandissement en bas de l'image */}
-                <div className="absolute bottom-2 inset-x-0 flex justify-center pointer-events-none z-10">
-                  <span className="rounded-full bg-black/70 backdrop-blur-xs px-3 py-0.5 text-[10px] font-medium text-white/90 shadow-xs flex items-center gap-1.5">
-                    <Maximize2 className="size-2.5 text-primary" /> Toucher l'image pour agrandir & zoomer
-                  </span>
-                </div>
-              </div>
-
-              {/* Bande de miniatures séparée EN DESSOUS (ne masque plus le bas du vêtement) */}
-              {activeModel.photo_paths && activeModel.photo_paths.length > 1 && (
-                <div className="flex items-center gap-2 overflow-x-auto p-2.5 bg-neutral-900 border-b border-border/40 scrollbar-none">
-                  {activeModel.photo_paths.map((p, i) => (
-                    <button
-                      key={i}
-                      type="button"
-                      onClick={() => setCurrentPhotoIndex(i)}
-                      className={`relative size-12 sm:size-14 shrink-0 overflow-hidden rounded-xl border-2 transition-all shadow-xs ${
-                        i === currentPhotoIndex
-                          ? "border-primary ring-2 ring-primary/60 scale-105"
-                          : "border-white/30 opacity-70 hover:opacity-100"
-                      }`}
-                    >
-                      <StoredImage
-                        path={p}
-                        alt={`Miniature ${i + 1}`}
-                        className="size-full object-cover"
-                      />
-                    </button>
-                  ))}
-                </div>
-              )}
-
-              {/* Détails du modèle */}
-              <div className="p-4 sm:p-5 space-y-3">
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <span className="inline-block rounded-full bg-primary/10 px-2.5 py-0.5 text-xs font-bold text-primary">
-                      {catalogCategoryLabel(activeModel.category)}
-                    </span>
-                    <h2 className="mt-1 font-display text-lg sm:text-xl font-bold text-foreground">
-                      {activeModel.name}
-                    </h2>
-                  </div>
-                  {activeModel.default_price && (
-                    <div className="text-right">
-                      <p className="text-[0.65rem] uppercase font-bold text-muted-foreground">
-                        Prix indicatif
-                      </p>
-                      <p className="font-display text-lg sm:text-xl font-bold text-primary">
-                        {fcfa(activeModel.default_price, atelierQuery.data?.currency)}
-                      </p>
-                    </div>
-                  )}
-                </div>
-
-                {activeModel.fabric_needed && (
-                  <p className="text-xs sm:text-sm font-medium text-muted-foreground">
-                    🧵 Tissu recommandé : <strong className="text-foreground">{activeModel.fabric_needed}</strong>
-                  </p>
-                )}
-
-                {activeModel.description && (
-                  <p className="text-xs sm:text-sm text-muted-foreground whitespace-pre-line leading-relaxed">
-                    {activeModel.description}
-                  </p>
-                )}
-
-                <div className="pt-2">
-                  <Button
-                    onClick={() => handleOrderWhatsApp(activeModel)}
-                    className="h-11 w-full font-bold text-sm rounded-xl bg-success hover:bg-success/90 text-success-foreground shadow-md"
-                  >
-                    <MessageCircle className="mr-2 size-4.5" /> Commander ce modèle sur WhatsApp
-                  </Button>
-                </div>
-              </div>
-            </div>
-          </DialogContent>
-        </Dialog>
-      )}
-
-      {/* Visionneuse Plein Écran immersive avec Zoom, Pan, Swipe et Mode 360° */}
-      {activeModel && (
-        <CatalogLightbox
-          open={lightboxOpen}
-          onClose={() => setLightboxOpen(false)}
-          photos={activeModel.photo_paths || []}
-          initialIndex={currentPhotoIndex}
-          modelName={activeModel.name}
-          categoryLabel={catalogCategoryLabel(activeModel.category)}
-          priceFormatted={
-            activeModel.default_price
-              ? fcfa(activeModel.default_price, atelierQuery.data?.currency)
-              : null
-          }
-        />
-      )}
+      {/* Visionneuse Plein Écran immersive de la taille du téléphone avec slalom entre modèles et rotation 360° */}
+      <CatalogLightbox
+        open={lightboxOpen}
+        onClose={() => setLightboxOpen(false)}
+        models={visibleModels}
+        initialModelIndex={lightboxModelIndex}
+        initialPhotoIndex={lightboxPhotoIndex}
+        categoryLabel={(cat) => catalogCategoryLabel(cat)}
+        formatPrice={(price) => fcfa(price, atelierQuery.data?.currency)}
+        onOrder={(m) => handleOrderWhatsApp(m as CatalogModelRow)}
+      />
     </div>
   );
 }
