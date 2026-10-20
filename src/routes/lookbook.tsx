@@ -54,7 +54,29 @@ function PublicLookbookPage() {
   const [activeModel, setActiveModel] = useState<CatalogModelRow | null>(null);
   const [currentPhotoIndex, setCurrentPhotoIndex] = useState(0);
   const [copied, setCopied] = useState(false);
+  const [touchStartX, setTouchStartX] = useState<number | null>(null);
   const openedSharedModel = useRef(false);
+
+  function handleTouchStart(e: React.TouchEvent) {
+    setTouchStartX(e.touches[0]?.clientX ?? null);
+  }
+
+  function handleTouchEnd(e: React.TouchEvent) {
+    if (touchStartX === null || !activeModel || !activeModel.photo_paths || activeModel.photo_paths.length <= 1) {
+      setTouchStartX(null);
+      return;
+    }
+    const touchEndX = e.changedTouches[0]?.clientX ?? 0;
+    const diff = touchEndX - touchStartX;
+    const SWIPE_THRESHOLD = 45;
+
+    if (diff > SWIPE_THRESHOLD) {
+      setCurrentPhotoIndex((prev) => (prev === 0 ? activeModel.photo_paths.length - 1 : prev - 1));
+    } else if (diff < -SWIPE_THRESHOLD) {
+      setCurrentPhotoIndex((prev) => (prev === activeModel.photo_paths.length - 1 ? 0 : prev + 1));
+    }
+    setTouchStartX(null);
+  }
 
   // Charger les données de l'atelier si un ID est fourni
   const atelierQuery = useQuery({
@@ -440,13 +462,17 @@ function PublicLookbookPage() {
         <Dialog open={Boolean(activeModel)} onOpenChange={() => setActiveModel(null)}>
           <DialogContent className="max-h-[95vh] max-w-2xl overflow-hidden p-0 bg-card border-border [&>button]:hidden">
             <div className="relative flex flex-col">
-              {/* Grand affichage photo */}
-              <div className="relative aspect-4/3 sm:aspect-16/10 w-full bg-black/95 flex items-center justify-center overflow-hidden">
+              {/* Grand affichage photo avec swipe mobile */}
+              <div
+                onTouchStart={handleTouchStart}
+                onTouchEnd={handleTouchEnd}
+                className="relative aspect-4/3 sm:aspect-16/10 w-full bg-black/95 flex items-center justify-center overflow-hidden select-none"
+              >
                 {activeModel.photo_paths && activeModel.photo_paths.length > 0 ? (
                   <StoredImage
                     path={activeModel.photo_paths[currentPhotoIndex] || activeModel.photo_paths[0]}
                     alt={activeModel.name}
-                    className="size-full object-contain"
+                    className="size-full object-contain transition-all duration-300"
                   />
                 ) : (
                   <div className="flex flex-col items-center justify-center gap-2 text-white/60">
@@ -455,38 +481,62 @@ function PublicLookbookPage() {
                   </div>
                 )}
 
+                {/* Badge compteur de photos (haut-gauche) */}
+                {activeModel.photo_paths && activeModel.photo_paths.length > 0 && (
+                  <span className="absolute top-3 left-3 rounded-full bg-black/75 backdrop-blur-md px-2.5 py-1 text-[0.7rem] font-bold text-white shadow-xs">
+                    📸 {currentPhotoIndex + 1} / {activeModel.photo_paths.length}
+                  </span>
+                )}
+
                 {activeModel.photo_paths && activeModel.photo_paths.length > 1 && (
                   <>
                     <button
                       type="button"
+                      aria-label="Photo précédente"
                       onClick={() =>
                         setCurrentPhotoIndex((prev) =>
                           prev === 0 ? activeModel.photo_paths.length - 1 : prev - 1,
                         )
                       }
-                      className="absolute left-2.5 top-1/2 -translate-y-1/2 flex size-9 items-center justify-center rounded-full bg-black/60 text-white hover:bg-black"
+                      className="absolute left-2.5 top-1/2 -translate-y-1/2 flex size-10 items-center justify-center rounded-full bg-black/60 text-white hover:bg-black/80 active:scale-95 transition-all shadow-md"
                     >
-                      <ChevronLeft className="size-5" />
+                      <ChevronLeft className="size-6" />
                     </button>
                     <button
                       type="button"
+                      aria-label="Photo suivante"
                       onClick={() =>
                         setCurrentPhotoIndex((prev) =>
                           prev === activeModel.photo_paths.length - 1 ? 0 : prev + 1,
                         )
                       }
-                      className="absolute right-2.5 top-1/2 -translate-y-1/2 flex size-9 items-center justify-center rounded-full bg-black/60 text-white hover:bg-black"
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 flex size-10 items-center justify-center rounded-full bg-black/60 text-white hover:bg-black/80 active:scale-95 transition-all shadow-md"
                     >
-                      <ChevronRight className="size-5" />
+                      <ChevronRight className="size-6" />
                     </button>
-                    <div className="absolute bottom-3 inset-x-0 flex items-center justify-center gap-1.5">
-                      {activeModel.photo_paths.map((_, i) => (
-                        <span
+
+                    {/* Bande de miniatures interactive */}
+                    <div className="absolute bottom-2 inset-x-2 flex items-center justify-center gap-1.5 overflow-x-auto py-1 px-2 scrollbar-none z-10">
+                      {activeModel.photo_paths.map((p, i) => (
+                        <button
                           key={i}
-                          className={`size-2 rounded-full transition-all ${
-                            i === currentPhotoIndex ? "bg-white scale-125" : "bg-white/40"
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setCurrentPhotoIndex(i);
+                          }}
+                          className={`relative size-10 sm:size-12 shrink-0 overflow-hidden rounded-lg border-2 transition-all shadow-xs ${
+                            i === currentPhotoIndex
+                              ? "border-primary ring-2 ring-primary/60 scale-105"
+                              : "border-white/40 opacity-70 hover:opacity-100"
                           }`}
-                        />
+                        >
+                          <StoredImage
+                            path={p}
+                            alt={`Miniature ${i + 1}`}
+                            className="size-full object-cover"
+                          />
+                        </button>
                       ))}
                     </div>
                   </>
@@ -494,8 +544,9 @@ function PublicLookbookPage() {
 
                 <button
                   type="button"
+                  aria-label="Fermer"
                   onClick={() => setActiveModel(null)}
-                  className="absolute top-3 right-3 flex size-8 items-center justify-center rounded-full bg-black/70 text-white hover:bg-black"
+                  className="absolute top-3 right-3 flex size-8 items-center justify-center rounded-full bg-black/70 text-white hover:bg-black active:scale-95 shadow-md"
                 >
                   <X className="size-4" />
                 </button>

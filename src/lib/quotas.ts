@@ -47,7 +47,7 @@ export const PLAN_CONFIG: Record<SubscriptionPlan, PlanConfigItem> = {
       "Clients illimités",
       "Commandes illimitées",
       "Fiches de mesures illimitées",
-      "Catalogue & Lookbook complet débloqué",
+      "Catalogue avec jusqu'à 200 photos de confections",
       "Reçus WhatsApp & impression avec logo de l'atelier",
       "Statistiques & analyses financières détaillées",
       "Sauvegarde Cloud continue et sécurisée",
@@ -66,7 +66,8 @@ export const PLAN_CONFIG: Record<SubscriptionPlan, PlanConfigItem> = {
     badgeColor: "bg-amber-500/15 text-amber-700 dark:text-amber-400 border-amber-500/30",
     features: [
       "3 mois complets (90 jours) de sérénité",
-      "Toutes les fonctionnalités Pro débloquées en illimité",
+      "Toutes les fonctionnalités Pro débloquées",
+      "Catalogue & Lookbook avec photos 100% ILLIMITÉES (à l'infini)",
       "Économie immédiate de 1 000 FCFA",
       "Parfait pour la Tabaski, fêtes de fin d'année et mariages",
       "Sauvegarde Cloud continue de votre carnet d'atelier",
@@ -86,7 +87,7 @@ export const PLAN_CONFIG: Record<SubscriptionPlan, PlanConfigItem> = {
       "12 mois complets (365 jours) sans interruption",
       "Meilleur tarif : seulement 1 250 FCFA / mois (9 000 F d'économie)",
       "Toutes les fonctionnalités Pro débloquées",
-      "Catalogue illimité avec photos haute définition",
+      "Catalogue avec photos 100% ILLIMITÉES haute définition",
       "Badge numérique « Atelier Certifié CouturPro »",
       "Assistance VIP directe par WhatsApp et téléphone",
     ],
@@ -408,3 +409,97 @@ export function checkMeasurementQuota(
       : `Vous avez atteint la limite de ${limit} fiches de mesures de la formule Découverte. Vos mesures enregistrées restent toujours consultables. Passez à Pro pour un carnet illimité.`,
   };
 }
+
+export const MONTHLY_CATALOG_PHOTO_LIMIT = 200;
+
+/**
+ * Contrôle rigoureux du quota de photos catalogue / lookbook :
+ * - Mensuel : 200 photos max tous catalogues et modèles confondus.
+ * - Trimestriel & Annuel : Illimité à l'infini (argument décisif d'abonnement).
+ * - Administrateurs : Illimité à 100%.
+ * - Découverte (Gratuit) : Création de modèles et ajout de photos non autorisés.
+ */
+export function checkCatalogPhotosQuota(
+  business: Business | null | undefined,
+  currentCount: number,
+  additionalCount: number = 0,
+): {
+  allowed: boolean;
+  limit: number;
+  current: number;
+  remaining: number;
+  isUnlimited: boolean;
+  message?: string | undefined;
+} {
+  // 1. Exemption totale pour les comptes Administrateur
+  if (business?.is_admin === true) {
+    return {
+      allowed: true,
+      limit: Infinity,
+      current: currentCount,
+      remaining: Infinity,
+      isUnlimited: true,
+    };
+  }
+
+  // 2. Mode Consultation / Abonnement expiré
+  if (isSubscriptionExpired(business)) {
+    return {
+      allowed: false,
+      limit: currentCount,
+      current: currentCount,
+      remaining: 0,
+      isUnlimited: false,
+      message:
+        "Votre atelier est en mode Consultation : vos modèles et photos restent consultables. Réactivez votre Pass Atelier pour ajouter de nouvelles confections.",
+    };
+  }
+
+  // 3. Formule Découverte (Gratuit) : L'ajout de modèles personnels est réservé aux abonnés Pro
+  const plan = business?.plan || "free";
+  if (plan === "free") {
+    return {
+      allowed: false,
+      limit: 0,
+      current: currentCount,
+      remaining: 0,
+      isUnlimited: false,
+      message:
+        "L'ajout et la personnalisation de vos propres modèles de catalogue est réservé aux ateliers abonnés Pro.",
+    };
+  }
+
+  // 4. Formules Trimestrielle et Annuelle : Photos illimitées à l'infini !
+  if (
+    plan === "quarterly" ||
+    plan === "yearly" ||
+    plan === "unlimited" ||
+    plan === "pro_yearly"
+  ) {
+    return {
+      allowed: true,
+      limit: Infinity,
+      current: currentCount,
+      remaining: Infinity,
+      isUnlimited: true,
+    };
+  }
+
+  // 5. Formule Mensuelle : Plafond strict de 200 photos tous catalogues confondus
+  const limit = MONTHLY_CATALOG_PHOTO_LIMIT;
+  const remaining = Math.max(0, limit - currentCount);
+  const targetCount = currentCount + additionalCount;
+  const allowed = targetCount <= limit;
+
+  return {
+    allowed,
+    limit,
+    current: currentCount,
+    remaining,
+    isUnlimited: false,
+    message: allowed
+      ? undefined
+      : `Plafond de ${limit} photos de catalogue atteint pour la formule Pro Mensuel (${currentCount} photos insérées). Passez au Pass Trimestriel ou Annuel pour débloquer les photos illimitées à l'infini !`,
+  };
+}
+

@@ -139,11 +139,11 @@ export function UpgradeDialog({
                 <p className="mt-1 font-display text-lg font-extrabold text-foreground">
                   2 000 <span className="text-xs font-medium">FCFA</span>
                 </p>
-                <p className="text-[11px] text-muted-foreground">pour 1 mois</p>
+                <p className="text-[11px] text-muted-foreground">pour 1 mois (200 photos)</p>
               </div>
               <div className="mt-2.5">
                 <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-primary">
-                  <Zap className="size-3" /> Liberté totale
+                  <Zap className="size-3" /> Max 200 photos
                 </span>
               </div>
             </button>
@@ -174,7 +174,7 @@ export function UpgradeDialog({
               </div>
               <div className="mt-2.5">
                 <span className="inline-flex items-center gap-1 text-[10px] font-bold text-amber-700 dark:text-amber-400">
-                  <Flame className="size-3" /> Spécial Fêtes
+                  <Sparkles className="size-3" /> Photos ILLIMITÉES
                 </span>
               </div>
             </button>
@@ -205,7 +205,7 @@ export function UpgradeDialog({
               </div>
               <div className="mt-2.5">
                 <span className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-700 dark:text-emerald-400">
-                  <Sparkles className="size-3" /> Sérénité 1 an
+                  <Sparkles className="size-3" /> Photos ILLIMITÉES HD
                 </span>
               </div>
             </button>
@@ -227,7 +227,10 @@ export function UpgradeDialog({
                 <Check className="size-3.5 text-emerald-600 shrink-0 font-bold" /> Fiches de mesures illimitées
               </span>
               <span className="flex items-center gap-1.5 font-medium text-foreground">
-                <Check className="size-3.5 text-emerald-600 shrink-0 font-bold" /> Catalogue & Lookbook complet
+                <Check className="size-3.5 text-emerald-600 shrink-0 font-bold" />
+                {selectedPlan === "monthly"
+                  ? "Catalogue : jusqu'à 200 photos"
+                  : "Catalogue : photos 100% ILLIMITÉES"}
               </span>
               <span className="flex items-center gap-1.5">
                 <Check className="size-3.5 text-emerald-600 shrink-0" /> Reçus imprimables & WhatsApp avec logo

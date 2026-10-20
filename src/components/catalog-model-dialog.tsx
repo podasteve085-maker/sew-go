@@ -1,5 +1,5 @@
-import { useState, useEffect } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useState, useEffect, useMemo } from "react";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   Dialog,
   DialogContent,
@@ -11,13 +11,15 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { Loader2, Plus, X, UploadCloud, Tag, Trash2 } from "lucide-react";
+import { Loader2, Plus, X, UploadCloud, Tag, Trash2, Star, Sparkles, AlertTriangle, Zap } from "lucide-react";
 import { toast } from "sonner";
 import { useBusiness } from "@/hooks/use-business";
 import { uploadImage, deleteStorageFiles } from "@/hooks/use-signed-url";
 import { CATALOG_CATEGORIES, type CatalogCategory } from "@/lib/domain";
-import { saveCatalogModelOffline, type CatalogModelRow } from "@/lib/queries";
+import { saveCatalogModelOffline, fetchCatalogModels, type CatalogModelRow } from "@/lib/queries";
+import { checkCatalogPhotosQuota } from "@/lib/quotas";
 import { StoredImage } from "@/components/bits";
+import { UpgradeDialog } from "@/components/upgrade-dialog";
 
 const SUGGESTED_TAGS = [
   "Cérémonie",
@@ -59,6 +61,24 @@ export function CatalogModelDialog({ open, onOpenChange, model, onSaved }: Catal
   const [tags, setTags] = useState<string[]>(model?.tags ?? []);
   const [tagInput, setTagInput] = useState("");
   const [uploading, setUploading] = useState(false);
+  const [upgradeOpen, setUpgradeOpen] = useState(false);
+
+  // Charger tous les modèles du catalogue pour calculer le nombre total de photos de l'atelier
+  const { data: allModels = [] } = useQuery({
+    queryKey: ["catalog-models", business?.id],
+    queryFn: () => fetchCatalogModels("all", business?.id),
+    enabled: Boolean(business?.id),
+  });
+
+  // Somme des photos dans les autres modèles (exclut le modèle en cours d'édition pour ne pas compter en double)
+  const totalOtherPhotos = useMemo(() => {
+    return allModels
+      .filter((m) => m.id !== model?.id)
+      .reduce((acc, m) => acc + (m.photo_paths?.length || 0), 0);
+  }, [allModels, model?.id]);
+
+  const currentDialogTotalPhotos = totalOtherPhotos + photoPaths.length;
+  const quotaInfo = checkCatalogPhotosQuota(business, currentDialogTotalPhotos);
 
   // Synchronise whenever the dialog opens with a specific model
   function resetForm(m?: CatalogModelRow | null) {
@@ -81,9 +101,35 @@ export function CatalogModelDialog({ open, onOpenChange, model, onSaved }: Catal
     // eslint-disable-next-line react-hooks/exhaustive-deps -- model?.id suffit
   }, [open, model?.id]);
 
+  function makeCoverPhoto(index: number) {
+    if (index === 0) return;
+    setPhotoPaths((prev) => {
+      const next = [...prev];
+      const [selected] = next.splice(index, 1);
+      if (selected) next.unshift(selected);
+      return next;
+    });
+    toast.success("Photo définie comme couverture principale");
+  }
+
   async function handleFileUpload(e: React.ChangeEvent<HTMLInputElement>) {
     const files = e.target.files;
     if (!files || files.length === 0 || !business) return;
+
+    // Vérification stricte du quota avant téléversement
+    const quotaCheck = checkCatalogPhotosQuota(business, currentDialogTotalPhotos, files.length);
+    if (!quotaCheck.allowed) {
+      toast.error(quotaCheck.message || "Quota de photos dépassé.", {
+        description: "Passez au Pass Trimestriel ou Annuel pour débloquer les photos illimitées !",
+        action: {
+          label: "Débloquer",
+          onClick: () => setUpgradeOpen(true),
+        },
+      });
+      setUpgradeOpen(true);
+      e.target.value = "";
+      return;
+    }
 
     setUploading(true);
     const newPaths: string[] = [];
@@ -321,17 +367,69 @@ export function CatalogModelDialog({ open, onOpenChange, model, onSaved }: Catal
             />
           </div>
 
-          {/* Photos du modèle */}
-          <div className="space-y-2">
+          {/* Photos du modèle & Jauge de Quota */}
+          <div className="space-y-2.5">
             <div className="flex items-center justify-between">
               <Label className="text-xs font-semibold sm:text-sm">Photos du modèle</Label>
-              <span className="text-[0.7rem] text-muted-foreground">
-                {photoPaths.length} photo(s)
+              <span className="text-[0.7rem] font-bold text-muted-foreground">
+                {photoPaths.length} photo(s) dans ce modèle
               </span>
             </div>
 
+            {/* Indicateur de Quota en direct */}
+            {quotaInfo.isUnlimited ? (
+              <div className="flex items-center justify-between rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-800 dark:text-emerald-300">
+                <span className="flex items-center gap-1.5 font-bold">
+                  <Sparkles className="size-4 text-emerald-600 shrink-0" /> Photos de catalogue illimitées à l'infini
+                </span>
+                <span className="text-[11px] font-semibold">
+                  {currentDialogTotalPhotos} photo(s) au catalogue
+                </span>
+              </div>
+            ) : (
+              <div className="rounded-xl border border-primary/20 bg-primary/5 p-2.5 text-xs space-y-1.5">
+                <div className="flex items-center justify-between font-semibold">
+                  <span className="flex items-center gap-1.5 text-foreground">
+                    <Zap className="size-3.5 text-primary" /> Quota Photos Mensuel : {currentDialogTotalPhotos} / 200
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setUpgradeOpen(true)}
+                    className="text-[11px] font-bold text-primary hover:underline flex items-center gap-1"
+                  >
+                    Passer à l'illimité ✨
+                  </button>
+                </div>
+                <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
+                  <div
+                    className={`h-full transition-all ${
+                      currentDialogTotalPhotos >= 200
+                        ? "bg-destructive"
+                        : currentDialogTotalPhotos >= 170
+                        ? "bg-amber-500"
+                        : "bg-primary"
+                    }`}
+                    style={{
+                      width: `${Math.min(100, Math.round((currentDialogTotalPhotos / 200) * 100))}%`,
+                    }}
+                  />
+                </div>
+                <p className="text-[10px] text-muted-foreground">
+                  {currentDialogTotalPhotos >= 200
+                    ? "⚠️ Plafond de 200 photos atteint. Passez au Pass Trimestriel ou Annuel pour ajouter des photos en illimité."
+                    : `${Math.max(0, 200 - currentDialogTotalPhotos)} emplacement(s) photo restant(s) pour la formule mensuelle.`}
+                </p>
+              </div>
+            )}
+
             <div className="flex flex-wrap items-center gap-3 pt-1 pr-1">
-              <label className="flex h-24 w-24 cursor-pointer flex-col items-center justify-center gap-1 rounded-xl border border-dashed border-primary/40 bg-primary/5 p-2 text-center transition-colors hover:bg-primary/10 active:scale-95">
+              <label
+                className={`flex h-24 w-24 flex-col items-center justify-center gap-1 rounded-xl border border-dashed p-2 text-center transition-all ${
+                  !quotaInfo.isUnlimited && currentDialogTotalPhotos >= 200
+                    ? "cursor-not-allowed border-destructive/40 bg-destructive/5 opacity-70"
+                    : "cursor-pointer border-primary/40 bg-primary/5 hover:bg-primary/10 active:scale-95"
+                }`}
+              >
                 <UploadCloud className="size-6 text-primary" />
                 <span className="text-[0.68rem] font-bold text-primary">
                   {uploading ? "Envoi..." : "+ Photo"}
@@ -341,7 +439,7 @@ export function CatalogModelDialog({ open, onOpenChange, model, onSaved }: Catal
                   accept="image/*"
                   multiple
                   onChange={handleFileUpload}
-                  disabled={uploading}
+                  disabled={uploading || (!quotaInfo.isUnlimited && currentDialogTotalPhotos >= 200)}
                   className="hidden"
                 />
               </label>
@@ -363,6 +461,24 @@ export function CatalogModelDialog({ open, onOpenChange, model, onSaved }: Catal
                       </span>
                     )}
                   </div>
+
+                  {/* Bouton pour définir comme couverture */}
+                  {idx > 0 && (
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        makeCoverPhoto(idx);
+                      }}
+                      aria-label="Mettre en photo de couverture"
+                      title="Mettre en couverture principale"
+                      className="absolute -top-2 -left-2 z-20 flex size-7 items-center justify-center rounded-full bg-background border border-border text-amber-500 shadow-md hover:scale-105 active:scale-95"
+                    >
+                      <Star className="size-3.5 fill-amber-500" />
+                    </button>
+                  )}
+
                   <button
                     type="button"
                     onClick={(e) => {
@@ -380,11 +496,11 @@ export function CatalogModelDialog({ open, onOpenChange, model, onSaved }: Catal
               ))}
             </div>
             <p className="text-[0.7rem] text-muted-foreground">
-              Appuyez sur la poubelle rouge pour retirer une photo. Sur un modèle déjà enregistré, le retrait est immédiat.
+              La première photo sert d'image de couverture. Cliquez sur l'étoile ⭐ pour désigner une autre photo comme couverture.
             </p>
             {uploading && (
-              <p className="flex items-center gap-1.5 text-xs text-primary animate-pulse">
-                <Loader2 className="size-3.5 animate-spin" /> Téléversement de l'image en cours...
+              <p className="flex items-center gap-1.5 text-xs text-primary animate-pulse font-medium">
+                <Loader2 className="size-3.5 animate-spin" /> Téléversement et compression de l'image...
               </p>
             )}
           </div>
@@ -490,6 +606,11 @@ export function CatalogModelDialog({ open, onOpenChange, model, onSaved }: Catal
           </div>
         </form>
       </DialogContent>
+      <UpgradeDialog
+        open={upgradeOpen}
+        onOpenChange={setUpgradeOpen}
+        triggerReason="Passez au Pass Trimestriel (5 000 F) ou Annuel (15 000 F) pour ajouter des photos de modèles en illimité à l'infini !"
+      />
     </Dialog>
   );
 }

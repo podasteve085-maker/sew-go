@@ -16,10 +16,18 @@ import {
   Copy,
   MessageCircle,
   ExternalLink,
+  Sparkles,
+  Zap,
+  LayoutGrid,
+  Grid3X3,
+  ArrowUpDown,
+  Image as ImageIcon,
 } from "lucide-react";
 import { toast } from "sonner";
 
 import { useBusiness } from "@/hooks/use-business";
+import { checkCatalogPhotosQuota } from "@/lib/quotas";
+import { UpgradeDialog } from "@/components/upgrade-dialog";
 import {
   fetchCatalogModels,
   deleteCatalogModel,
@@ -74,6 +82,10 @@ function CataloguePage() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingModel, setEditingModel] = useState<CatalogModelRow | null>(null);
   const [modelToDelete, setModelToDelete] = useState<CatalogModelRow | null>(null);
+  const [upgradeOpen, setUpgradeOpen] = useState(false);
+  const [layoutMode, setLayoutMode] = useState<"grid" | "compact">("grid");
+  const [sortBy, setSortBy] = useState<"newest" | "name" | "price_asc" | "price_desc">("newest");
+  const [touchStartX, setTouchStartX] = useState<number | null>(null);
 
   // Mode Présentation Plein Écran pour le client
   const [presentationModel, setPresentationModel] = useState<CatalogModelRow | null>(null);
@@ -86,6 +98,13 @@ function CataloguePage() {
   });
 
   const allModels = modelsQuery.data ?? [];
+
+  // Calcul du nombre total de photos insérées tous modèles et catalogues confondus
+  const totalCatalogPhotos = useMemo(() => {
+    return allModels.reduce((acc, m) => acc + (m.photo_paths?.length || 0), 0);
+  }, [allModels]);
+
+  const quotaInfo = checkCatalogPhotosQuota(business, totalCatalogPhotos);
 
   // Filtrage par texte de recherche et catégorie
   const filteredModels = useMemo(() => {
@@ -103,6 +122,22 @@ function CataloguePage() {
     });
   }, [allModels, searchQuery, selectedCategory]);
 
+  // Tri multi-critères
+  const sortedAndFilteredModels = useMemo(() => {
+    const list = [...filteredModels];
+    if (sortBy === "name") {
+      list.sort((a, b) => a.name.localeCompare(b.name));
+    } else if (sortBy === "price_asc") {
+      list.sort((a, b) => (Number(a.default_price) || 0) - (Number(b.default_price) || 0));
+    } else if (sortBy === "price_desc") {
+      list.sort((a, b) => (Number(b.default_price) || 0) - (Number(a.default_price) || 0));
+    } else {
+      // plus récents
+      list.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+    }
+    return list;
+  }, [filteredModels, sortBy]);
+
   // Compteurs par catégorie
   const categoryCounts = useMemo(() => {
     const counts: Record<string, number> = { all: allModels.length };
@@ -111,6 +146,30 @@ function CataloguePage() {
     }
     return counts;
   }, [allModels]);
+
+  // Handlers pour le swipe tactile sur smartphone dans la visionneuse
+  function handleTouchStart(e: React.TouchEvent) {
+    setTouchStartX(e.touches[0]?.clientX ?? null);
+  }
+
+  function handleTouchEnd(e: React.TouchEvent) {
+    if (touchStartX === null || !presentationModel || !presentationModel.photo_paths || presentationModel.photo_paths.length <= 1) {
+      setTouchStartX(null);
+      return;
+    }
+    const touchEndX = e.changedTouches[0]?.clientX ?? 0;
+    const diff = touchEndX - touchStartX;
+    const SWIPE_THRESHOLD = 45;
+
+    if (diff > SWIPE_THRESHOLD) {
+      // Glissement droite -> photo précédente
+      setCurrentPhotoIndex((prev) => (prev === 0 ? presentationModel.photo_paths.length - 1 : prev - 1));
+    } else if (diff < -SWIPE_THRESHOLD) {
+      // Glissement gauche -> photo suivante
+      setCurrentPhotoIndex((prev) => (prev === presentationModel.photo_paths.length - 1 ? 0 : prev + 1));
+    }
+    setTouchStartX(null);
+  }
 
   const deleteMutation = useMutation({
     mutationFn: (id: string) => deleteCatalogModel(id),
@@ -226,11 +285,34 @@ function CataloguePage() {
             <span className="flex size-9 items-center justify-center rounded-xl bg-primary/10 text-primary">
               <BookOpen className="size-5" />
             </span>
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <h1 className="page-title text-lg sm:text-2xl">Catalogue & Lookbook</h1>
               <span className="rounded-full bg-primary/10 px-2 py-0.5 text-xs font-bold text-primary">
-                {allModels.length}
+                {allModels.length} modèle(s)
               </span>
+
+              {/* Badge de quota photo en direct */}
+              {quotaInfo.isUnlimited ? (
+                <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/15 border border-emerald-500/30 px-2.5 py-0.5 text-[11px] font-bold text-emerald-700 dark:text-emerald-400 shadow-2xs">
+                  <Sparkles className="size-3" /> Photos illimitées ({totalCatalogPhotos})
+                </span>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setUpgradeOpen(true)}
+                  className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[11px] font-bold transition-all hover:scale-105 active:scale-95 ${
+                    totalCatalogPhotos >= 200
+                      ? "bg-destructive/15 text-destructive border-destructive/30"
+                      : totalCatalogPhotos >= 170
+                      ? "bg-amber-500/15 text-amber-700 dark:text-amber-400 border-amber-500/30"
+                      : "bg-primary/10 text-primary border-primary/20"
+                  }`}
+                  title="Quota photos de votre formule Mensuelle. Cliquez pour débloquer l'illimité !"
+                >
+                  <Zap className="size-3" /> {totalCatalogPhotos} / 200 photos
+                  <span className="text-[10px] underline font-semibold ml-0.5">Illimité ✨</span>
+                </button>
+              )}
             </div>
           </div>
           <p className="mt-1 text-xs text-muted-foreground sm:text-sm">
@@ -280,24 +362,97 @@ function CataloguePage() {
         </div>
       </div>
 
-      {/* Barre de recherche et filtres */}
+      {/* Alerte si le quota de 200 photos est atteint pour le forfait Mensuel */}
+      {!quotaInfo.isUnlimited && totalCatalogPhotos >= 200 && (
+        <div className="rounded-2xl border border-destructive/40 bg-destructive/10 p-4 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3 animate-in fade-in duration-300">
+          <div className="flex items-start gap-3">
+            <span className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-destructive text-white font-black text-sm">
+              !
+            </span>
+            <div>
+              <p className="text-xs sm:text-sm font-bold text-destructive">
+                Plafond de 200 photos de catalogue atteint (Forfait Pro Mensuel)
+              </p>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                Vos confections restent 100% consultables et partageables. Pour ajouter de nouveaux modèles et photos sans aucune limite, passez au Pass Trimestriel (5 000 F) ou Annuel.
+              </p>
+            </div>
+          </div>
+          <Button
+            onClick={() => setUpgradeOpen(true)}
+            className="shrink-0 font-bold h-9 text-xs bg-primary text-primary-foreground shadow-xs"
+          >
+            <Sparkles className="mr-1.5 size-3.5" /> Débloquer les photos illimitées
+          </Button>
+        </div>
+      )}
+
+      {/* Barre de recherche, tri et filtres */}
       <div className="space-y-2.5">
-        <div className="relative">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
-          <Input
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Rechercher par nom, tissu (ex: Bazin, Faso Dan Fani, Robe)..."
-            className="h-11 pl-9 pr-8 text-base sm:text-sm rounded-xl"
-          />
-          {searchQuery && (
-            <button
-              onClick={() => setSearchQuery("")}
-              className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-            >
-              <X className="size-4" />
-            </button>
-          )}
+        <div className="flex flex-col sm:flex-row gap-2">
+          <div className="relative flex-1">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
+            <Input
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Rechercher par nom, tissu (ex: Bazin, Faso Dan Fani, Robe)..."
+              className="h-11 pl-9 pr-8 text-base sm:text-sm rounded-xl"
+            />
+            {searchQuery && (
+              <button
+                onClick={() => setSearchQuery("")}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+              >
+                <X className="size-4" />
+              </button>
+            )}
+          </div>
+
+          {/* Contrôles de tri et de disposition */}
+          <div className="flex items-center gap-1.5 self-end sm:self-auto">
+            {/* Sélecteur de tri */}
+            <div className="relative flex items-center">
+              <select
+                value={sortBy}
+                onChange={(e) => setSortBy(e.target.value as any)}
+                className="h-11 rounded-xl border border-border bg-card pl-3 pr-8 text-xs font-semibold text-foreground focus:outline-hidden focus:ring-2 focus:ring-primary shadow-2xs"
+                aria-label="Trier les modèles"
+              >
+                <option value="newest">🕒 Plus récents</option>
+                <option value="name">🔤 Nom (A-Z)</option>
+                <option value="price_asc">💰 Prix croissant</option>
+                <option value="price_desc">💎 Prix décroissant</option>
+              </select>
+            </div>
+
+            {/* Bascule de disposition Grille vs Compact */}
+            <div className="flex items-center rounded-xl border border-border bg-card p-0.5 shadow-2xs">
+              <button
+                type="button"
+                onClick={() => setLayoutMode("grid")}
+                className={`flex size-10 items-center justify-center rounded-lg transition-all ${
+                  layoutMode === "grid"
+                    ? "bg-primary text-primary-foreground shadow-xs"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+                title="Affichage cartes visuelles"
+              >
+                <LayoutGrid className="size-4.5" />
+              </button>
+              <button
+                type="button"
+                onClick={() => setLayoutMode("compact")}
+                className={`flex size-10 items-center justify-center rounded-lg transition-all ${
+                  layoutMode === "compact"
+                    ? "bg-primary text-primary-foreground shadow-xs"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+                title="Affichage compact dense"
+              >
+                <Grid3X3 className="size-4.5" />
+              </button>
+            </div>
+          </div>
         </div>
 
         {/* Puces de filtrage par catégorie */}
@@ -345,12 +500,18 @@ function CataloguePage() {
 
       {/* Grille des modèles */}
       {modelsQuery.isLoading ? (
-        <div className="grid grid-cols-1 min-[480px]:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 sm:gap-4">
-          {[1, 2, 3, 4].map((n) => (
+        <div
+          className={
+            layoutMode === "grid"
+              ? "grid grid-cols-1 min-[480px]:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 sm:gap-4"
+              : "grid grid-cols-2 min-[540px]:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-2.5 sm:gap-3"
+          }
+        >
+          {[1, 2, 3, 4, 5, 6].map((n) => (
             <div key={n} className="card-soft h-52 sm:h-64 animate-pulse bg-muted/60" />
           ))}
         </div>
-      ) : filteredModels.length === 0 ? (
+      ) : sortedAndFilteredModels.length === 0 ? (
         <EmptyState
           title={
             searchQuery
@@ -369,8 +530,14 @@ function CataloguePage() {
           }
         />
       ) : (
-        <div className="grid grid-cols-1 min-[480px]:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 sm:gap-4">
-          {filteredModels.map((model) => {
+        <div
+          className={
+            layoutMode === "grid"
+              ? "grid grid-cols-1 min-[480px]:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 sm:gap-4"
+              : "grid grid-cols-2 min-[540px]:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-2.5 sm:gap-3"
+          }
+        >
+          {sortedAndFilteredModels.map((model) => {
             const hasPhotos = model.photo_paths && model.photo_paths.length > 0;
             const coverPhoto = hasPhotos ? model.photo_paths[0] : null;
 
@@ -382,7 +549,9 @@ function CataloguePage() {
                 {/* Image de couverture ou visuel par défaut avec barre d'action visible */}
                 <div
                   onClick={() => openPresentation(model)}
-                  className="relative aspect-square sm:aspect-4/3 w-full cursor-pointer overflow-hidden bg-muted transition-transform group-hover:opacity-95"
+                  className={`relative w-full cursor-pointer overflow-hidden bg-muted transition-transform group-hover:opacity-95 ${
+                    layoutMode === "grid" ? "aspect-square sm:aspect-4/3" : "aspect-square"
+                  }`}
                 >
                   {coverPhoto ? (
                     <StoredImage
@@ -404,12 +573,12 @@ function CataloguePage() {
 
                   {/* Indicateur multi-photos */}
                   {model.photo_paths && model.photo_paths.length > 1 && (
-                    <span className="absolute top-2 right-2 rounded-full bg-black/65 px-2 py-0.5 text-[0.65rem] font-bold text-white backdrop-blur">
-                      +{model.photo_paths.length - 1}
+                    <span className="absolute top-2 right-2 rounded-full bg-black/65 px-2 py-0.5 text-[0.65rem] font-bold text-white backdrop-blur flex items-center gap-0.5">
+                      <ImageIcon className="size-2.5" /> +{model.photo_paths.length - 1}
                     </span>
                   )}
 
-                  <div className="absolute bottom-2 right-2 z-10 flex items-center gap-1.5">
+                  <div className="absolute bottom-2 right-2 z-10 flex items-center gap-1.5 opacity-90 group-hover:opacity-100 transition-opacity">
                     <button
                       type="button"
                       aria-label="Modifier le modèle"
@@ -418,9 +587,9 @@ function CataloguePage() {
                         e.stopPropagation();
                         handleEdit(model);
                       }}
-                      className="flex size-11 items-center justify-center rounded-full bg-white text-foreground shadow-lg ring-1 ring-black/10 active:scale-95"
+                      className="flex size-9 sm:size-10 items-center justify-center rounded-full bg-white text-foreground shadow-lg ring-1 ring-black/10 hover:scale-105 active:scale-95"
                     >
-                      <Edit className="size-4.5" />
+                      <Edit className="size-4" />
                     </button>
                     <button
                       type="button"
@@ -430,9 +599,9 @@ function CataloguePage() {
                         e.stopPropagation();
                         setModelToDelete(model);
                       }}
-                      className="flex size-11 items-center justify-center rounded-full bg-destructive text-white shadow-lg active:scale-95"
+                      className="flex size-9 sm:size-10 items-center justify-center rounded-full bg-destructive text-white shadow-lg hover:scale-105 active:scale-95"
                     >
-                      <Trash2 className="size-4.5" />
+                      <Trash2 className="size-4" />
                     </button>
                   </div>
                 </div>
@@ -444,7 +613,7 @@ function CataloguePage() {
                       {model.name}
                     </h3>
 
-                    {model.description && (
+                    {model.description && layoutMode === "grid" && (
                       <p className="mt-0.5 text-[0.7rem] sm:text-xs text-muted-foreground line-clamp-1">
                         {model.description}
                       </p>
@@ -471,33 +640,33 @@ function CataloguePage() {
                       variant="outline"
                       size="sm"
                       onClick={() => handleEdit(model)}
-                      className="h-11 text-xs font-bold rounded-xl px-1.5"
+                      className="h-9 sm:h-10 text-[11px] sm:text-xs font-bold rounded-xl px-1"
                     >
-                      <Edit className="mr-1 size-3.5" /> Modifier
+                      <Edit className="mr-1 size-3 sm:size-3.5" /> Modifier
                     </Button>
                     <Button
                       type="button"
                       variant="outline"
                       size="sm"
                       onClick={() => setModelToDelete(model)}
-                      className="h-11 text-xs font-bold rounded-xl px-1.5 border-destructive/40 text-destructive hover:bg-destructive/10"
+                      className="h-9 sm:h-10 text-[11px] sm:text-xs font-bold rounded-xl px-1 border-destructive/40 text-destructive hover:bg-destructive/10"
                     >
-                      <Trash2 className="mr-1 size-3.5" /> Supprimer
+                      <Trash2 className="mr-1 size-3 sm:size-3.5" /> Suppr.
                     </Button>
                     <Button
                       size="sm"
                       onClick={() => handleOrderFromModel(model)}
-                      className="h-11 text-xs font-bold rounded-xl shadow-xs px-1.5"
+                      className="h-9 sm:h-10 text-[11px] sm:text-xs font-bold rounded-xl shadow-xs px-1"
                     >
-                      <Scissors className="mr-1 size-3.5" /> Commander
+                      <Scissors className="mr-1 size-3 sm:size-3.5" /> Commander
                     </Button>
                     <Button
                       type="button"
                       size="sm"
                       onClick={() => void handleShareWhatsApp(model)}
-                      className="h-11 text-xs font-bold rounded-xl bg-success text-success-foreground hover:bg-success/90 px-1.5"
+                      className="h-9 sm:h-10 text-[11px] sm:text-xs font-bold rounded-xl bg-success text-success-foreground hover:bg-success/90 px-1"
                     >
-                      <Share2 className="mr-1 size-3.5" /> Envoyer
+                      <Share2 className="mr-1 size-3 sm:size-3.5" /> WhatsApp
                     </Button>
                   </div>
                 </div>
@@ -528,13 +697,17 @@ function CataloguePage() {
         <Dialog open={Boolean(presentationModel)} onOpenChange={() => setPresentationModel(null)}>
           <DialogContent className="max-h-[95vh] max-w-2xl overflow-hidden p-0 bg-card border-border [&>button]:hidden">
             <div className="relative flex flex-col">
-              {/* Grand affichage photo */}
-              <div className="relative aspect-4/3 sm:aspect-16/10 w-full bg-black/90 flex items-center justify-center overflow-hidden">
+              {/* Grand affichage photo avec gestes tactiles (swipe mobile) */}
+              <div
+                onTouchStart={handleTouchStart}
+                onTouchEnd={handleTouchEnd}
+                className="relative aspect-4/3 sm:aspect-16/10 w-full bg-black/95 flex items-center justify-center overflow-hidden select-none"
+              >
                 {presentationModel.photo_paths && presentationModel.photo_paths.length > 0 ? (
                   <StoredImage
                     path={presentationModel.photo_paths[currentPhotoIndex] || presentationModel.photo_paths[0]}
                     alt={presentationModel.name}
-                    className="size-full object-contain"
+                    className="size-full object-contain transition-all duration-300"
                   />
                 ) : (
                   <div className="flex flex-col items-center justify-center gap-2 text-white/60">
@@ -543,41 +716,63 @@ function CataloguePage() {
                   </div>
                 )}
 
+                {/* Badge compteur de photos (haut-gauche) */}
+                {presentationModel.photo_paths && presentationModel.photo_paths.length > 0 && (
+                  <span className="absolute top-3 left-3 rounded-full bg-black/75 backdrop-blur-md px-2.5 py-1 text-[0.7rem] font-bold text-white shadow-xs">
+                    📸 {currentPhotoIndex + 1} / {presentationModel.photo_paths.length}
+                  </span>
+                )}
+
                 {/* Navigation entre photos */}
                 {presentationModel.photo_paths && presentationModel.photo_paths.length > 1 && (
                   <>
                     <button
                       type="button"
+                      aria-label="Photo précédente"
                       onClick={() =>
                         setCurrentPhotoIndex((prev) =>
                           prev === 0 ? presentationModel.photo_paths.length - 1 : prev - 1,
                         )
                       }
-                      className="absolute left-2.5 top-1/2 -translate-y-1/2 flex size-9 items-center justify-center rounded-full bg-black/60 text-white hover:bg-black"
+                      className="absolute left-2.5 top-1/2 -translate-y-1/2 flex size-10 items-center justify-center rounded-full bg-black/60 text-white hover:bg-black/80 active:scale-95 transition-all shadow-md"
                     >
-                      <ChevronLeft className="size-5" />
+                      <ChevronLeft className="size-6" />
                     </button>
                     <button
                       type="button"
+                      aria-label="Photo suivante"
                       onClick={() =>
                         setCurrentPhotoIndex((prev) =>
                           prev === presentationModel.photo_paths.length - 1 ? 0 : prev + 1,
                         )
                       }
-                      className="absolute right-2.5 top-1/2 -translate-y-1/2 flex size-9 items-center justify-center rounded-full bg-black/60 text-white hover:bg-black"
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 flex size-10 items-center justify-center rounded-full bg-black/60 text-white hover:bg-black/80 active:scale-95 transition-all shadow-md"
                     >
-                      <ChevronRight className="size-5" />
+                      <ChevronRight className="size-6" />
                     </button>
 
-                    {/* Indicateurs pastilles */}
-                    <div className="absolute bottom-3 inset-x-0 flex items-center justify-center gap-1.5">
-                      {presentationModel.photo_paths.map((_, i) => (
-                        <span
+                    {/* Bande de miniatures interactive */}
+                    <div className="absolute bottom-2 inset-x-2 flex items-center justify-center gap-1.5 overflow-x-auto py-1 px-2 scrollbar-none z-10">
+                      {presentationModel.photo_paths.map((p, i) => (
+                        <button
                           key={i}
-                          className={`size-2 rounded-full transition-all ${
-                            i === currentPhotoIndex ? "bg-white scale-125" : "bg-white/40"
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setCurrentPhotoIndex(i);
+                          }}
+                          className={`relative size-10 sm:size-12 shrink-0 overflow-hidden rounded-lg border-2 transition-all shadow-xs ${
+                            i === currentPhotoIndex
+                              ? "border-primary ring-2 ring-primary/60 scale-105"
+                              : "border-white/40 opacity-70 hover:opacity-100"
                           }`}
-                        />
+                        >
+                          <StoredImage
+                            path={p}
+                            alt={`Miniature ${i + 1}`}
+                            className="size-full object-cover"
+                          />
+                        </button>
                       ))}
                     </div>
                   </>
@@ -586,8 +781,9 @@ function CataloguePage() {
                 {/* Bouton fermer */}
                 <button
                   type="button"
+                  aria-label="Fermer"
                   onClick={() => setPresentationModel(null)}
-                  className="absolute top-3 right-3 flex size-8 items-center justify-center rounded-full bg-black/70 text-white hover:bg-black"
+                  className="absolute top-3 right-3 flex size-8 items-center justify-center rounded-full bg-black/75 text-white hover:bg-black active:scale-95 shadow-md"
                 >
                   <X className="size-4" />
                 </button>
@@ -638,14 +834,14 @@ function CataloguePage() {
                       setPresentationModel(null);
                       handleOrderFromModel(presentationModel);
                     }}
-                    className="col-span-2 font-bold h-11 rounded-xl"
+                    className="col-span-2 font-bold h-11 rounded-xl shadow-xs"
                   >
                     <Scissors className="mr-2 size-4" /> Commander ce modèle
                   </Button>
                   <Button
                     size="lg"
                     onClick={() => void handleShareWhatsApp(presentationModel)}
-                    className="col-span-2 h-11 font-bold rounded-xl bg-success text-success-foreground hover:bg-success/90"
+                    className="col-span-2 h-11 font-bold rounded-xl bg-success text-success-foreground hover:bg-success/90 shadow-xs"
                   >
                     <Share2 className="mr-1.5 size-4" /> Envoyer au client
                   </Button>
@@ -712,6 +908,13 @@ function CataloguePage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Modal d'upgrade avec proposition directe des forfaits Trimestriel et Annuel */}
+      <UpgradeDialog
+        open={upgradeOpen}
+        onOpenChange={setUpgradeOpen}
+        triggerReason="Passez au Pass Trimestriel (5 000 F) ou Annuel (15 000 F) pour ajouter des photos de catalogue en illimité à l'infini !"
+      />
     </div>
   );
 }

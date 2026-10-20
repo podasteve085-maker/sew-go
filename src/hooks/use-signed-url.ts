@@ -48,34 +48,50 @@ export type ImageCompressionOptions = {
 };
 
 /**
- * Compresse et optimise une image côté client (WebP / JPEG haute efficacité)
- * Réduit les photos de smartphones de 4-10 Mo à 20-70 Ko avant téléversement.
+ * Compresse et optimise une image côté client (WebP / JPEG haute efficacité).
+ * Réduit les photos de smartphones (jusqu'à 35 Mo) à 20-90 Ko avant téléversement.
+ * Protège le stockage Supabase et réduit considérablement l'espace IndexedDB hors-ligne.
  */
 export async function compressImage(
   file: File,
-  options: ImageCompressionOptions = {}
+  options: ImageCompressionOptions = {},
 ): Promise<{ blob: Blob; ext: string; contentType: string }> {
   const rawType = (file.type || "").toLowerCase();
-  const ALLOWED_MIME_TYPES = ["image/jpeg", "image/png", "image/webp", "image/avif"];
-  if (!ALLOWED_MIME_TYPES.includes(rawType)) {
-    throw new Error("Type de fichier non autorisé. Seules les images JPG, PNG et WebP sont acceptées.");
-  }
-  if (file.size > 10 * 1024 * 1024) {
-    throw new Error("L'image est trop volumineuse (maximum 10 Mo).");
+  const isImageMime = rawType.startsWith("image/") || /\.(jpe?g|png|webp|avif|heic|heif)$/i.test(file.name);
+  if (!isImageMime) {
+    throw new Error("Type de fichier non autorisé. Seules les images sont acceptées.");
   }
 
-  const { maxWidth = 1200, maxHeight = 1200, quality = 0.8 } = options;
+  // Accepte jusqu'à 35 Mo pour ne pas bloquer les photos 48MP/RAW de smartphones
+  if (file.size > 35 * 1024 * 1024) {
+    throw new Error("L'image est trop volumineuse (maximum 35 Mo).");
+  }
+
+  const { maxWidth = 1400, maxHeight = 1400, quality = 0.82 } = options;
 
   return new Promise((resolve) => {
     if (typeof window === "undefined" || typeof document === "undefined") {
-      resolve({ blob: file, ext: file.name.split(".").pop()?.toLowerCase() || "jpg", contentType: file.type });
+      resolve({
+        blob: file,
+        ext: file.name.split(".").pop()?.toLowerCase() || "jpg",
+        contentType: file.type || "image/jpeg",
+      });
       return;
     }
 
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      const img = new Image();
-      img.onload = () => {
+    const objectUrl = URL.createObjectURL(file);
+    const img = new Image();
+
+    const cleanup = () => {
+      try {
+        URL.revokeObjectURL(objectUrl);
+      } catch {
+        // Ignorer si déjà révoqué
+      }
+    };
+
+    img.onload = () => {
+      try {
         let { width, height } = img;
 
         // Calcul des dimensions proportionnelles
@@ -90,11 +106,16 @@ export async function compressImage(
         }
 
         const canvas = document.createElement("canvas");
-        canvas.width = width;
-        canvas.height = height;
+        canvas.width = Math.max(1, width);
+        canvas.height = Math.max(1, height);
         const ctx = canvas.getContext("2d");
         if (!ctx) {
-          resolve({ blob: file, ext: file.name.split(".").pop()?.toLowerCase() || "jpg", contentType: file.type });
+          cleanup();
+          resolve({
+            blob: file,
+            ext: file.name.split(".").pop()?.toLowerCase() || "jpg",
+            contentType: file.type || "image/jpeg",
+          });
           return;
         }
 
@@ -102,47 +123,70 @@ export async function compressImage(
         ctx.imageSmoothingQuality = "high";
         ctx.drawImage(img, 0, 0, width, height);
 
-        // Export WebP prioritaire (98% des navigateurs modernes)
+        cleanup();
+
+        // 1. Export WebP prioritaire (support universel moderne, compression optimale)
         canvas.toBlob(
           (webpBlob) => {
-            if (webpBlob && (webpBlob.size < file.size || file.size > 80_000)) {
+            if (webpBlob && webpBlob.size > 0 && webpBlob.size <= file.size) {
+              resolve({
+                blob: webpBlob,
+                ext: "webp",
+                contentType: "image/webp",
+              });
+            } else if (webpBlob && webpBlob.size > 0 && file.size <= 60_000) {
+              // Si le fichier source était déjà très petit (<60 Ko), conserver WebP standardisé
               resolve({
                 blob: webpBlob,
                 ext: "webp",
                 contentType: "image/webp",
               });
             } else {
-              // Fallback JPEG
+              // 2. Repli JPEG haute qualité
               canvas.toBlob(
                 (jpegBlob) => {
-                  if (jpegBlob && (jpegBlob.size < file.size || file.size > 80_000)) {
+                  if (jpegBlob && jpegBlob.size > 0) {
                     resolve({
                       blob: jpegBlob,
                       ext: "jpg",
                       contentType: "image/jpeg",
                     });
                   } else {
-                    resolve({ blob: file, ext: file.name.split(".").pop()?.toLowerCase() || "jpg", contentType: file.type });
+                    resolve({
+                      blob: file,
+                      ext: file.name.split(".").pop()?.toLowerCase() || "jpg",
+                      contentType: file.type || "image/jpeg",
+                    });
                   }
                 },
                 "image/jpeg",
-                quality
+                quality,
               );
             }
           },
           "image/webp",
-          quality
+          quality,
         );
-      };
-      img.onerror = () => {
-        resolve({ blob: file, ext: file.name.split(".").pop()?.toLowerCase() || "jpg", contentType: file.type });
-      };
-      img.src = event.target?.result as string;
+      } catch {
+        cleanup();
+        resolve({
+          blob: file,
+          ext: file.name.split(".").pop()?.toLowerCase() || "jpg",
+          contentType: file.type || "image/jpeg",
+        });
+      }
     };
-    reader.onerror = () => {
-      resolve({ blob: file, ext: file.name.split(".").pop()?.toLowerCase() || "jpg", contentType: file.type });
+
+    img.onerror = () => {
+      cleanup();
+      resolve({
+        blob: file,
+        ext: file.name.split(".").pop()?.toLowerCase() || "jpg",
+        contentType: file.type || "image/jpeg",
+      });
     };
-    reader.readAsDataURL(file);
+
+    img.src = objectUrl;
   });
 }
 
@@ -206,17 +250,22 @@ export async function uploadImage(businessId: string, file: File, folder: string
   const allowedFolders = ["atelier", "clients", "orders", "catalog"];
   const safeFolder = allowedFolders.includes(folder) ? folder : "misc";
 
-  // Ajustement précis selon le dossier pour économie d'espace maximale :
-  // - "atelier" (logo) ou "clients" (avatar) : format compact 400x400
-  // - "orders" ou "catalog" : format haute définition équilibré 1280x1280
+  // Profils de compression adaptatifs haute efficacité :
+  // - "atelier" (logo) ou "clients" (avatar) : format compact 400x400 (15-30 Ko)
+  // - "orders" (croquis, tissus, confections) : 1400x1400, qualité 0.80 (50-80 Ko)
+  // - "catalog" (photos modèles lookbook) : 1600x1600, qualité 0.82 (70-120 Ko, rendu cristallin des broderies et wax)
   const isAvatarOrLogo = safeFolder === "atelier" || safeFolder === "clients";
+  const isCatalog = safeFolder === "catalog";
   const compressionConfig: ImageCompressionOptions = isAvatarOrLogo
     ? { maxWidth: 400, maxHeight: 400, quality: 0.82 }
-    : { maxWidth: 1280, maxHeight: 1280, quality: 0.78 };
+    : isCatalog
+      ? { maxWidth: 1600, maxHeight: 1600, quality: 0.82 }
+      : { maxWidth: 1400, maxHeight: 1400, quality: 0.80 };
 
   const { blob, ext, contentType } = await compressImage(file, compressionConfig);
 
-  // Si formellement hors-ligne : convertir immédiatement en DataURL sans tenter le réseau
+  // Si formellement hors-ligne : convertir immédiatement le blob compressé en DataURL
+  // Grâce à la compression préalable, le DataURL fait ~60 Ko au lieu de 12 Mo, protégeant IndexedDB
   const isOnline = typeof navigator !== "undefined" ? navigator.onLine : true;
   if (!isOnline) {
     return await blobToDataUrl(blob);
@@ -236,7 +285,7 @@ export async function uploadImage(businessId: string, file: File, folder: string
     // Échec réseau ou micro-coupure : repli sur le DataURL local
   }
 
-  // Fallback universel : retourner le DataURL local pour affichage et sauvegarde immédiate
+  // Fallback universel : retourner le DataURL local compressé pour affichage et sauvegarde immédiate
   return await blobToDataUrl(blob);
 }
 

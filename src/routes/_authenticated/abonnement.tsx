@@ -118,6 +118,32 @@ function SubscriptionPage() {
     },
   });
 
+  // 4. Quota photos catalogue actuelles
+  const catalogPhotosCountQuery = useQuery({
+    queryKey: ["catalog-photos-count", business?.id],
+    enabled: Boolean(business?.id),
+    queryFn: async () => {
+      try {
+        if (typeof navigator === "undefined" || navigator.onLine) {
+          const { data, error } = await supabase
+            .from("catalog_models")
+            .select("photo_paths")
+            .eq("business_id", business!.id);
+          if (!error && Array.isArray(data)) {
+            return data.reduce((acc, m) => acc + (m.photo_paths?.length || 0), 0);
+          }
+        }
+      } catch {
+        // Fallback hors-ligne
+      }
+      const { getAllLocalItems } = await import("@/lib/offline-storage");
+      const local = await getAllLocalItems<{ business_id: string; photo_paths?: string[] }>("catalog_models");
+      return local
+        .filter((m) => m.business_id === business!.id)
+        .reduce((acc, m) => acc + (m.photo_paths?.length || 0), 0);
+    },
+  });
+
   if (isLoading || !business) {
     return (
       <div className="mx-auto max-w-4xl space-y-6">
@@ -135,14 +161,31 @@ function SubscriptionPage() {
   const clientCount = clientsCountQuery.data ?? 0;
   const orderCount = ordersCountQuery.data ?? 0;
   const measurementCount = measurementsCountQuery.data ?? 0;
+  const catalogPhotoCount = catalogPhotosCountQuery.data ?? 0;
+
+  const isCatalogPhotosUnlimited =
+    isAdmin ||
+    (isPro &&
+      (business.plan === "quarterly" ||
+        business.plan === "yearly" ||
+        business.plan === "unlimited" ||
+        business.plan === "pro_yearly"));
 
   const maxClients = isPro ? Infinity : FREE_LIMITS.maxClients;
   const maxOrders = isPro ? Infinity : FREE_LIMITS.maxOrders;
   const maxMeasurements = isPro ? Infinity : FREE_LIMITS.maxMeasurements;
+  const maxCatalogPhotos = isCatalogPhotosUnlimited
+    ? Infinity
+    : isPro && (business.plan === "monthly" || business.plan === "pro_monthly")
+    ? 200
+    : 0;
 
   const clientPercent = isPro ? 0 : Math.min(100, Math.round((clientCount / maxClients) * 100));
   const orderPercent = isPro ? 0 : Math.min(100, Math.round((orderCount / maxOrders) * 100));
   const measurePercent = isPro ? 0 : Math.min(100, Math.round((measurementCount / maxMeasurements) * 100));
+  const catalogPhotoPercent = isCatalogPhotosUnlimited
+    ? 0
+    : Math.min(100, Math.round((catalogPhotoCount / (maxCatalogPhotos || 1)) * 100));
 
   return (
     <div className="mx-auto max-w-4xl space-y-8 pb-12">
@@ -286,7 +329,7 @@ function SubscriptionPage() {
       <section className="space-y-3">
         <SectionTitle>Consommation des Quotas de l'Atelier</SectionTitle>
 
-        <div className="grid gap-4 sm:grid-cols-3">
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           {/* 1. Quota Clients */}
           <div className="card-soft p-4 sm:p-5 space-y-3">
             <div className="flex items-center justify-between">
@@ -409,6 +452,55 @@ function SubscriptionPage() {
               </p>
             )}
           </div>
+
+          {/* 4. Quota Photos Catalogue (Lookbook) */}
+          <div className="card-soft p-4 sm:p-5 space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <span className="flex size-8 items-center justify-center rounded-lg bg-pink-500/15 text-pink-600">
+                  <ImageIcon className="size-4" />
+                </span>
+                <span className="font-semibold text-xs sm:text-sm">Photos Catalogue</span>
+              </div>
+              <span className="font-display font-bold text-xs sm:text-sm">
+                {isCatalogPhotosUnlimited
+                  ? `${catalogPhotoCount} (Illimité)`
+                  : isPro
+                  ? `${catalogPhotoCount} / 200`
+                  : `${catalogPhotoCount} (Pro)`}
+              </span>
+            </div>
+
+            {isCatalogPhotosUnlimited ? (
+              <p className="text-xs text-emerald-600 font-semibold flex items-center gap-1">
+                <Check className="size-3.5" /> Photos illimitées à l'infini
+              </p>
+            ) : isPro ? (
+              <div className="space-y-1.5">
+                <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
+                  <div
+                    className={`h-full transition-all duration-500 ${
+                      catalogPhotoPercent >= 100
+                        ? "bg-destructive"
+                        : catalogPhotoPercent >= 85
+                        ? "bg-amber-500"
+                        : "bg-primary"
+                    }`}
+                    style={{ width: `${catalogPhotoPercent}%` }}
+                  />
+                </div>
+                <p className="text-[11px] text-muted-foreground">
+                  {catalogPhotoCount >= 200
+                    ? "⚠️ Plafond de 200 photos atteint."
+                    : `${200 - catalogPhotoCount} photo(s) restante(s) (Mensuel).`}
+                </p>
+              </div>
+            ) : (
+              <p className="text-xs text-muted-foreground flex items-center gap-1">
+                <Lock className="size-3.5 text-amber-500" /> Réservé aux forfaits Pro
+              </p>
+            )}
+          </div>
         </div>
       </section>
 
@@ -441,7 +533,7 @@ function SubscriptionPage() {
                   <Check className="size-4 text-emerald-600 shrink-0 font-bold" /> Clients & commandes illimités
                 </p>
                 <p className="flex items-center gap-2 font-medium text-foreground">
-                  <Check className="size-4 text-emerald-600 shrink-0 font-bold" /> Catalogue & Lookbook complet
+                  <Check className="size-4 text-emerald-600 shrink-0 font-bold" /> Jusqu'à 200 photos de modèles au catalogue
                 </p>
                 <p className="flex items-center gap-2">
                   <Receipt className="size-4 text-primary shrink-0" /> Reçus imprimables & WhatsApp avec logo
@@ -487,6 +579,9 @@ function SubscriptionPage() {
               </div>
 
               <div className="space-y-2 pt-2 text-xs text-muted-foreground">
+                <p className="flex items-center gap-2 font-medium text-amber-700 dark:text-amber-400 font-bold">
+                  <Sparkles className="size-4 text-amber-600 shrink-0 font-bold" /> Photos catalogue 100% ILLIMITÉES (à l'infini)
+                </p>
                 <p className="flex items-center gap-2 font-medium text-foreground">
                   <Check className="size-4 text-emerald-600 shrink-0 font-bold" /> Tous les avantages Pro inclus
                 </p>
@@ -536,6 +631,9 @@ function SubscriptionPage() {
               </div>
 
               <div className="space-y-2 pt-2 text-xs text-muted-foreground">
+                <p className="flex items-center gap-2 font-medium text-emerald-700 dark:text-emerald-400 font-bold">
+                  <Sparkles className="size-4 text-emerald-600 shrink-0 font-bold" /> Photos catalogue 100% ILLIMITÉES HD
+                </p>
                 <p className="flex items-center gap-2 font-medium text-foreground">
                   <Check className="size-4 text-emerald-600 shrink-0 font-bold" /> Tous les avantages Pro débloqués
                 </p>
