@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
-import { cacheImage, getCachedImageUrl } from "@/lib/image-cache";
+import { cacheImage, getCachedImageUrl, cacheBlob } from "@/lib/image-cache";
 
 export const BUCKET = "atelier";
 
@@ -318,10 +318,15 @@ export async function uploadImage(businessId: string, file: File, folder: string
       contentType,
       upsert: false,
     });
-    if (!error) return path;
+    if (!error) {
+      // Mettre immédiatement en cache local pour offline
+      cacheBlob(path, blob).catch(() => {});
+      return path;
+    }
   } catch {
     // Échec réseau ou micro-coupure : repli sur le DataURL local
   }
+
 
   // Fallback universel : retourner le DataURL local compressé pour affichage et sauvegarde immédiate
   return await blobToDataUrl(blob);

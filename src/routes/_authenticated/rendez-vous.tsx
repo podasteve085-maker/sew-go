@@ -9,6 +9,7 @@ import { useBusiness } from "@/hooks/use-business";
 import { isProOrAdmin, isSubscriptionExpired } from "@/lib/quotas";
 import { UpgradeDialog } from "@/components/upgrade-dialog";
 import { fetchAppointments, fetchClients, type AppointmentRow } from "@/lib/queries";
+import { APPOINTMENT_TYPES, APPOINTMENT_STATUS, appointmentLabel } from "@/lib/domain";
 import { dateLongFr, fullName, today, addDays, cleanPhone, waLink } from "@/lib/format";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";

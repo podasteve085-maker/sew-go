@@ -218,6 +218,11 @@ function ClientDetail() {
                 path={c.photo_url}
                 alt={fullName(c)}
                 className="size-13 sm:size-16 shrink-0 rounded-2xl object-cover"
+                fallback={
+                  <span className="flex size-13 sm:size-16 shrink-0 items-center justify-center rounded-2xl bg-primary/10 font-display text-base sm:text-lg font-bold text-primary">
+                    {initials(c.first_name, c.last_name)}
+                  </span>
+                }
               />
             ) : (
               <span className="flex size-13 sm:size-16 shrink-0 items-center justify-center rounded-2xl bg-primary/10 font-display text-base sm:text-lg font-bold text-primary">

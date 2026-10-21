@@ -1,7 +1,8 @@
 import { supabase } from "@/integrations/supabase/client";
 import type { Json } from "@/integrations/supabase/types";
 import type { OrderStatus } from "@/lib/domain";
-import { deleteStorageFiles, materializeStoragePaths, uuid } from "@/hooks/use-signed-url";
+import { deleteStorageFiles, materializeStoragePaths, uuid, getSignedUrl } from "@/hooks/use-signed-url";
+import { cacheImage } from "@/lib/image-cache";
 import {
   setLocalItem,
   setLocalItems,
@@ -11,6 +12,7 @@ import {
   addToSyncQueue,
   getPendingSyncQueue,
 } from "./offline-storage";
+
 
 export async function currentBusinessId(): Promise<string> {
   // 1. Accès instantané au cache local (0ms de latence, fonctionne toujours en ligne et hors-ligne)
@@ -348,8 +350,26 @@ export async function fetchClients(term?: string): Promise<ClientRow[]> {
         );
         const combined = deduplicateClients([...serverRows, ...pendingLocals]);
         setLocalItems("clients", combined).catch(() => {});
+
+        // Pré-cache en arrière-plan les photos clients pour disponibilité hors-ligne
+        Promise.allSettled(
+          combined
+            .filter((c) => c.photo_url && !c.photo_url.startsWith("data:"))
+            .map(async (c) => {
+              try {
+                const signedUrl = await getSignedUrl(c.photo_url!);
+                if (signedUrl && !signedUrl.startsWith("blob:")) {
+                  cacheImage(c.photo_url!, signedUrl).catch(() => {});
+                }
+              } catch {
+                // ignore
+              }
+            })
+        ).catch(() => {});
+
         return combined;
       }
+
     } catch {
       // Fallback IndexedDB
     }

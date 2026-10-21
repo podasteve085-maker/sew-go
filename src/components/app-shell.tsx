@@ -81,7 +81,6 @@ export function AppShell({ children }: { children: ReactNode }) {
   // Préchargement intelligent en arrière-plan pour navigation instantanée (0ms) sur mobile
   useEffect(() => {
     if (!business?.id) return;
-    const bid = business.id;
     const prefetchData = () => {
       queryClient.prefetchQuery({
         queryKey: ["orders"],
@@ -107,6 +106,39 @@ export function AppShell({ children }: { children: ReactNode }) {
       setTimeout(prefetchData, 300);
     }
   }, [business?.id, queryClient]);
+
+  // Préchargement des chunks JS des routes principales pour navigation hors-ligne instantanée
+  // Ces imports dynamiques forcent le service worker à mettre les bundles en cache
+  useEffect(() => {
+    if (typeof navigator === "undefined" || !navigator.onLine) return;
+    const preloadRouteChunks = () => {
+      const routeImports = [
+        () => import("@/routes/_authenticated/commandes.index"),
+        () => import("@/routes/_authenticated/clients.index"),
+        () => import("@/routes/_authenticated/mesures"),
+        () => import("@/routes/_authenticated/rendez-vous"),
+        () => import("@/routes/_authenticated/statistiques"),
+        () => import("@/routes/_authenticated/catalogue"),
+        () => import("@/routes/_authenticated/atelier"),
+        () => import("@/routes/_authenticated/abonnement"),
+      ];
+      // Importer séquentiellement avec délai pour ne pas saturer la bande passante
+      routeImports.reduce((chain, fn, i) => {
+        return chain.then(() => new Promise<void>((res) => {
+          setTimeout(() => { fn().catch(() => {}).finally(res); }, i * 400);
+        }));
+      }, Promise.resolve());
+    };
+
+    if (typeof window !== "undefined" && "requestIdleCallback" in window) {
+      (window as unknown as { requestIdleCallback: (cb: () => void, opts: { timeout: number }) => void })
+        .requestIdleCallback(preloadRouteChunks, { timeout: 5000 });
+    } else {
+      setTimeout(preloadRouteChunks, 2000);
+    }
+  }, []);
+
+
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -359,7 +391,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       <DraggableFab />
 
       {/* Navigation basse — téléphone avec repères tactiles nets et accès au menu complet */}
-      <nav className="no-print fixed inset-x-0 bottom-0 z-30 border-t border-border/80 bg-card/98 pb-[max(env(safe-area-inset-bottom),0.25rem)] pt-1 backdrop-blur-md lg:hidden">
+      <nav className="no-print fixed inset-x-0 bottom-0 z-40 border-t border-border/80 bg-card/98 pb-[max(env(safe-area-inset-bottom),0.25rem)] pt-1 backdrop-blur-md lg:hidden">
         <div className="flex items-center justify-around">
           {MOBILE_BOTTOM_NAV.map((item) => {
             const active = pathname.startsWith(item.to);
@@ -419,11 +451,11 @@ export function AppShell({ children }: { children: ReactNode }) {
 
       {/* Tiroir de navigation mobile complet (Tous les modules + Déconnexion) */}
       <Sheet open={mobileMenuOpen} onOpenChange={setMobileMenuOpen}>
-        <SheetContent side="left" className="w-[85vw] max-w-xs p-0 flex flex-col justify-between bg-sidebar text-sidebar-foreground border-r border-sidebar-border">
+        <SheetContent side="left" className="w-[85vw] max-w-xs landscape:max-w-sm p-0 flex flex-col bg-sidebar text-sidebar-foreground border-r border-sidebar-border overflow-hidden">
           {/* En-tête Atelier */}
-          <div className="p-4 border-b border-sidebar-border bg-sidebar/50">
-            <div className="flex items-center gap-3">
-              <div className="size-11 rounded-xl overflow-hidden shrink-0 border border-sidebar-border/60 bg-sidebar-primary/20 flex items-center justify-center ring-2 ring-primary/20 shadow-xs">
+          <div className="p-3 landscape:p-2 border-b border-sidebar-border bg-sidebar/50 shrink-0">
+            <div className="flex items-center gap-3 landscape:gap-2">
+              <div className="size-11 landscape:size-8 rounded-xl overflow-hidden shrink-0 border border-sidebar-border/60 bg-sidebar-primary/20 flex items-center justify-center ring-2 ring-primary/20 shadow-xs">
                 <StoredImage
                   path={business?.logo_url}
                   alt="Logo atelier"
@@ -436,13 +468,13 @@ export function AppShell({ children }: { children: ReactNode }) {
                 />
               </div>
               <div className="min-w-0 flex-1">
-                <p className="truncate font-display text-sm font-bold text-sidebar-foreground">
+                <p className="truncate font-display text-sm landscape:text-xs font-bold text-sidebar-foreground">
                   {business?.name ?? "Mon atelier"}
                 </p>
-                <p className="truncate text-xs text-sidebar-foreground/60">
+                <p className="truncate text-xs text-sidebar-foreground/60 landscape:hidden">
                   {business?.owner_name || "Couturier & Styliste"}
                 </p>
-                <div className="mt-1">
+                <div className="mt-1 landscape:hidden">
                   {business?.is_admin ? (
                     <span className="inline-flex rounded-full bg-purple-600 px-2 py-0.5 text-[9px] font-extrabold text-white">
                       ADMIN PLATEFORME
@@ -465,8 +497,9 @@ export function AppShell({ children }: { children: ReactNode }) {
             </div>
           </div>
 
+
           {/* Sélecteur de thème immédiat au sommet du menu mobile */}
-          <div className="px-3.5 py-2.5 border-b border-sidebar-border bg-sidebar-accent/30 shrink-0">
+          <div className="landscape:hidden px-3.5 py-2.5 border-b border-sidebar-border bg-sidebar-accent/30 shrink-0">
             <div className="flex items-center justify-between mb-1.5 px-0.5">
               <span className="text-[10px] font-bold uppercase tracking-wider text-sidebar-foreground/70">
                 Thème d'affichage
@@ -479,7 +512,8 @@ export function AppShell({ children }: { children: ReactNode }) {
           </div>
 
           {/* Liste complète de tous les modules */}
-          <div className="flex-1 overflow-y-auto px-3 py-3 space-y-4">
+          <div className="flex-1 overflow-y-auto px-3 py-2 landscape:py-1 space-y-3 landscape:space-y-2">
+
             <div className="space-y-1">
               <p className="px-3 text-[10px] font-bold uppercase tracking-wider text-sidebar-foreground/50">
                 Atelier au quotidien
@@ -498,17 +532,18 @@ export function AppShell({ children }: { children: ReactNode }) {
                     key={item.to}
                     to={item.to}
                     onClick={() => setMobileMenuOpen(false)}
-                    className={`flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-colors ${
+                    className={`flex items-center gap-3 rounded-xl px-3 py-2 landscape:py-1.5 text-sm landscape:text-xs font-medium transition-colors ${
                       active
                         ? "bg-sidebar-accent text-sidebar-accent-foreground font-bold shadow-xs"
                         : "text-sidebar-foreground/80 hover:bg-sidebar-accent/60 hover:text-sidebar-accent-foreground"
                     }`}
                   >
-                    <item.icon className="size-4.5 shrink-0" />
+                    <item.icon className="size-4 shrink-0" />
                     <span>{item.label}</span>
                   </Link>
                 );
               })}
+
             </div>
 
             <div className="space-y-1 pt-2 border-t border-sidebar-border">
@@ -526,13 +561,13 @@ export function AppShell({ children }: { children: ReactNode }) {
                     key={item.to}
                     to={item.to}
                     onClick={() => setMobileMenuOpen(false)}
-                    className={`flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-colors ${
+                    className={`flex items-center gap-3 rounded-xl px-3 py-2 landscape:py-1.5 text-sm landscape:text-xs font-medium transition-colors ${
                       active
                         ? "bg-sidebar-accent text-sidebar-accent-foreground font-bold shadow-xs"
                         : "text-sidebar-foreground/80 hover:bg-sidebar-accent/60 hover:text-sidebar-accent-foreground"
                     }`}
                   >
-                    <item.icon className="size-4.5 shrink-0" />
+                    <item.icon className="size-4 shrink-0" />
                     <span>{item.label}</span>
                   </Link>
                 );
@@ -542,13 +577,13 @@ export function AppShell({ children }: { children: ReactNode }) {
                 <Link
                   to="/admin"
                   onClick={() => setMobileMenuOpen(false)}
-                  className={`flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-bold transition-colors ${
+                  className={`flex items-center gap-3 rounded-xl px-3 py-2 landscape:py-1.5 text-sm landscape:text-xs font-bold transition-colors ${
                     pathname.startsWith("/admin")
                       ? "bg-purple-600 text-white shadow-xs"
                       : "text-purple-400 hover:bg-purple-600/20 hover:text-purple-300"
                   }`}
                 >
-                  <ShieldAlert className="size-4.5 shrink-0" />
+                  <ShieldAlert className="size-4 shrink-0" />
                   <span>Administration Centrale</span>
                   <span className="ml-auto rounded bg-purple-700 px-1.5 py-0.5 text-[9px] font-extrabold text-white">
                     ADMIN
@@ -558,8 +593,9 @@ export function AppShell({ children }: { children: ReactNode }) {
             </div>
           </div>
 
+
           {/* Pied du tiroir : Réseau + Installation PWA + Bouton Se Déconnecter */}
-          <div className="p-3.5 border-t border-sidebar-border space-y-3 bg-sidebar/70">
+          <div className="p-3 landscape:p-2 border-t border-sidebar-border space-y-2 landscape:space-y-1 bg-sidebar/70 shrink-0">
             <div className="flex items-center justify-between px-1">
               <span className="text-[10px] font-semibold uppercase tracking-wider text-sidebar-foreground/60">
                 État connexion
@@ -569,9 +605,10 @@ export function AppShell({ children }: { children: ReactNode }) {
             <PwaInstallButton />
             <SignOutButton
               onDone={() => setMobileMenuOpen(false)}
-              className="flex w-full items-center justify-center gap-2 rounded-xl bg-destructive/15 text-destructive border border-destructive/25 py-2.5 text-sm font-bold transition-colors active:scale-95 hover:bg-destructive hover:text-destructive-foreground cursor-pointer"
+              className="flex w-full items-center justify-center gap-2 rounded-xl bg-destructive/15 text-destructive border border-destructive/25 py-2 landscape:py-1.5 text-sm font-bold transition-colors active:scale-95 hover:bg-destructive hover:text-destructive-foreground cursor-pointer"
             />
           </div>
+
         </SheetContent>
       </Sheet>
 
@@ -663,50 +700,62 @@ function DraggableFab() {
   } | null>(null);
 
   const BUTTON_SIZE = 52;
+  // Réserve minimale en bas (barre de navigation ~72px + marge sécurité)
+  const BOTTOM_NAV_H = 80;
+  // Réserve minimale en haut (header ~56px + marge)
+  const TOP_HEADER_H = 72;
+
+  const getDefaultPos = () => {
+    if (typeof window === "undefined") return null;
+    const maxX = window.innerWidth - BUTTON_SIZE - 14;
+    const maxY = window.innerHeight - BOTTOM_NAV_H - BUTTON_SIZE;
+    return { x: maxX, y: maxY };
+  };
 
   useEffect(() => {
     if (typeof window === "undefined" || isFormOrDetailPage) return;
 
-    const calcDefault = () => {
+    const calcPos = () => {
+      const maxX = window.innerWidth - BUTTON_SIZE - 14;
+      const maxY = window.innerHeight - BOTTOM_NAV_H - BUTTON_SIZE;
+      const minY = TOP_HEADER_H;
       const saved = localStorage.getItem("couturpro_fab_pos");
       if (saved) {
         try {
           const parsed = JSON.parse(saved);
           if (typeof parsed.x === "number" && typeof parsed.y === "number") {
-            const maxX = window.innerWidth - BUTTON_SIZE - 12;
-            const maxY = window.innerHeight - 72 - BUTTON_SIZE;
-            return {
-              x: Math.min(Math.max(12, parsed.x), maxX),
-              y: Math.min(Math.max(64, parsed.y), maxY),
-            };
+            // Valider les coordonnées sauvegardées (éviter les positions obsolètes d'anciens écrans)
+            const validX = Math.min(Math.max(14, parsed.x), maxX);
+            const validY = Math.min(Math.max(minY, parsed.y), maxY);
+            // Si la position sauvegardée est très différente de l'écran actuel, réinitialiser
+            if (validY < maxY - BUTTON_SIZE * 3) {
+              // Trop haut → ignorer le cache et mettre en bas
+              return { x: validX > window.innerWidth / 2 ? maxX : 14, y: maxY };
+            }
+            return { x: validX, y: validY };
           }
-        } catch {
-          // ignore
-        }
+        } catch { /* ignore */ }
       }
-      return {
-        x: window.innerWidth - BUTTON_SIZE - 16,
-        y: window.innerHeight - 76 - BUTTON_SIZE - 10,
-      };
+      return { x: maxX, y: maxY };
     };
 
-    setPos(calcDefault());
+    setPos(calcPos());
 
     const onResize = () => {
       setPos((prev) => {
-        if (!prev) return calcDefault();
-        const maxX = window.innerWidth - BUTTON_SIZE - 12;
-        const maxY = window.innerHeight - 72 - BUTTON_SIZE;
+        const maxX = window.innerWidth - BUTTON_SIZE - 14;
+        const maxY = window.innerHeight - BOTTOM_NAV_H - BUTTON_SIZE;
+        if (!prev) return getDefaultPos();
         return {
-          x: prev.x > window.innerWidth / 2 ? maxX : 12,
-          y: Math.min(Math.max(64, prev.y), maxY),
+          x: prev.x > window.innerWidth / 2 ? maxX : 14,
+          y: maxY, // toujours recoller au bas lors du resize (évite les chevauchements de contenu)
         };
       });
     };
 
     window.addEventListener("resize", onResize);
     return () => window.removeEventListener("resize", onResize);
-  }, []);
+  }, [isFormOrDetailPage]);
 
   const handlePointerDown = (e: React.PointerEvent<HTMLButtonElement>) => {
     if (!pos) return;
@@ -725,16 +774,16 @@ function DraggableFab() {
     const deltaX = e.clientX - dragInfo.current.startX;
     const deltaY = e.clientY - dragInfo.current.startY;
 
-    if (!dragInfo.current.hasMoved && Math.hypot(deltaX, deltaY) > 5) {
+    if (!dragInfo.current.hasMoved && Math.hypot(deltaX, deltaY) > 8) {
       dragInfo.current.hasMoved = true;
       setIsDragging(true);
     }
 
     if (dragInfo.current.hasMoved) {
       const maxX = window.innerWidth - BUTTON_SIZE - 10;
-      const maxY = window.innerHeight - 68 - BUTTON_SIZE;
+      const maxY = window.innerHeight - BOTTOM_NAV_H - BUTTON_SIZE;
       const newX = Math.min(Math.max(10, dragInfo.current.btnStartX + deltaX), maxX);
-      const newY = Math.min(Math.max(60, dragInfo.current.btnStartY + deltaY), maxY);
+      const newY = Math.min(Math.max(TOP_HEADER_H, dragInfo.current.btnStartY + deltaY), maxY);
       setPos({ x: newX, y: newY });
     }
   };
@@ -743,9 +792,7 @@ function DraggableFab() {
     if (!dragInfo.current) return;
     try {
       (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
-    } catch {
-      // ignore
-    }
+    } catch { /* ignore */ }
 
     const hadMoved = dragInfo.current.hasMoved;
     const currentPos = pos;
@@ -753,15 +800,15 @@ function DraggableFab() {
     setIsDragging(false);
 
     if (hadMoved && currentPos) {
+      // Snap horizontal sur le bord le plus proche ; Y reste inchangé
       const isLeft = currentPos.x + BUTTON_SIZE / 2 < window.innerWidth / 2;
       const snappedX = isLeft ? 14 : window.innerWidth - BUTTON_SIZE - 14;
-      const snappedPos = { x: snappedX, y: currentPos.y };
+      const maxY = window.innerHeight - BOTTOM_NAV_H - BUTTON_SIZE;
+      const snappedPos = { x: snappedX, y: Math.min(currentPos.y, maxY) };
       setPos(snappedPos);
       try {
         localStorage.setItem("couturpro_fab_pos", JSON.stringify(snappedPos));
-      } catch {
-        // ignore
-      }
+      } catch { /* ignore */ }
     } else if (!hadMoved) {
       navigate({ to: "/commandes/nouvelle" });
     }
@@ -779,7 +826,7 @@ function DraggableFab() {
       style={{
         transform: `translate3d(${pos.x}px, ${pos.y}px, 0)`,
       }}
-      className={`no-print fixed left-0 top-0 z-40 flex size-[52px] items-center justify-center rounded-full bg-primary text-primary-foreground select-none touch-none lg:hidden shadow-xl border-2 border-white/25 cursor-grab active:cursor-grabbing ${
+      className={`no-print fixed left-0 top-0 z-40 flex size-[52px] items-center justify-center rounded-full bg-primary text-primary-foreground select-none touch-none lg:hidden landscape:hidden shadow-xl border-2 border-white/25 cursor-grab active:cursor-grabbing ${
         isDragging
           ? "scale-110 shadow-2xl opacity-95 transition-none"
           : "scale-100 opacity-90 hover:opacity-100 transition-all duration-300 ease-out active:scale-95"
@@ -791,6 +838,7 @@ function DraggableFab() {
     </button>
   );
 }
+
 
 function GlobalSearch({
   open,

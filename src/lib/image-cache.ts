@@ -99,6 +99,41 @@ export async function getCachedImageUrl(storagePath: string): Promise<string | n
 }
 
 /**
+ * Met directement un Blob en cache sans fetch réseau.
+ * Utilisé après un upload Supabase réussi pour garantir la disponibilité hors-ligne immédiate.
+ */
+export async function cacheBlob(storagePath: string, blob: Blob): Promise<boolean> {
+  if (!storagePath || !blob || blob.size === 0) return false;
+  if (storagePath.startsWith("data:")) return false;
+
+  try {
+    const key = normalizeCacheKey(storagePath);
+
+    if (isCacheApiSupported()) {
+      const cache = await caches.open(CACHE_NAME);
+      const responseToCache = new Response(blob, {
+        headers: {
+          "Content-Type": blob.type || "image/webp",
+          "Content-Length": String(blob.size),
+          "X-Cached-At": Date.now().toString(),
+        },
+      });
+      await cache.put(key, responseToCache);
+    }
+
+    // Rafraîchir aussi le blob URL mémoire
+    const prev = inMemoryBlobUrls.get(key);
+    if (prev) {
+      try { URL.revokeObjectURL(prev); } catch { /* ignore */ }
+    }
+    inMemoryBlobUrls.set(key, URL.createObjectURL(blob));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Supprime une image du cache local
  */
 export async function removeCachedImage(storagePath: string): Promise<void> {

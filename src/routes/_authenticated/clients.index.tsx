@@ -245,12 +245,18 @@ function ClientsPage() {
                     path={c.photo_url}
                     alt={fullName(c)}
                     className="size-11 shrink-0 rounded-full object-cover ring-1 ring-border"
+                    fallback={
+                      <span className="flex size-11 shrink-0 items-center justify-center rounded-full bg-primary/10 font-display text-sm font-bold text-primary">
+                        {initials(c.first_name, c.last_name)}
+                      </span>
+                    }
                   />
                 ) : (
                   <span className="flex size-11 shrink-0 items-center justify-center rounded-full bg-primary/10 font-display text-sm font-bold text-primary">
                     {initials(c.first_name, c.last_name)}
                   </span>
                 )}
+
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center justify-between gap-1">
                     <p className="truncate font-display text-sm font-bold text-foreground hover:text-primary">
