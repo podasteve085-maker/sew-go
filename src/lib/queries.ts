@@ -505,11 +505,20 @@ export async function fetchAllMeasurementSets(): Promise<FullMeasurementSetRow[]
       if (!error && data) {
         const rows = data as unknown as FullMeasurementSetRow[];
         const localSets = await getAllLocalItems<FullMeasurementSetRow>("measurement_sets");
-        const serverIds = new Set(rows.map((r) => r.id));
-        const pendingLocals = localSets.filter(
-          (l) => !serverIds.has(l.id) && (!businessId || l.business_id === businessId || !l.business_id),
+        const pendingIds = new Set(
+          (await getPendingSyncQueue())
+            .filter((q) => q.entity === "measurement_set" && q.action !== "delete")
+            .map((q) => q.payload["id"] as string)
+            .filter(Boolean),
         );
-        const combined = [...rows, ...pendingLocals];
+        const localById = new Map(localSets.map((set) => [set.id, set]));
+        const combined = rows.map((row) => pendingIds.has(row.id) ? (localById.get(row.id) ?? row) : row);
+        const serverIds = new Set(rows.map((r) => r.id));
+        combined.push(
+          ...localSets.filter(
+            (l) => !serverIds.has(l.id) && (!businessId || l.business_id === businessId || !l.business_id),
+          ),
+        );
         const enriched = await enrichMeasurementSetsWithClients(combined);
         setLocalItems("measurement_sets", enriched).catch(() => {});
         return enriched;
@@ -541,11 +550,20 @@ export async function fetchMeasurementSets(clientId: string): Promise<Measuremen
       if (!error && data) {
         const rows = data as unknown as MeasurementSetRow[];
         const localSets = await getAllLocalItems<MeasurementSetRow>("measurement_sets");
-        const serverIds = new Set(rows.map((r) => r.id));
-        const pendingLocals = localSets.filter(
-          (l) => l.client_id === clientId && !serverIds.has(l.id),
+        const pendingIds = new Set(
+          (await getPendingSyncQueue())
+            .filter((q) => q.entity === "measurement_set" && q.action !== "delete")
+            .map((q) => q.payload["id"] as string)
+            .filter(Boolean),
         );
-        const combined = [...rows, ...pendingLocals];
+        const localById = new Map(localSets.map((set) => [set.id, set]));
+        const combined = rows
+          .filter((row) => row.client_id === clientId)
+          .map((row) => pendingIds.has(row.id) ? (localById.get(row.id) ?? row) : row);
+        const serverIds = new Set(rows.map((r) => r.id));
+        combined.push(
+          ...localSets.filter((l) => l.client_id === clientId && !serverIds.has(l.id)),
+        );
         setLocalItems("measurement_sets", combined).catch(() => {});
         return combined;
       }
@@ -576,11 +594,20 @@ export async function fetchAppointments(opts?: { clientId?: string }): Promise<A
       if (!error && data) {
         const rows = data as unknown as AppointmentRow[];
         const localAppts = await getAllLocalItems<AppointmentRow>("appointments");
-        const serverIds = new Set(rows.map((r) => r.id));
-        const pendingLocals = localAppts.filter(
-          (l) => !serverIds.has(l.id) && (!businessId || l.business_id === businessId || !l.business_id),
+        const pendingIds = new Set(
+          (await getPendingSyncQueue())
+            .filter((q) => q.entity === "appointment" && q.action !== "delete")
+            .map((q) => q.payload["id"] as string)
+            .filter(Boolean),
         );
-        const combined = [...rows, ...pendingLocals];
+        const localById = new Map(localAppts.map((appointment) => [appointment.id, appointment]));
+        const combined = rows.map((row) => pendingIds.has(row.id) ? (localById.get(row.id) ?? row) : row);
+        const serverIds = new Set(rows.map((r) => r.id));
+        combined.push(
+          ...localAppts.filter(
+            (l) => !serverIds.has(l.id) && (!businessId || l.business_id === businessId || !l.business_id),
+          ),
+        );
         const enriched = await enrichAppointmentsWithClients(combined);
         setLocalItems("appointments", enriched).catch(() => {});
         return enriched;
@@ -1718,18 +1745,25 @@ export async function saveMeasurementSetOffline(
         .single();
 
       if (!setError && setRow) {
+        const { error: deleteValuesError } = await supabase
+          .from("measurement_values")
+          .delete()
+          .eq("set_id", setId);
+        if (deleteValuesError) throw deleteValuesError;
         if (values.length > 0) {
-          await supabase.from("measurement_values").delete().eq("set_id", setId);
-          await supabase.from("measurement_values").insert(
-            values.map((v, i) => ({
-              business_id: businessId,
-              set_id: setId,
-              name: v.name,
-              value: v.value,
-              unit: v.unit || "cm",
-              position: v.position ?? i,
-            })) as never,
-          );
+          const { error: insertValuesError } = await supabase
+            .from("measurement_values")
+            .insert(
+              values.map((v, i) => ({
+                business_id: businessId,
+                set_id: setId,
+                name: v.name,
+                value: v.value,
+                unit: v.unit || "cm",
+                position: v.position ?? i,
+              })) as never,
+            );
+          if (insertValuesError) throw insertValuesError;
         }
         const fullRow: FullMeasurementSetRow = {
           ...localSet,

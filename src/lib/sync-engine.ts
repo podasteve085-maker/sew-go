@@ -11,6 +11,7 @@ import { isMissingDbRoutine, parseCatalogRpcPayload } from "@/lib/queries";
 import type { Json } from "@/integrations/supabase/types";
 import {
   getPendingSyncQueue,
+  getLocalItem,
   removeSyncQueueItem,
   updateSyncQueueItem,
   getSyncQueueCount,
@@ -351,22 +352,32 @@ async function processSyncItem(
           .single();
         if (setError) throw setError;
 
-        if (values.length > 0 && setRow?.id) {
+        if (setRow?.id) {
           const bizId =
             setRow.business_id ||
             setData["business_id"] ||
             (await (await import("./queries")).currentBusinessId());
 
-          await supabase.from("measurement_values").delete().eq("set_id", setRow.id);
-          const valuesToInsert = values.map((v) => ({
-            business_id: bizId,
-            set_id: setRow.id,
-            name: v["name"],
-            value: v["value"],
-            unit: v["unit"] || "cm",
-            position: v["position"] || 0,
-          }));
-          await supabase.from("measurement_values").insert(valuesToInsert as never);
+          const { error: deleteValuesError } = await supabase
+            .from("measurement_values")
+            .delete()
+            .eq("set_id", setRow.id);
+          if (deleteValuesError) throw deleteValuesError;
+
+          if (values.length > 0) {
+            const valuesToInsert = values.map((v) => ({
+              business_id: bizId,
+              set_id: setRow.id,
+              name: v["name"],
+              value: v["value"],
+              unit: v["unit"] || "cm",
+              position: typeof v["position"] === "number" ? v["position"] : 0,
+            }));
+            const { error: insertValuesError } = await supabase
+              .from("measurement_values")
+              .insert(valuesToInsert as never);
+            if (insertValuesError) throw insertValuesError;
+          }
         }
 
         if (tempId && setRow?.id) {
@@ -374,7 +385,19 @@ async function processSyncItem(
           if (tempId.startsWith("temp_")) {
             await deleteLocalItem("measurement_sets", tempId);
           }
-          await setLocalItem("measurement_sets", setRow);
+          const localSet = await getLocalItem<Record<string, unknown>>("measurement_sets", tempId);
+          await setLocalItem("measurement_sets", {
+            ...localSet,
+            ...setRow,
+            id: setRow.id,
+            measurement_values: values.map((v) => ({
+              id: `val_${v["position"] ?? 0}`,
+              name: v["name"],
+              value: v["value"],
+              unit: v["unit"] || "cm",
+              position: typeof v["position"] === "number" ? v["position"] : 0,
+            })),
+          });
         }
       } else if (item.action === "delete") {
         const id = (payload["id"] as string) || item.tempId!;

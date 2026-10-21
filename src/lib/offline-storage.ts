@@ -211,7 +211,7 @@ export async function addToSyncQueue(
       (q) =>
         q.entity === item.entity &&
         ((q.payload["id"] as string) === targetId || q.tempId === targetId) &&
-        q.status === "pending",
+        q.status !== "syncing",
     );
 
     if (existing) {
@@ -221,7 +221,10 @@ export async function addToSyncQueue(
         ...existing,
         action: mergedAction,
         payload: { ...existing.payload, ...item.payload },
-        createdAt: new Date().toISOString(),
+        createdAt: existing.createdAt,
+        status: "pending",
+        retryCount: 0,
+        errorMessage: undefined,
       };
       await setLocalItem("sync_queue", updatedItem);
       return updatedItem;
