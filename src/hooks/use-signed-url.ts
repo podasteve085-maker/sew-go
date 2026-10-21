@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
+import { cacheImage, getCachedImageUrl } from "@/lib/image-cache";
 
 export const BUCKET = "atelier";
 
@@ -19,24 +20,61 @@ export function uuid(): string {
   });
 }
 
-/** Lien temporaire pour afficher un fichier privé du stockage. */
+/** Récupère l'URL signée en ligne ou le blob du cache hors-ligne. */
+export async function getSignedUrl(path: string | null | undefined): Promise<string | null> {
+  if (!path) return null;
+  if (
+    path.startsWith("data:") ||
+    path.startsWith("http://") ||
+    path.startsWith("https://") ||
+    path.startsWith("blob:")
+  ) {
+    return path;
+  }
+
+  // 1. Si en ligne : tenter createSignedUrl ou getPublicUrl
+  const isOnline = typeof navigator === "undefined" || navigator.onLine;
+  if (isOnline) {
+    try {
+      const { data, error } = await supabase.storage
+        .from(BUCKET)
+        .createSignedUrl(path, 60 * 60);
+      if (!error && data?.signedUrl) {
+        // En arrière-plan, mettre en cache le binaire pour les futures sessions hors-ligne
+        cacheImage(path, data.signedUrl).catch(() => {});
+        return data.signedUrl;
+      }
+
+      const isCatalogPhoto = String(path).includes("/catalog/");
+      if (isCatalogPhoto) {
+        const { data: publicData } = supabase.storage.from(BUCKET).getPublicUrl(path);
+        if (publicData?.publicUrl) {
+          cacheImage(path, publicData.publicUrl).catch(() => {});
+          return publicData.publicUrl;
+        }
+      }
+    } catch {
+      // Repli hors-ligne en cas d'erreur réseau
+    }
+  }
+
+  // 2. Repli Hors-ligne : chercher dans le cache local binaire
+  const cached = await getCachedImageUrl(path);
+  if (cached) return cached;
+
+  return null;
+}
+
+/** Lien temporaire pour afficher un fichier privé du stockage avec fallback hors-ligne. */
 export function useSignedUrl(path: string | null | undefined) {
   return useQuery({
     queryKey: ["signed-url", path],
     enabled: !!path,
     staleTime: 45 * 60 * 1000,
     queryFn: async () => {
-      const { data, error } = await supabase.storage
-        .from(BUCKET)
-        .createSignedUrl(path as string, 60 * 60);
-      if (!error && data?.signedUrl) return data.signedUrl;
-
-      const isCatalogPhoto = String(path).includes("/catalog/");
-      if (isCatalogPhoto) {
-        const { data: publicData } = supabase.storage.from(BUCKET).getPublicUrl(path as string);
-        if (publicData?.publicUrl) return publicData.publicUrl;
-      }
-      throw error ?? new Error("Image indisponible");
+      const url = await getSignedUrl(path);
+      if (!url) throw new Error("Image indisponible");
+      return url;
     },
   });
 }

@@ -1,4 +1,4 @@
-import { useMemo, useEffect } from "react";
+import { useMemo, useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { fetchAppointments, fetchOrders } from "@/lib/queries";
 import { useBusiness } from "@/hooks/use-business";
@@ -27,10 +27,12 @@ export function useNotifications() {
   const orders = ordersQuery.data ?? [];
   const atelierName = business?.name ?? "Notre atelier";
 
+  const [refreshKey, setRefreshKey] = useState(0);
+
   // Calcul instantané des rappels (Jour J, Veille, Retards)
   const notifications: AppNotification[] = useMemo(() => {
     return generateReminders(appointments, orders, atelierName);
-  }, [appointments, orders, atelierName]);
+  }, [appointments, orders, atelierName, refreshKey]);
 
   // Déclenchement automatique des notifications système (bannière push téléphone)
   useEffect(() => {
@@ -50,5 +52,10 @@ export function useNotifications() {
     overdueCount,
     totalCount: notifications.length,
     isLoading: appointmentsQuery.isLoading || ordersQuery.isLoading,
+    refetch: () => {
+      appointmentsQuery.refetch();
+      ordersQuery.refetch();
+      setRefreshKey((k) => k + 1);
+    },
   };
 }

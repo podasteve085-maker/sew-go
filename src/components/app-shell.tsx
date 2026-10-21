@@ -76,7 +76,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   const [upgradeOpen, setUpgradeOpen] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const pathname = useRouterState({ select: (s) => s.location.pathname });
-  const { notifications } = useNotifications();
+  const { notifications, refetch: refetchNotifs } = useNotifications();
 
   // Préchargement intelligent en arrière-plan pour navigation instantanée (0ms) sur mobile
   useEffect(() => {
@@ -333,7 +333,7 @@ export function AppShell({ children }: { children: ReactNode }) {
 
             {/* Centre de Notifications & Rappels Jour J & Veille */}
             <div className="shrink-0 flex items-center">
-              <NotificationCenter notifications={notifications} />
+              <NotificationCenter notifications={notifications} onRefresh={refetchNotifs} />
             </div>
 
             {/* Bascule Thème Clair / Sombre / Auto TOUJOURS VISIBLE */}

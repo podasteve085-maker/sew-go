@@ -187,6 +187,7 @@ export function StoredImage({
       (path.startsWith("http://") ||
         path.startsWith("https://") ||
         path.startsWith("data:") ||
+        path.startsWith("blob:") ||
         path.startsWith("/")),
   );
   const { data, isLoading, isError } = useSignedUrl(isDirect ? null : path);

@@ -30,6 +30,7 @@ import {
   fetchMeasurementSets,
   saveOrderOffline,
   savePaymentOffline,
+  saveOrderImageOffline,
 } from "@/lib/queries";
 import { IMAGE_KINDS, PAYMENT_METHODS } from "@/lib/domain";
 import { addDays, fullName, today, dateFr, fcfa } from "@/lib/format";
@@ -200,18 +201,17 @@ function NewOrder() {
         });
       }
 
-      if (images.length && (typeof navigator === "undefined" || navigator.onLine)) {
-        try {
-          await supabase.from("order_images").insert(
-            images.map((img) => ({
-              business_id: business.id,
+      if (images.length) {
+        for (const img of images) {
+          try {
+            await saveOrderImageOffline({
               order_id: orderId,
               path: img.path,
               kind: img.kind,
-            })),
-          );
-        } catch {
-          // ignore offline image attachment
+            });
+          } catch {
+            // continuer pour les autres images
+          }
         }
       }
       return orderId;

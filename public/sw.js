@@ -70,7 +70,49 @@ self.addEventListener("fetch", (event) => {
   const { request } = event;
   const url = new URL(request.url);
 
-  // 1. Ne pas intercepter les requêtes vers Supabase (gérées par IndexedDB + sync-engine)
+  // 1. Requêtes Supabase Storage (images catalogue, commandes, ateliers) -> Cache-First
+  const isSupabaseStorageImage =
+    url.hostname.includes("supabase.co") &&
+    url.pathname.includes("/storage/v1/object/") &&
+    request.method === "GET";
+
+  if (isSupabaseStorageImage) {
+    event.respondWith(
+      (async () => {
+        // Clé de cache stable sans query params (ignore les tokens d'expiration)
+        const storageKey = new Request(url.origin + url.pathname);
+        const imagesCache = await caches.open("couturpro-images-v1");
+
+        const cachedResponse = await imagesCache.match(storageKey);
+        if (cachedResponse) {
+          // Rafraîchissement silencieux en arrière-plan si en ligne
+          if (typeof navigator !== "undefined" && navigator.onLine) {
+            fetch(request)
+              .then((netRes) => {
+                if (netRes && netRes.ok) {
+                  imagesCache.put(storageKey, netRes.clone());
+                }
+              })
+              .catch(() => {});
+          }
+          return cachedResponse;
+        }
+
+        try {
+          const netRes = await fetch(request);
+          if (netRes && netRes.ok) {
+            imagesCache.put(storageKey, netRes.clone());
+          }
+          return netRes;
+        } catch {
+          return cachedResponse || new Response("", { status: 408 });
+        }
+      })()
+    );
+    return;
+  }
+
+  // 1b. Ne pas intercepter les requêtes API/Auth vers Supabase (gérées par IndexedDB + sync-engine)
   if (url.hostname.includes("supabase.co")) return;
 
   // 2. Ne pas intercepter les requêtes cross-origin non prévues (analytics, etc.)

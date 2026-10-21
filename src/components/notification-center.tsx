@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Link } from "@tanstack/react-router";
+import { useQueryClient } from "@tanstack/react-query";
 import {
   Bell,
   Calendar,
@@ -8,9 +9,11 @@ import {
   ExternalLink,
   CheckCircle2,
   AlertTriangle,
-  Sparkles,
   Shirt,
   Volume2,
+  X,
+  CheckCheck,
+  FastForward,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -18,8 +21,11 @@ import {
   type AppNotification,
   getNotificationPermission,
   requestNotificationPermission,
+  dismissNotificationId,
+  dismissAllNotificationIds,
 } from "@/lib/notifications";
-import { waLink, cleanPhone } from "@/lib/format";
+import { waLink, cleanPhone, addDays, dateFr, today } from "@/lib/format";
+import { saveOrderOffline, saveAppointmentOffline } from "@/lib/queries";
 import {
   Popover,
   PopoverContent,
@@ -32,9 +38,10 @@ interface NotificationCenterProps {
   onRefresh?: () => void;
 }
 
-export function NotificationCenter({ notifications }: NotificationCenterProps) {
+export function NotificationCenter({ notifications, onRefresh }: NotificationCenterProps) {
   const [open, setOpen] = useState(false);
   const [permission, setPermission] = useState(getNotificationPermission());
+  const queryClient = useQueryClient();
 
   const todayItems = notifications.filter((n) => n.timing === "today");
   const tomorrowItems = notifications.filter((n) => n.timing === "tomorrow");
@@ -65,6 +72,44 @@ export function NotificationCenter({ notifications }: NotificationCenterProps) {
     }
   };
 
+  const handleDismissOne = (item: AppNotification) => {
+    dismissNotificationId(item.id);
+    queryClient.invalidateQueries({ queryKey: ["orders"] });
+    queryClient.invalidateQueries({ queryKey: ["appointments"] });
+    if (onRefresh) onRefresh();
+    toast.success("Rappel masqué");
+  };
+
+  const handleDismissAll = () => {
+    dismissAllNotificationIds(notifications.map((n) => n.id));
+    queryClient.invalidateQueries({ queryKey: ["orders"] });
+    queryClient.invalidateQueries({ queryKey: ["appointments"] });
+    if (onRefresh) onRefresh();
+    toast.success("Toutes les notifications ont été effacées");
+  };
+
+  const handlePostpone = async (item: AppNotification, daysToAdd: number) => {
+    try {
+      // Si la date est déjà passée, on prolonge à partir d'aujourd'hui
+      const baseDate = item.targetDate < today() ? today() : item.targetDate;
+      const nextDate = addDays(daysToAdd, new Date(baseDate));
+
+      if (item.category === "order_delivery") {
+        await saveOrderOffline({ due_date: nextDate }, false, item.referenceId);
+        queryClient.invalidateQueries({ queryKey: ["orders"] });
+        queryClient.invalidateQueries({ queryKey: ["order", item.referenceId] });
+        toast.success(`Échéance repoussée au ${dateFr(nextDate)} ✅`);
+      } else {
+        await saveAppointmentOffline({ scheduled_date: nextDate }, false, item.referenceId);
+        queryClient.invalidateQueries({ queryKey: ["appointments"] });
+        toast.success(`Rendez-vous reporté au ${dateFr(nextDate)} ✅`);
+      }
+      if (onRefresh) onRefresh();
+    } catch {
+      toast.error("Impossible de repousser la date");
+    }
+  };
+
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
@@ -85,7 +130,7 @@ export function NotificationCenter({ notifications }: NotificationCenterProps) {
       <PopoverContent
         align="end"
         sideOffset={8}
-        className="w-[94vw] sm:w-[420px] p-0 rounded-2xl shadow-2xl border-border bg-card overflow-hidden"
+        className="w-[94vw] sm:w-[440px] p-0 rounded-2xl shadow-2xl border-border bg-card overflow-hidden"
       >
         {/* En-tête du volet de notifications */}
         <div className="flex items-center justify-between border-b border-border/80 bg-muted/40 px-4 py-3">
@@ -103,17 +148,32 @@ export function NotificationCenter({ notifications }: NotificationCenterProps) {
             </div>
           </div>
 
-          {permission !== "granted" && permission !== "unsupported" && (
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={handleRequestPermission}
-              className="h-7 text-[11px] font-bold border-primary/40 text-primary hover:bg-primary/10 gap-1 rounded-lg"
-            >
-              <Volume2 className="size-3" />
-              <span>Activer sonnerie</span>
-            </Button>
-          )}
+          <div className="flex items-center gap-1.5">
+            {totalCount > 0 && (
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={handleDismissAll}
+                className="h-7 text-[11px] font-bold text-muted-foreground hover:text-foreground hover:bg-muted gap-1 rounded-lg px-2"
+                title="Tout masquer / marquer comme lu"
+              >
+                <CheckCheck className="size-3.5" />
+                <span>Tout effacer</span>
+              </Button>
+            )}
+
+            {permission !== "granted" && permission !== "unsupported" && (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={handleRequestPermission}
+                className="h-7 text-[11px] font-bold border-primary/40 text-primary hover:bg-primary/10 gap-1 rounded-lg px-2"
+              >
+                <Volume2 className="size-3" />
+                <span>Activer sonnerie</span>
+              </Button>
+            )}
+          </div>
         </div>
 
         {/* Corps des alertes */}
@@ -146,6 +206,8 @@ export function NotificationCenter({ notifications }: NotificationCenterProps) {
                         key={item.id}
                         item={item}
                         onWhatsApp={() => handleSendWhatsApp(item)}
+                        onDismiss={() => handleDismissOne(item)}
+                        onPostpone={(days) => handlePostpone(item, days)}
                         onClose={() => setOpen(false)}
                       />
                     ))}
@@ -169,6 +231,8 @@ export function NotificationCenter({ notifications }: NotificationCenterProps) {
                         key={item.id}
                         item={item}
                         onWhatsApp={() => handleSendWhatsApp(item)}
+                        onDismiss={() => handleDismissOne(item)}
+                        onPostpone={(days) => handlePostpone(item, days)}
                         onClose={() => setOpen(false)}
                       />
                     ))}
@@ -192,6 +256,8 @@ export function NotificationCenter({ notifications }: NotificationCenterProps) {
                         key={item.id}
                         item={item}
                         onWhatsApp={() => handleSendWhatsApp(item)}
+                        onDismiss={() => handleDismissOne(item)}
+                        onPostpone={(days) => handlePostpone(item, days)}
                         onClose={() => setOpen(false)}
                       />
                     ))}
@@ -224,23 +290,37 @@ export function NotificationCenter({ notifications }: NotificationCenterProps) {
   );
 }
 
-/* ── Carte individuelle de rappel ────────────────────────────────── */
+/* ── Carte individuelle de rappel avec actions 1-clic ─────────────── */
 
 function NotificationCard({
   item,
   onWhatsApp,
+  onDismiss,
+  onPostpone,
   onClose,
 }: {
   item: AppNotification;
   onWhatsApp: () => void;
+  onDismiss: () => void;
+  onPostpone: (days: number) => void;
   onClose: () => void;
 }) {
   const isRDV = item.category === "appointment";
   const hasPhone = Boolean(item.clientWhatsapp || item.clientPhone);
 
   return (
-    <div className="rounded-xl border border-border/70 bg-card p-3 shadow-xs space-y-2.5 transition-all hover:border-primary/40">
-      <div className="flex items-start justify-between gap-2">
+    <div className="relative group rounded-xl border border-border/70 bg-card p-3 shadow-xs space-y-2.5 transition-all hover:border-primary/40">
+      {/* Bouton rapide de masquage / suppression (✕) */}
+      <button
+        type="button"
+        onClick={onDismiss}
+        className="absolute top-2.5 right-2.5 flex size-6 items-center justify-center rounded-full text-muted-foreground hover:text-foreground hover:bg-muted/80 transition-all"
+        title="Masquer ce rappel"
+      >
+        <X className="size-3.5" />
+      </button>
+
+      <div className="flex items-start justify-between gap-2 pr-6">
         <div className="flex items-start gap-2.5 min-w-0">
           <div
             className={`flex size-8 shrink-0 items-center justify-center rounded-lg ${
@@ -258,6 +338,28 @@ function NotificationCard({
             </p>
           </div>
         </div>
+      </div>
+
+      {/* Ligne 1-clic : Prolonger ou Repousser en 1 geste */}
+      <div className="flex items-center gap-1.5 pt-1 text-[11px] text-muted-foreground bg-muted/30 -mx-3 px-3 py-1.5 rounded-lg">
+        <FastForward className="size-3 text-primary shrink-0" />
+        <span className="font-medium text-[10px] uppercase tracking-wide">Repousser :</span>
+        <button
+          type="button"
+          onClick={() => onPostpone(2)}
+          className="rounded-md bg-card border border-border/70 hover:border-primary/50 px-2 py-0.5 text-[10px] font-bold text-foreground hover:bg-primary/10 hover:text-primary transition-all active:scale-95"
+          title="Reporter de 2 jours"
+        >
+          +2 jours
+        </button>
+        <button
+          type="button"
+          onClick={() => onPostpone(7)}
+          className="rounded-md bg-card border border-border/70 hover:border-primary/50 px-2 py-0.5 text-[10px] font-bold text-foreground hover:bg-primary/10 hover:text-primary transition-all active:scale-95"
+          title="Reporter d'une semaine"
+        >
+          +1 semaine
+        </button>
       </div>
 
       {/* Actions rapides : WhatsApp Client & Consulter */}

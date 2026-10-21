@@ -47,6 +47,8 @@ import {
   saveOrderOffline,
   savePaymentOffline,
   deletePaymentOffline,
+  saveOrderImageOffline,
+  deleteOrderImageOffline,
 } from "@/lib/queries";
 import {
   ORDER_STATUS,
@@ -331,17 +333,20 @@ function OrderDetailPage() {
     setUploadingImage(true);
     try {
       const path = await uploadImage(business.id, file, "orders");
-      const { error } = await supabase.from("order_images").insert({
-        business_id: business.id,
+      await saveOrderImageOffline({
         order_id: orderId,
         path,
         kind: imageKind,
       });
-      if (error) throw error;
       queryClient.invalidateQueries({ queryKey: ["order-images", orderId] });
-      toast.success("Photo ajoutée");
+      const isOnline = typeof navigator === "undefined" || navigator.onLine;
+      if (isOnline && !path.startsWith("data:")) {
+        toast.success("Photo ajoutée");
+      } else {
+        toast.success("Photo enregistrée en local (synchronisation au retour en ligne)");
+      }
     } catch {
-      toast.error("Échec de l'envoi de la photo");
+      toast.error("Échec de l'enregistrement de la photo");
     } finally {
       setUploadingImage(false);
       e.target.value = "";
@@ -351,15 +356,8 @@ function OrderDetailPage() {
   // Delete Photo
   const deleteImageMutation = useMutation({
     mutationFn: async (imgId: string) => {
-      // Récupère le path Storage avant suppression pour nettoyage physique
       const image = imagesQuery.data?.find((img) => img.id === imgId);
-      // Supprime d'abord le fichier physique dans le bucket
-      if (image?.path) {
-        await deleteStorageFile(image.path);
-      }
-      // Puis supprime la ligne en base
-      const { error } = await supabase.from("order_images").delete().eq("id", imgId);
-      if (error) throw error;
+      await deleteOrderImageOffline(imgId, orderId, image?.path);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["order-images", orderId] });

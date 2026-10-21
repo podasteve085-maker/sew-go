@@ -5,7 +5,52 @@
 
 import { dateLongFr, dateFr, fullName, cleanPhone, waLink } from "./format";
 import type { AppointmentRow, OrderRow } from "./queries";
-import { appointmentLabel } from "./domain";
+import { appointmentLabel, isActive } from "./domain";
+
+/* ── Gestion des notifications masquées / supprimées par l'artisan ── */
+
+const DISMISSED_STORAGE_KEY = "sewgo_dismissed_notifs";
+
+export function getDismissedNotifIds(): Set<string> {
+  if (typeof window === "undefined") return new Set();
+  try {
+    const raw = localStorage.getItem(DISMISSED_STORAGE_KEY);
+    return raw ? new Set(JSON.parse(raw)) : new Set();
+  } catch {
+    return new Set();
+  }
+}
+
+export function dismissNotificationId(id: string): void {
+  if (typeof window === "undefined") return;
+  try {
+    const current = getDismissedNotifIds();
+    current.add(id);
+    localStorage.setItem(DISMISSED_STORAGE_KEY, JSON.stringify(Array.from(current)));
+  } catch {
+    // ignore
+  }
+}
+
+export function dismissAllNotificationIds(ids: string[]): void {
+  if (typeof window === "undefined") return;
+  try {
+    const current = getDismissedNotifIds();
+    for (const id of ids) current.add(id);
+    localStorage.setItem(DISMISSED_STORAGE_KEY, JSON.stringify(Array.from(current)));
+  } catch {
+    // ignore
+  }
+}
+
+export function clearDismissedNotifs(): void {
+  if (typeof window === "undefined") return;
+  try {
+    localStorage.removeItem(DISMISSED_STORAGE_KEY);
+  } catch {
+    // ignore
+  }
+}
 
 /* ── Types ──────────────────────────────────────────────────────── */
 
@@ -98,6 +143,7 @@ export function generateReminders(
 ): AppNotification[] {
   const todayStr = getTodayStr();
   const tomorrowStr = getTomorrowStr();
+  const dismissed = getDismissedNotifIds();
   const notifications: AppNotification[] = [];
 
   /* ── 1. Rendez-vous (Essayages, Mesures, Livraisons en atelier) ── */
@@ -113,47 +159,53 @@ export function generateReminders(
 
     // A. Rendez-vous AUJOURD'HUI (Jour J)
     if (a.scheduled_date === todayStr) {
-      notifications.push({
-        id: `rdv-today-${a.id}-${todayStr}`,
-        category: "appointment",
-        timing: "today",
-        title: `📅 Rendez-vous AUJOURD'HUI${heureStr}`,
-        body: `${typeLabel} avec ${cName} prévu aujourd'hui${heureStr}.`,
-        targetDate: a.scheduled_date,
-        targetTime: a.scheduled_time,
-        clientName: cName,
-        clientPhone: cPhone,
-        clientWhatsapp: cWa,
-        whatsappMessage: `Bonjour ${cName} ! 👋 Petit rappel de votre rendez-vous (${typeLabel.toLowerCase()}) prévu AUJOURD'HUI${heureStr} à l'atelier ${atelierName}. Au plaisir de vous accueillir !`,
-        linkUrl: `/rendez-vous`,
-        referenceId: a.id,
-      });
+      const notifId = `rdv-today-${a.id}-${todayStr}`;
+      if (!dismissed.has(notifId)) {
+        notifications.push({
+          id: notifId,
+          category: "appointment",
+          timing: "today",
+          title: `📅 Rendez-vous AUJOURD'HUI${heureStr}`,
+          body: `${typeLabel} avec ${cName} prévu aujourd'hui${heureStr}.`,
+          targetDate: a.scheduled_date,
+          targetTime: a.scheduled_time,
+          clientName: cName,
+          clientPhone: cPhone,
+          clientWhatsapp: cWa,
+          whatsappMessage: `Bonjour ${cName} ! 👋 Petit rappel de votre rendez-vous (${typeLabel.toLowerCase()}) prévu AUJOURD'HUI${heureStr} à l'atelier ${atelierName}. Au plaisir de vous accueillir !`,
+          linkUrl: `/rendez-vous`,
+          referenceId: a.id,
+        });
+      }
     }
 
     // B. Rendez-vous DEMAIN (La veille / J-1)
     else if (a.scheduled_date === tomorrowStr) {
-      notifications.push({
-        id: `rdv-tomorrow-${a.id}-${todayStr}`,
-        category: "appointment",
-        timing: "tomorrow",
-        title: `📅 Rendez-vous DEMAIN (Veille)${heureStr}`,
-        body: `${typeLabel} avec ${cName} prévu demain${heureStr} (${dateLongFr(a.scheduled_date)}).`,
-        targetDate: a.scheduled_date,
-        targetTime: a.scheduled_time,
-        clientName: cName,
-        clientPhone: cPhone,
-        clientWhatsapp: cWa,
-        whatsappMessage: `Bonjour ${cName} ! 👋 Nous vous rappelons votre rendez-vous (${typeLabel.toLowerCase()}) prévu DEMAIN${heureStr} à l'atelier ${atelierName}. Merci de nous confirmer votre disponibilité !`,
-        linkUrl: `/rendez-vous`,
-        referenceId: a.id,
-      });
+      const notifId = `rdv-tomorrow-${a.id}-${todayStr}`;
+      if (!dismissed.has(notifId)) {
+        notifications.push({
+          id: notifId,
+          category: "appointment",
+          timing: "tomorrow",
+          title: `📅 Rendez-vous DEMAIN (Veille)${heureStr}`,
+          body: `${typeLabel} avec ${cName} prévu demain${heureStr} (${dateLongFr(a.scheduled_date)}).`,
+          targetDate: a.scheduled_date,
+          targetTime: a.scheduled_time,
+          clientName: cName,
+          clientPhone: cPhone,
+          clientWhatsapp: cWa,
+          whatsappMessage: `Bonjour ${cName} ! 👋 Nous vous rappelons votre rendez-vous (${typeLabel.toLowerCase()}) prévu DEMAIN${heureStr} à l'atelier ${atelierName}. Merci de nous confirmer votre disponibilité !`,
+          linkUrl: `/rendez-vous`,
+          referenceId: a.id,
+        });
+      }
     }
   }
 
   /* ── 2. Commandes & Dates de livraison prévues ─────────────────── */
   for (const o of orders) {
-    // Ignorer les commandes déjà livrées ou annulées
-    if (o.status === "livre" || o.status === "annule" || !o.due_date) continue;
+    // RÈGLE STRICTE : Ignorer formellement les commandes livrées ou annulées (fixe le statut 'livree')
+    if (!isActive(o.status) || !o.due_date) continue;
 
     const cName = o.clients ? fullName(o.clients) : "Client";
     const cPhone = o.clients?.phone || null;
@@ -163,56 +215,65 @@ export function generateReminders(
 
     // A. Livraison AUJOURD'HUI (Jour J)
     if (o.due_date === todayStr) {
-      notifications.push({
-        id: `order-today-${o.id}-${todayStr}`,
-        category: "order_delivery",
-        timing: "today",
-        title: `👗 Livraison prévue AUJOURD'HUI ${refOrder}`,
-        body: `Livraison de "${garmentDesc}" pour ${cName} prévue aujourd'hui.`,
-        targetDate: o.due_date,
-        clientName: cName,
-        clientPhone: cPhone,
-        clientWhatsapp: cWa,
-        whatsappMessage: `Bonjour ${cName} ! 👋 Votre commande ${refOrder} (${garmentDesc}) est programmée pour livraison / retrait AUJOURD'HUI à l'atelier ${atelierName}. Nous vous attendons avec plaisir !`,
-        linkUrl: `/commandes/${o.id}`,
-        referenceId: o.id,
-      });
+      const notifId = `order-today-${o.id}-${todayStr}`;
+      if (!dismissed.has(notifId)) {
+        notifications.push({
+          id: notifId,
+          category: "order_delivery",
+          timing: "today",
+          title: `👗 Livraison prévue AUJOURD'HUI ${refOrder}`,
+          body: `Livraison de "${garmentDesc}" pour ${cName} prévue aujourd'hui.`,
+          targetDate: o.due_date,
+          clientName: cName,
+          clientPhone: cPhone,
+          clientWhatsapp: cWa,
+          whatsappMessage: `Bonjour ${cName} ! 👋 Votre commande ${refOrder} (${garmentDesc}) est programmée pour livraison / retrait AUJOURD'HUI à l'atelier ${atelierName}. Nous vous attendons avec plaisir !`,
+          linkUrl: `/commandes/${o.id}`,
+          referenceId: o.id,
+        });
+      }
     }
 
     // B. Livraison DEMAIN (La veille / J-1)
     else if (o.due_date === tomorrowStr) {
-      notifications.push({
-        id: `order-tomorrow-${o.id}-${todayStr}`,
-        category: "order_delivery",
-        timing: "tomorrow",
-        title: `👗 Livraison DEMAIN (Veille) ${refOrder}`,
-        body: `Livraison de "${garmentDesc}" pour ${cName} prévue demain (${dateLongFr(o.due_date)}).`,
-        targetDate: o.due_date,
-        clientName: cName,
-        clientPhone: cPhone,
-        clientWhatsapp: cWa,
-        whatsappMessage: `Bonjour ${cName} ! 👋 Votre commande ${refOrder} (${garmentDesc}) sera prête pour livraison / essayage DEMAIN à l'atelier ${atelierName}. À très bientôt !`,
-        linkUrl: `/commandes/${o.id}`,
-        referenceId: o.id,
-      });
+      const notifId = `order-tomorrow-${o.id}-${todayStr}`;
+      if (!dismissed.has(notifId)) {
+        notifications.push({
+          id: notifId,
+          category: "order_delivery",
+          timing: "tomorrow",
+          title: `👗 Livraison DEMAIN (Veille) ${refOrder}`,
+          body: `Livraison de "${garmentDesc}" pour ${cName} prévue demain (${dateLongFr(o.due_date)}).`,
+          targetDate: o.due_date,
+          clientName: cName,
+          clientPhone: cPhone,
+          clientWhatsapp: cWa,
+          whatsappMessage: `Bonjour ${cName} ! 👋 Votre commande ${refOrder} (${garmentDesc}) sera prête pour livraison / essayage DEMAIN à l'atelier ${atelierName}. À très bientôt !`,
+          linkUrl: `/commandes/${o.id}`,
+          referenceId: o.id,
+        });
+      }
     }
 
-    // C. Livraison EN RETARD (Date dépassée)
+    // C. Livraison EN RETARD (Date dépassée pour une commande encore active)
     else if (o.due_date < todayStr) {
-      notifications.push({
-        id: `order-overdue-${o.id}-${todayStr}`,
-        category: "order_delivery",
-        timing: "overdue",
-        title: `⚠️ Livraison en retard ${refOrder}`,
-        body: `Date de livraison dépassée depuis le ${dateFr(o.due_date)} pour ${cName} (${garmentDesc}).`,
-        targetDate: o.due_date,
-        clientName: cName,
-        clientPhone: cPhone,
-        clientWhatsapp: cWa,
-        whatsappMessage: `Bonjour ${cName} ! Concernant votre commande ${refOrder} chez ${atelierName}, nous finalisons les derniers détails de votre tenue. Nous vous tenons informé très rapidement.`,
-        linkUrl: `/commandes/${o.id}`,
-        referenceId: o.id,
-      });
+      const notifId = `order-overdue-${o.id}-${todayStr}`;
+      if (!dismissed.has(notifId)) {
+        notifications.push({
+          id: notifId,
+          category: "order_delivery",
+          timing: "overdue",
+          title: `⚠️ Livraison en retard ${refOrder}`,
+          body: `Date de livraison dépassée depuis le ${dateFr(o.due_date)} pour ${cName} (${garmentDesc}).`,
+          targetDate: o.due_date,
+          clientName: cName,
+          clientPhone: cPhone,
+          clientWhatsapp: cWa,
+          whatsappMessage: `Bonjour ${cName} ! Concernant votre commande ${refOrder} chez ${atelierName}, nous finalisons les derniers détails de votre tenue. Nous vous tenons informé très rapidement.`,
+          linkUrl: `/commandes/${o.id}`,
+          referenceId: o.id,
+        });
+      }
     }
   }
 

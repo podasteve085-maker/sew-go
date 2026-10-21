@@ -4,13 +4,14 @@
  */
 
 const DB_NAME = "couturpro_offline_v1";
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 
 export type SyncQueueItem = {
   id: string; // UUID de l'action de synchronisation
   entity:
     | "client"
     | "order"
+    | "order_image"
     | "payment"
     | "measurement_set"
     | "appointment"
@@ -59,6 +60,13 @@ function getDB(): Promise<IDBDatabase> {
         orderStore.createIndex("by_business", "business_id", { unique: false });
         orderStore.createIndex("by_client", "client_id", { unique: false });
         orderStore.createIndex("by_status", "status", { unique: false });
+      }
+
+      // 3b. Photos de commandes
+      if (!db.objectStoreNames.contains("order_images")) {
+        const orderImgStore = db.createObjectStore("order_images", { keyPath: "id" });
+        orderImgStore.createIndex("by_order", "order_id", { unique: false });
+        orderImgStore.createIndex("by_business", "business_id", { unique: false });
       }
 
       // 4. Paiements

@@ -214,6 +214,63 @@ async function processSyncItem(
       break;
     }
 
+    case "order_image": {
+      if (item.action === "create" || item.action === "update") {
+        const id = (payload["id"] as string) || item.tempId!;
+        const targetId = idMapping.get(id) || id;
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const insertData: Record<string, any> = { ...payload };
+
+        if (targetId && !targetId.startsWith("temp_")) {
+          insertData["id"] = targetId;
+        } else {
+          delete insertData["id"];
+        }
+
+        // Remapper l'order_id s'il a été créé avec un tempId
+        if (insertData["order_id"] && idMapping.has(insertData["order_id"])) {
+          insertData["order_id"] = idMapping.get(insertData["order_id"]);
+        }
+
+        // Si la photo a été stockée en DataURL base64 hors-ligne, on la téléverse vers Supabase Storage
+        if (typeof insertData["path"] === "string" && insertData["path"].startsWith("data:")) {
+          const bizId = insertData["business_id"];
+          if (bizId) {
+            const uploadedPath = await uploadDataUrl(bizId, insertData["path"], "orders");
+            if (uploadedPath) {
+              insertData["path"] = uploadedPath;
+            }
+          }
+        }
+
+        const { data, error } = await supabase
+          .from("order_images")
+          .upsert(insertData as never, { onConflict: "id" })
+          .select()
+          .single();
+        if (error) throw error;
+        if (data) {
+          if (id && id !== data.id) idMapping.set(id, data.id);
+          await setLocalItem("order_images", data);
+          if (id && id.startsWith("temp_")) {
+            await deleteLocalItem("order_images", id);
+          }
+        }
+      } else if (item.action === "delete") {
+        const id = (payload["id"] as string) || item.tempId!;
+        const targetId = idMapping.get(id) || id;
+        const path = payload["path"] as string | undefined;
+        const { error } = await supabase.from("order_images").delete().eq("id", targetId);
+        if (error) throw error;
+        await deleteLocalItem("order_images", targetId);
+        if (path && !path.startsWith("data:")) {
+          const { deleteStorageFiles } = await import("@/hooks/use-signed-url");
+          deleteStorageFiles([path]).catch(() => {});
+        }
+      }
+      break;
+    }
+
     case "payment": {
       if (item.action === "create") {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any

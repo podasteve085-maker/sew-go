@@ -550,18 +550,198 @@ export async function fetchPayments(orderId: string): Promise<PaymentRow[]> {
 
 export async function fetchOrderImages(orderId: string): Promise<OrderImageRow[]> {
   const businessId = await currentBusinessId();
+  const isOnline = typeof navigator === "undefined" || navigator.onLine;
+
+  if (isOnline) {
+    try {
+      const { data, error } = await supabase
+        .from("order_images")
+        .select("*")
+        .eq("order_id", orderId)
+        .eq("business_id", businessId)
+        .order("created_at", { ascending: true });
+      if (!error && data) {
+        const rows = data as unknown as OrderImageRow[];
+        // Sauvegarder dans IndexedDB pour la consultation hors-ligne
+        await setLocalItems("order_images", rows);
+
+        // Pré-mettre en cache les images de façon asynchrone non-bloquante
+        for (const row of rows) {
+          if (row.path && !row.path.startsWith("data:")) {
+            import("./image-cache")
+              .then(async ({ cacheImage }) => {
+                const { getSignedUrl } = await import("@/hooks/use-signed-url");
+                const url = await getSignedUrl(row.path);
+                if (url) cacheImage(row.path, url);
+              })
+              .catch(() => {});
+          }
+        }
+
+        // Fusionner avec d'éventuelles photos locales en attente de sync
+        const pendingQueue = await getPendingSyncQueue();
+        const pendingImages = pendingQueue
+          .filter(
+            (q) =>
+              q.entity === "order_image" &&
+              q.action !== "delete" &&
+              q.payload["order_id"] === orderId,
+          )
+          .map((q) => q.payload as unknown as OrderImageRow);
+
+        const deletedIds = new Set(
+          pendingQueue
+            .filter((q) => q.entity === "order_image" && q.action === "delete")
+            .map((q) => q.payload["id"] as string),
+        );
+
+        const map = new Map<string, OrderImageRow>();
+        for (const r of rows) {
+          if (!deletedIds.has(r.id)) map.set(r.id, r);
+        }
+        for (const p of pendingImages) {
+          if (p && p.id && !deletedIds.has(p.id)) map.set(p.id, p);
+        }
+        return Array.from(map.values()).sort(
+          (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
+        );
+      }
+    } catch {
+      // Repli hors-ligne ci-dessous
+    }
+  }
+
+  // Fallback Hors-ligne : lire depuis IndexedDB
   try {
-    const { data, error } = await supabase
-      .from("order_images")
-      .select("*")
-      .eq("order_id", orderId)
-      .eq("business_id", businessId)
-      .order("created_at", { ascending: true });
-    if (error) throw error;
-    return (data ?? []) as unknown as OrderImageRow[];
+    const allLocal = await getAllLocalItems<OrderImageRow>("order_images");
+    const localForOrder = allLocal.filter((img) => img.order_id === orderId);
+
+    const pendingQueue = await getPendingSyncQueue();
+    const pendingImages = pendingQueue
+      .filter(
+        (q) =>
+          q.entity === "order_image" &&
+          q.action !== "delete" &&
+          q.payload["order_id"] === orderId,
+      )
+      .map((q) => q.payload as unknown as OrderImageRow);
+
+    const deletedIds = new Set(
+      pendingQueue
+        .filter((q) => q.entity === "order_image" && q.action === "delete")
+        .map((q) => q.payload["id"] as string),
+    );
+
+    const map = new Map<string, OrderImageRow>();
+    for (const r of localForOrder) {
+      if (!deletedIds.has(r.id)) map.set(r.id, r);
+    }
+    for (const p of pendingImages) {
+      if (p && p.id && !deletedIds.has(p.id)) map.set(p.id, p);
+    }
+    return Array.from(map.values()).sort(
+      (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
+    );
   } catch {
     return [];
   }
+}
+
+export async function saveOrderImageOffline(
+  imageData: {
+    order_id: string;
+    path: string;
+    kind: string;
+    caption?: string | null;
+  },
+  existingId?: string,
+): Promise<OrderImageRow> {
+  const businessId = await currentBusinessId();
+  const isOnline = typeof navigator !== "undefined" ? navigator.onLine : true;
+  const imageId = existingId || uuid();
+
+  const localRow: OrderImageRow = {
+    id: imageId,
+    business_id: businessId,
+    order_id: imageData.order_id,
+    path: imageData.path,
+    kind: imageData.kind || "autre",
+    caption: imageData.caption || null,
+    created_at: new Date().toISOString(),
+  };
+
+  // 1. Sauvegarder immédiatement dans IndexedDB
+  await setLocalItem("order_images", localRow);
+
+  // 2. Si en ligne et que ce n'est pas une DataURL temporaire, tenter l'insertion Supabase
+  if (isOnline && !imageData.path.startsWith("data:")) {
+    try {
+      const { data, error } = await supabase
+        .from("order_images")
+        .upsert(localRow as never, { onConflict: "id" })
+        .select()
+        .single();
+      if (!error && data) {
+        const saved = data as unknown as OrderImageRow;
+        await setLocalItem("order_images", saved);
+        return saved;
+      }
+    } catch {
+      // repli vers la file de sync
+    }
+  }
+
+  // 3. Mettre en file d'attente de synchronisation
+  await addToSyncQueue({
+    entity: "order_image",
+    action: "create",
+    payload: localRow,
+    tempId: imageId,
+  });
+
+  return localRow;
+}
+
+export async function deleteOrderImageOffline(
+  imageId: string,
+  orderId?: string,
+  path?: string,
+): Promise<void> {
+  const isOnline = typeof navigator !== "undefined" ? navigator.onLine : true;
+
+  // 1. Supprimer du stockage local IndexedDB
+  await deleteLocalItem("order_images", imageId);
+
+  // 2. Supprimer du cache d'images local si path fourni
+  if (path) {
+    import("./image-cache")
+      .then(({ removeCachedImage }) => removeCachedImage(path))
+      .catch(() => {});
+  }
+
+  // 3. Si en ligne, tenter la suppression distante
+  if (isOnline) {
+    try {
+      const { error } = await supabase.from("order_images").delete().eq("id", imageId);
+      if (!error) {
+        if (path && !path.startsWith("data:")) {
+          const { deleteStorageFile } = await import("@/hooks/use-signed-url");
+          deleteStorageFile(path).catch(() => {});
+        }
+        return;
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  // 4. Mettre en file de synchronisation
+  await addToSyncQueue({
+    entity: "order_image",
+    action: "delete",
+    payload: { id: imageId, order_id: orderId, path },
+    tempId: imageId,
+  });
 }
 
 export const DEFAULT_GARMENT_TYPES: { id: string; name: string; default_price: number | null }[] = [
@@ -1229,6 +1409,69 @@ export async function saveOrderOffline(
   });
 
   return localOrder;
+}
+
+export async function saveAppointmentOffline(
+  appData: Record<string, unknown>,
+  isNew: boolean,
+  existingId?: string,
+): Promise<AppointmentRow> {
+  const businessId = await currentBusinessId();
+  const isOnline = typeof navigator !== "undefined" ? navigator.onLine : true;
+
+  let existingApp: AppointmentRow | null = null;
+  if (!isNew && existingId) {
+    try {
+      existingApp = await getLocalItem<AppointmentRow>("appointments", existingId);
+    } catch {
+      // ignore
+    }
+  }
+
+  const appId = existingId || uuid();
+  const localApp: AppointmentRow = {
+    id: appId,
+    business_id: (appData["business_id"] as string) || existingApp?.business_id || businessId,
+    client_id: (appData["client_id"] as string) || existingApp?.client_id || "",
+    type: (appData["type"] as string) || existingApp?.type || "essayage",
+    status: (appData["status"] as string) || existingApp?.status || "prevu",
+    scheduled_date: (appData["scheduled_date"] as string) || existingApp?.scheduled_date || new Date().toISOString().slice(0, 10),
+    scheduled_time: appData["scheduled_time"] !== undefined
+      ? (appData["scheduled_time"] as string | null)
+      : (existingApp?.scheduled_time ?? null),
+    notes: appData["notes"] !== undefined ? (appData["notes"] as string | null) : (existingApp?.notes ?? null),
+    created_at: existingApp?.created_at || new Date().toISOString(),
+    clients: existingApp?.clients ?? null,
+  };
+
+  await setLocalItem("appointments", localApp);
+
+  if (isOnline && businessId) {
+    try {
+      const { clients: _, ...cleanPayload } = localApp;
+      const { data, error } = await supabase
+        .from("appointments")
+        .upsert(cleanPayload as never, { onConflict: "id" })
+        .select("*, clients(first_name, last_name, phone, whatsapp)")
+        .single();
+      if (!error && data) {
+        const row = data as unknown as AppointmentRow;
+        await setLocalItem("appointments", row);
+        return row;
+      }
+    } catch {
+      // repli sync queue
+    }
+  }
+
+  await addToSyncQueue({
+    entity: "appointment",
+    action: isNew ? "create" : "update",
+    payload: localApp,
+    tempId: appId,
+  });
+
+  return localApp;
 }
 
 export async function savePaymentOffline(paymentData: Record<string, unknown>): Promise<PaymentRow> {
