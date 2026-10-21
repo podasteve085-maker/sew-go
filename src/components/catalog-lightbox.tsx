@@ -1,20 +1,17 @@
 import { useState, useEffect, useRef, useCallback } from "react";
+import { createPortal } from "react-dom";
 import {
   X,
   ChevronLeft,
   ChevronRight,
   ZoomIn,
   ZoomOut,
-  Rotate3d,
-  Play,
-  Pause,
   ArrowLeft,
   Scissors,
-  Share2,
   MessageCircle,
   Maximize2,
   Minimize2,
-  LayoutGrid,
+  Layers,
 } from "lucide-react";
 import { StoredImage } from "./bits";
 
@@ -33,7 +30,7 @@ export interface LightboxModel {
 interface CatalogLightboxProps {
   open: boolean;
   onClose: () => void;
-  /** Tous les modèles du catalogue pour naviguer entre eux */
+  /** Tous les modèles du catalogue pour naviguer de l'un à l'autre */
   models: LightboxModel[];
   /** Index du modèle actif */
   initialModelIndex?: number;
@@ -66,20 +63,16 @@ export function CatalogLightbox({
   const [photoIndex, setPhotoIndex] = useState(initialPhotoIndex);
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
-  const [is360, setIs360] = useState(false);
-  const [angle360, setAngle360] = useState(0);
-  const [autoSpin, setAutoSpin] = useState(false);
-  const [showModelPicker, setShowModelPicker] = useState(false);
-  const [fitMode, setFitMode] = useState<"contain" | "cover">("contain");
+  // Remplir (cover) par défaut pour 100% plein écran sans AUCUNE bande latérale
+  const [fitMode, setFitMode] = useState<"cover" | "contain">("cover");
+  const [showCatalogDrawer, setShowCatalogDrawer] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
 
   const dragStartRef = useRef({ x: 0, y: 0 });
   const panStartRef = useRef({ x: 0, y: 0 });
-  const angleStartRef = useRef(0);
   const lastTapRef = useRef(0);
   const pinchDistRef = useRef<number | null>(null);
   const pinchZoomRef = useRef(1);
-  const autoSpinRef = useRef<number | null>(null);
 
   const model = models[modelIndex] ?? null;
   const photos = model?.photo_paths ?? [];
@@ -92,49 +85,21 @@ export function CatalogLightbox({
       setPhotoIndex(Math.min(Math.max(0, initialPhotoIndex), Math.max(0, (models[initialModelIndex]?.photo_paths?.length ?? 1) - 1)));
       setZoom(1);
       setPan({ x: 0, y: 0 });
-      setIs360(false);
-      setAngle360(0);
-      setAutoSpin(false);
-      setShowModelPicker(false);
+      setFitMode("cover"); // Plein écran bord-à-bord immédiat, zéro bande noire latérale
+      setShowCatalogDrawer(false);
     }
   }, [open, initialModelIndex, initialPhotoIndex, models.length]);
 
-  /* ── Blocage du scroll de la page ─────────────────────────────── */
+  /* ── Verrouillage du défilement global de la page ─────────────── */
   useEffect(() => {
     if (open) {
+      const prevOverflow = document.body.style.overflow;
       document.body.style.overflow = "hidden";
-      return () => { document.body.style.overflow = ""; };
+      return () => {
+        document.body.style.overflow = prevOverflow;
+      };
     }
   }, [open]);
-
-  /* ── Moteur Rotation 360° (Animation fluide à 60fps) ───────────── */
-  useEffect(() => {
-    if (!open || !is360 || !autoSpin) {
-      if (autoSpinRef.current) cancelAnimationFrame(autoSpinRef.current);
-      return;
-    }
-
-    let lastTime = performance.now();
-    const animate = (time: number) => {
-      const dt = time - lastTime;
-      lastTime = time;
-      // Rotation de 45° par seconde
-      setAngle360((prev) => {
-        const next = (prev + (dt * 0.045)) % 360;
-        if (photos.length > 1) {
-          const idx = Math.floor((next / 360) * photos.length) % photos.length;
-          setPhotoIndex(idx);
-        }
-        return next;
-      });
-      autoSpinRef.current = requestAnimationFrame(animate);
-    };
-
-    autoSpinRef.current = requestAnimationFrame(animate);
-    return () => {
-      if (autoSpinRef.current) cancelAnimationFrame(autoSpinRef.current);
-    };
-  }, [open, is360, autoSpin, photos.length]);
 
   /* ── Navigation Clavier ───────────────────────────────────────── */
   useEffect(() => {
@@ -145,16 +110,12 @@ export function CatalogLightbox({
       else if (e.key === "ArrowRight") nextPhoto();
       else if (e.key === "ArrowUp") prevModel();
       else if (e.key === "ArrowDown") nextModel();
-      else if (e.key === " " && is360) {
-        e.preventDefault();
-        setAutoSpin((v) => !v);
-      }
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [open, photos.length, models.length, is360]);
+  }, [open, photos.length, models.length]);
 
-  /* ── Navigation Photos du modèle ──────────────────────────────── */
+  /* ── Navigation entre Photos d'un modèle ───────────────────────── */
   const prevPhoto = useCallback(() => {
     if (photos.length <= 1) return;
     setZoom(1); setPan({ x: 0, y: 0 });
@@ -167,11 +128,10 @@ export function CatalogLightbox({
     setPhotoIndex((p) => (p === photos.length - 1 ? 0 : p + 1));
   }, [photos.length]);
 
-  /* ── Navigation Modèles du catalogue ──────────────────────────── */
+  /* ── Navigation Slalom entre Modèles du Catalogue ─────────────── */
   const prevModel = useCallback(() => {
     if (models.length <= 1) return;
     setZoom(1); setPan({ x: 0, y: 0 });
-    setIs360(false); setAutoSpin(false); setAngle360(0);
     setModelIndex((i) => (i === 0 ? models.length - 1 : i - 1));
     setPhotoIndex(0);
   }, [models.length]);
@@ -179,12 +139,11 @@ export function CatalogLightbox({
   const nextModel = useCallback(() => {
     if (models.length <= 1) return;
     setZoom(1); setPan({ x: 0, y: 0 });
-    setIs360(false); setAutoSpin(false); setAngle360(0);
     setModelIndex((i) => (i === models.length - 1 ? 0 : i + 1));
     setPhotoIndex(0);
   }, [models.length]);
 
-  /* ── Zoom ──────────────────────────────────────────────────────── */
+  /* ── Zoom tactile & souris ────────────────────────────────────── */
   const zoomIn = () => setZoom((z) => Math.min(3.5, +(z + 0.5).toFixed(1)));
   const zoomOut = () => {
     setZoom((z) => {
@@ -195,7 +154,6 @@ export function CatalogLightbox({
   };
 
   const handleDoubleTap = (cx: number, cy: number) => {
-    if (is360) return;
     if (zoom > 1) {
       setZoom(1); setPan({ x: 0, y: 0 });
     } else {
@@ -230,12 +188,11 @@ export function CatalogLightbox({
       setIsDragging(true);
       dragStartRef.current = { x: t.clientX, y: t.clientY };
       panStartRef.current = { ...pan };
-      angleStartRef.current = angle360;
     }
   };
 
   const handleTouchMove = (e: React.TouchEvent) => {
-    if (e.touches.length === 2 && pinchDistRef.current && !is360) {
+    if (e.touches.length === 2 && pinchDistRef.current) {
       const dist = Math.hypot(
         e.touches[0].clientX - e.touches[1].clientX,
         e.touches[0].clientY - e.touches[1].clientY,
@@ -246,28 +203,16 @@ export function CatalogLightbox({
       return;
     }
 
-    if (e.touches.length === 1 && isDragging) {
+    if (e.touches.length === 1 && isDragging && zoom > 1) {
       const t = e.touches[0];
       const dx = t.clientX - dragStartRef.current.x;
       const dy = t.clientY - dragStartRef.current.y;
-
-      if (is360) {
-        // Mode 360 : glisser horizontalement fait tourner le modèle de 0° à 360°
-        setAutoSpin(false);
-        const newAngle = ((angleStartRef.current - dx * 0.75) % 360 + 360) % 360;
-        setAngle360(newAngle);
-        if (photos.length > 1) {
-          const idx = Math.floor((newAngle / 360) * photos.length) % photos.length;
-          setPhotoIndex(idx);
-        }
-      } else if (zoom > 1) {
-        const maxX = (window.innerWidth * (zoom - 1)) / 2;
-        const maxY = (window.innerHeight * (zoom - 1)) / 2;
-        setPan({
-          x: Math.max(-maxX, Math.min(maxX, panStartRef.current.x + dx)),
-          y: Math.max(-maxY, Math.min(maxY, panStartRef.current.y + dy)),
-        });
-      }
+      const maxX = (window.innerWidth * (zoom - 1)) / 2;
+      const maxY = (window.innerHeight * (zoom - 1)) / 2;
+      setPan({
+        x: Math.max(-maxX, Math.min(maxX, panStartRef.current.x + dx)),
+        y: Math.max(-maxY, Math.min(maxY, panStartRef.current.y + dy)),
+      });
     }
   };
 
@@ -276,18 +221,22 @@ export function CatalogLightbox({
     if (!isDragging) return;
     setIsDragging(false);
 
-    if (!is360 && zoom === 1 && e.changedTouches.length > 0) {
+    if (zoom === 1 && e.changedTouches.length > 0) {
       const t = e.changedTouches[0];
       const dx = t.clientX - dragStartRef.current.x;
       const dy = t.clientY - dragStartRef.current.y;
       const absDx = Math.abs(dx);
       const absDy = Math.abs(dy);
 
-      if (absDx > 45 && absDx > absDy * 1.3) {
-        // Swipe horizontal : photo suivante/précédente
-        dx < 0 ? nextPhoto() : prevPhoto();
-      } else if (absDy > 60 && absDy > absDx * 1.3) {
-        // Swipe vertical : modèle suivant/précédent
+      // Glissement horizontal : photo suivante/précédente (ou modèle si 1 photo)
+      if (absDx > 45 && absDx > absDy * 1.2) {
+        if (photos.length > 1) {
+          dx < 0 ? nextPhoto() : prevPhoto();
+        } else {
+          dx < 0 ? nextModel() : prevModel();
+        }
+      } else if (absDy > 60 && absDy > absDx * 1.2) {
+        // Glissement vertical : modèle suivant/précédent (slalom)
         dy < 0 ? nextModel() : prevModel();
       }
     }
@@ -298,143 +247,143 @@ export function CatalogLightbox({
     setIsDragging(true);
     dragStartRef.current = { x: e.clientX, y: e.clientY };
     panStartRef.current = { ...pan };
-    angleStartRef.current = angle360;
   };
 
   const handleMouseMove = (e: React.MouseEvent) => {
-    if (!isDragging) return;
+    if (!isDragging || zoom <= 1) return;
     const dx = e.clientX - dragStartRef.current.x;
     const dy = e.clientY - dragStartRef.current.y;
-
-    if (is360) {
-      setAutoSpin(false);
-      const newAngle = ((angleStartRef.current - dx * 0.75) % 360 + 360) % 360;
-      setAngle360(newAngle);
-      if (photos.length > 1) {
-        const idx = Math.floor((newAngle / 360) * photos.length) % photos.length;
-        setPhotoIndex(idx);
-      }
-    } else if (zoom > 1) {
-      const maxX = (window.innerWidth * (zoom - 1)) / 2;
-      const maxY = (window.innerHeight * (zoom - 1)) / 2;
-      setPan({
-        x: Math.max(-maxX, Math.min(maxX, panStartRef.current.x + dx)),
-        y: Math.max(-maxY, Math.min(maxY, panStartRef.current.y + dy)),
-      });
-    }
+    const maxX = (window.innerWidth * (zoom - 1)) / 2;
+    const maxY = (window.innerHeight * (zoom - 1)) / 2;
+    setPan({
+      x: Math.max(-maxX, Math.min(maxX, panStartRef.current.x + dx)),
+      y: Math.max(-maxY, Math.min(maxY, panStartRef.current.y + dy)),
+    });
   };
 
   const handleMouseUp = () => setIsDragging(false);
 
   if (!open || !model) return null;
+  if (typeof document === "undefined") return null;
 
   const catLabel = categoryLabel ? categoryLabel(model.category) : model.category;
   const priceStr = model.default_price && formatPrice ? formatPrice(model.default_price) : null;
 
-  // Calcul de la perspective 3D si une seule photo
-  const perspective3D = photos.length <= 1 && is360
-    ? `perspective(1000px) rotateY(${Math.sin((angle360 * Math.PI) / 180) * 32}deg)`
-    : "";
-
-  return (
+  /* ── Utilisation de createPortal directement sur document.body ──
+     Cela garantit que la visionneuse passe AU-DESSUS DE TOUT (au-dessus du header
+     et au-dessus de la barre de navigation basse d'accueil de l'application).
+  ───────────────────────────────────────────────────────────────── */
+  return createPortal(
     <div
       role="dialog"
       aria-modal="true"
       aria-label={`Plein écran : ${model.name}`}
-      className="fixed inset-0 z-[120] flex flex-col bg-black text-white select-none animate-in fade-in duration-150"
+      className="fixed inset-0 z-[99999] flex flex-col bg-black text-white select-none animate-in fade-in duration-150 overflow-hidden"
+      style={{
+        width: "100vw",
+        height: "100dvh",
+        maxHeight: "100dvh",
+      }}
       onMouseUp={handleMouseUp}
     >
       {/* ══════════════════════════════════════════════════════════════════
-          1. BARRE DE NAVIGATION SUPÉRIEURE (ULTRA-VISIBLE AVEC RETOUR PROMINENT)
+          1. BARRE DE NAVIGATION SUPÉRIEURE (BLINDÉE, ÉCLATANTE, ULTRA-VISIBLE)
          ══════════════════════════════════════════════════════════════════ */}
-      <header className="relative z-50 shrink-0 border-b border-white/15 bg-neutral-950/95 px-3 py-2.5 sm:px-4 backdrop-blur-md">
-        <div className="flex items-center justify-between gap-2">
-          {/* BOUTON RETOUR IM-MAN-QUA-BLE */}
+      <header
+        className="relative z-50 shrink-0 bg-neutral-950/90 border-b border-white/20 px-3 py-2.5 sm:px-5 backdrop-blur-md"
+        style={{
+          paddingTop: "max(env(safe-area-inset-top, 12px), 12px)",
+        }}
+      >
+        <div className="flex items-center justify-between gap-2 max-w-7xl mx-auto w-full">
+          {/* BOUTON RETOUR : BLANC & NOIR, LUMINEUX, IMPOSSIBLE À RATER */}
           <button
             type="button"
             onClick={onClose}
-            className="flex items-center gap-2 rounded-xl bg-primary px-3.5 py-2 text-xs sm:text-sm font-black text-primary-foreground shadow-lg hover:bg-primary/90 active:scale-95 transition-all border border-primary/40 shrink-0"
-            title="Revenir au catalogue et aux filtres"
+            className="flex items-center gap-2 rounded-full bg-white px-4 py-2 text-xs sm:text-sm font-black text-neutral-950 shadow-2xl hover:bg-neutral-200 active:scale-95 transition-all cursor-pointer ring-2 ring-white/50"
+            title="Revenir au catalogue"
           >
-            <ArrowLeft className="size-4.5 stroke-[2.5]" />
-            <span>Retour Catalogue</span>
+            <ArrowLeft className="size-4.5 stroke-[3]" />
+            <span>Retour</span>
           </button>
 
-          {/* SÉLECTEUR RAPIDE DE MODÈLE (Slalom) */}
-          <div className="flex items-center gap-1 min-w-0">
+          {/* SÉLECTEUR RAPIDE DE MODÈLE (SLALOM ENTRE LES CATALOGUES) */}
+          <div className="flex items-center gap-1.5 min-w-0">
             <button
               type="button"
               onClick={prevModel}
               disabled={models.length <= 1}
-              className="flex size-8 items-center justify-center rounded-lg bg-white/10 hover:bg-white/20 active:scale-90 disabled:opacity-30 disabled:pointer-events-none"
-              title="Modèle précédent (Flèche haut)"
+              className="flex size-8 items-center justify-center rounded-full bg-white/15 text-white hover:bg-white/25 active:scale-90 disabled:opacity-30 disabled:pointer-events-none"
+              title="Modèle précédent"
             >
-              <ChevronLeft className="size-4" />
+              <ChevronLeft className="size-4.5 stroke-[2.5]" />
             </button>
-            <div className="text-center px-1 truncate max-w-[140px] sm:max-w-xs">
-              <p className="text-xs sm:text-sm font-bold text-white truncate">{model.name}</p>
-              <p className="text-[10px] text-white/60 font-semibold truncate">
-                Modèle {modelIndex + 1}/{models.length} · {catLabel}
+
+            <div className="text-center px-1 truncate max-w-[150px] sm:max-w-xs">
+              <p className="text-xs sm:text-sm font-black text-white truncate">{model.name}</p>
+              <p className="text-[10px] text-white/70 font-semibold truncate">
+                {modelIndex + 1}/{models.length} · {catLabel}
               </p>
             </div>
+
             <button
               type="button"
               onClick={nextModel}
               disabled={models.length <= 1}
-              className="flex size-8 items-center justify-center rounded-lg bg-white/10 hover:bg-white/20 active:scale-90 disabled:opacity-30 disabled:pointer-events-none"
-              title="Modèle suivant (Flèche bas)"
+              className="flex size-8 items-center justify-center rounded-full bg-white/15 text-white hover:bg-white/25 active:scale-90 disabled:opacity-30 disabled:pointer-events-none"
+              title="Modèle suivant"
             >
-              <ChevronRight className="size-4" />
+              <ChevronRight className="size-4.5 stroke-[2.5]" />
             </button>
           </div>
 
-          {/* ACTIONS HAUT-DROITE : LISTE MODÈLES, REMPLIR, FERMER */}
+          {/* ACTIONS HAUT-DROITE : LISTE COMPLÈTE & FERMETURE */}
           <div className="flex items-center gap-1.5 shrink-0">
-            {/* Bouton pour ouvrir la grille de tous les modèles */}
+            {/* Tiroir pour voir tous les modèles du catalogue */}
             <button
               type="button"
-              onClick={() => setShowModelPicker((v) => !v)}
-              className={`flex items-center gap-1 rounded-xl px-2.5 py-2 text-xs font-bold transition-all shadow-xs ${
-                showModelPicker
-                  ? "bg-primary text-primary-foreground"
-                  : "bg-white/10 text-white hover:bg-white/20"
+              onClick={() => setShowCatalogDrawer((v) => !v)}
+              className={`flex items-center gap-1 rounded-full px-3 py-2 text-xs font-bold transition-all shadow-md ${
+                showCatalogDrawer
+                  ? "bg-primary text-primary-foreground font-black"
+                  : "bg-white/15 text-white hover:bg-white/25"
               }`}
-              title="Voir tous les modèles du catalogue"
+              title="Voir toute la liste des modèles"
             >
-              <LayoutGrid className="size-3.5" />
-              <span className="hidden sm:inline">Tous</span>
+              <Layers className="size-3.5" />
+              <span className="hidden sm:inline">Modèles ({models.length})</span>
             </button>
 
             {/* Bouton Remplir / Adapter */}
             <button
               type="button"
               onClick={() => setFitMode((m) => (m === "cover" ? "contain" : "cover"))}
-              className="flex items-center gap-1 rounded-xl bg-white/10 px-2.5 py-2 text-xs font-bold text-white hover:bg-white/20 active:scale-95"
-              title={fitMode === "cover" ? "Adapter le vêtement complet" : "Remplir tout l'écran"}
+              className="flex items-center gap-1 rounded-full bg-white/15 px-2.5 py-2 text-xs font-bold text-white hover:bg-white/25 active:scale-95"
+              title={fitMode === "cover" ? "Adapter le vêtement complet" : "Remplir 100% sans bordures"}
             >
               {fitMode === "cover" ? <Minimize2 className="size-3.5" /> : <Maximize2 className="size-3.5" />}
               <span className="hidden sm:inline">{fitMode === "cover" ? "Adapter" : "Remplir"}</span>
             </button>
 
-            {/* Bouton Quitter (X) */}
+            {/* Bouton Fermer (X) */}
             <button
               type="button"
               onClick={onClose}
-              className="flex size-9 items-center justify-center rounded-xl bg-destructive/80 text-white hover:bg-destructive active:scale-95 transition-all shadow-md ml-0.5"
+              className="flex size-9 items-center justify-center rounded-full bg-red-600/90 text-white hover:bg-red-600 active:scale-95 transition-all shadow-md ml-0.5"
               title="Fermer"
             >
-              <X className="size-5" />
+              <X className="size-5 stroke-[2.5]" />
             </button>
           </div>
         </div>
       </header>
 
       {/* ══════════════════════════════════════════════════════════════════
-          2. ZONE PHOTO CENTRALE (Bord-à-bord, Fond Ambiant, Zéro Bande Noire)
+          2. ZONE PHOTO CENTRALE (Bord-à-Bord Absolu, ZÉRO BANDE LATÉRALE)
          ══════════════════════════════════════════════════════════════════ */}
       <div
-        className={`relative flex-1 flex items-center justify-center overflow-hidden touch-none ${
-          is360 ? "cursor-ew-resize" : zoom > 1 ? "cursor-grab active:cursor-grabbing" : "cursor-default"
+        className={`relative flex-1 flex items-center justify-center overflow-hidden touch-none w-full h-full ${
+          zoom > 1 ? "cursor-grab active:cursor-grabbing" : "cursor-default"
         }`}
         onTouchStart={handleTouchStart}
         onTouchMove={handleTouchMove}
@@ -442,23 +391,23 @@ export function CatalogLightbox({
         onMouseDown={handleMouseDown}
         onMouseMove={handleMouseMove}
       >
-        {/* Fond d'ambiance flouté dynamique (élimine 100% des bandes noires) */}
+        {/* Fond d'ambiance flouté dynamique (garantit 0 bande noire même si l'image est adaptée) */}
         {currentPhoto && (
           <div className="absolute inset-0 overflow-hidden pointer-events-none select-none">
             <StoredImage
               path={currentPhoto}
               alt="fond d'ambiance"
-              className="size-full object-cover blur-3xl scale-125 opacity-40 brightness-75 transition-all duration-300"
+              className="size-full object-cover blur-3xl scale-125 opacity-45 brightness-90 transition-all duration-300"
             />
           </div>
         )}
 
-        {/* Image du vêtement avec zoom / pan / 360 3D */}
+        {/* Image du vêtement : object-cover par défaut pour 100% plein écran sans aucune bande latérale */}
         {currentPhoto ? (
           <div
-            className="absolute inset-0 flex items-center justify-center transition-transform duration-75 ease-out"
+            className="absolute inset-0 flex items-center justify-center transition-transform duration-75 ease-out w-full h-full"
             style={{
-              transform: `translate3d(${pan.x}px, ${pan.y}px, 0) scale(${zoom}) ${perspective3D}`,
+              transform: `translate3d(${pan.x}px, ${pan.y}px, 0) scale(${zoom})`,
               transformOrigin: "center center",
             }}
             onDoubleClick={(e) => handleDoubleTap(e.clientX, e.clientY)}
@@ -466,7 +415,9 @@ export function CatalogLightbox({
             <StoredImage
               path={currentPhoto}
               alt={`${model.name} - vue ${photoIndex + 1}`}
-              className={`size-full ${fitMode === "cover" ? "object-cover" : "object-contain"} pointer-events-none drop-shadow-2xl transition-all duration-200`}
+              className={`size-full ${
+                fitMode === "cover" ? "object-cover" : "object-contain"
+              } pointer-events-none drop-shadow-2xl transition-all duration-200`}
             />
           </div>
         ) : (
@@ -476,69 +427,54 @@ export function CatalogLightbox({
           </div>
         )}
 
-        {/* Flèches Photos Suivante / Précédente (gauche/droite) */}
-        {photos.length > 1 && zoom === 1 && !is360 && (
+        {/* Flèches de navigation entre les photos (gauche / droite) */}
+        {photos.length > 1 && zoom === 1 && (
           <>
             <button
               type="button"
               onClick={prevPhoto}
-              className="absolute left-2.5 top-1/2 -translate-y-1/2 z-20 flex size-11 items-center justify-center rounded-full bg-black/50 text-white hover:bg-black/80 active:scale-90 transition-all shadow-xl backdrop-blur-xs border border-white/20"
+              className="absolute left-3 top-1/2 -translate-y-1/2 z-20 flex size-12 items-center justify-center rounded-full bg-black/60 text-white hover:bg-black/90 active:scale-90 transition-all shadow-2xl backdrop-blur-md border border-white/30"
               title="Photo précédente"
             >
-              <ChevronLeft className="size-6.5" />
+              <ChevronLeft className="size-7 stroke-[2.5]" />
             </button>
             <button
               type="button"
               onClick={nextPhoto}
-              className="absolute right-2.5 top-1/2 -translate-y-1/2 z-20 flex size-11 items-center justify-center rounded-full bg-black/50 text-white hover:bg-black/80 active:scale-90 transition-all shadow-xl backdrop-blur-xs border border-white/20"
+              className="absolute right-3 top-1/2 -translate-y-1/2 z-20 flex size-12 items-center justify-center rounded-full bg-black/60 text-white hover:bg-black/90 active:scale-90 transition-all shadow-2xl backdrop-blur-md border border-white/30"
               title="Photo suivante"
             >
-              <ChevronRight className="size-6.5" />
+              <ChevronRight className="size-7 stroke-[2.5]" />
             </button>
           </>
         )}
 
-        {/* Indicateur de Mode 360° en haut au centre de l'image */}
-        {is360 && (
-          <div className="absolute top-3 inset-x-4 flex flex-col items-center pointer-events-none z-30">
-            <div className="flex items-center gap-2 rounded-full bg-black/85 px-4 py-1.5 border border-primary/50 shadow-2xl backdrop-blur-md">
-              <Rotate3d className="size-4 text-primary animate-spin" />
-              <span className="text-xs font-black text-white tracking-wider">
-                ROTATION 360° : {Math.round(angle360)}° {photos.length > 1 ? `· Vue ${photoIndex + 1}/${photos.length}` : "· 3D"}
-              </span>
-            </div>
-            <p className="mt-1 text-[10px] font-bold text-white/90 bg-black/70 px-3 py-0.5 rounded-full backdrop-blur-xs">
-              👈 Glissez le doigt horizontalement pour pivoter 👉
-            </p>
-          </div>
-        )}
-
-        {/* Indicateur de Zoom en bas à gauche */}
+        {/* Indicateur de zoom actif */}
         {zoom > 1 && (
-          <div className="absolute bottom-4 left-4 z-20 rounded-full bg-black/75 px-3 py-1 text-[11px] font-bold text-white border border-white/20 shadow-md backdrop-blur-md pointer-events-none">
+          <div className="absolute bottom-4 left-4 z-20 rounded-full bg-black/80 px-3.5 py-1 text-xs font-bold text-white border border-white/20 shadow-xl backdrop-blur-md pointer-events-none">
             🔍 {Math.round(zoom * 100)}% — Glissez pour parcourir
           </div>
         )}
 
-        {/* DRAWER SUR ÉCRAN : GRILLE DES AUTRES MODÈLES DU CATALOGUE */}
-        {showModelPicker && (
-          <div className="absolute inset-x-3 bottom-3 top-3 z-40 flex flex-col rounded-2xl bg-neutral-950/95 p-3.5 border border-white/20 shadow-2xl backdrop-blur-xl animate-in fade-in zoom-in-95 duration-150">
-            <div className="flex items-center justify-between pb-2.5 border-b border-white/10">
+        {/* TIROIR MODÈLES DU CATALOGUE (S'affiche en 1 clic pour slalomer d'une tenue à une autre) */}
+        {showCatalogDrawer && (
+          <div className="absolute inset-x-3 bottom-3 top-3 z-40 flex flex-col rounded-3xl bg-neutral-950/95 p-4 border border-white/20 shadow-2xl backdrop-blur-2xl animate-in fade-in zoom-in-95 duration-150">
+            <div className="flex items-center justify-between pb-3 border-b border-white/15">
               <div className="flex items-center gap-2">
-                <LayoutGrid className="size-4 text-primary" />
-                <h4 className="font-bold text-xs sm:text-sm text-white">
+                <Layers className="size-5 text-primary" />
+                <h4 className="font-black text-sm sm:text-base text-white">
                   Tous les modèles du catalogue ({models.length})
                 </h4>
               </div>
               <button
                 type="button"
-                onClick={() => setShowModelPicker(false)}
-                className="flex size-7 items-center justify-center rounded-lg bg-white/10 text-white hover:bg-white/20"
+                onClick={() => setShowCatalogDrawer(false)}
+                className="flex size-8 items-center justify-center rounded-full bg-white/10 text-white hover:bg-white/20"
               >
-                <X className="size-4" />
+                <X className="size-4.5" />
               </button>
             </div>
-            <div className="flex-1 overflow-y-auto grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2 pt-2.5">
+            <div className="flex-1 overflow-y-auto grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2.5 pt-3">
               {models.map((m, idx) => (
                 <button
                   key={m.id}
@@ -548,16 +484,15 @@ export function CatalogLightbox({
                     setPhotoIndex(0);
                     setZoom(1);
                     setPan({ x: 0, y: 0 });
-                    setIs360(false);
-                    setShowModelPicker(false);
+                    setShowCatalogDrawer(false);
                   }}
-                  className={`group flex flex-col text-left overflow-hidden rounded-xl border-2 transition-all p-1 ${
+                  className={`group flex flex-col text-left overflow-hidden rounded-2xl border-2 transition-all p-1.5 ${
                     idx === modelIndex
-                      ? "border-primary bg-primary/20 ring-2 ring-primary/40"
+                      ? "border-primary bg-primary/20 ring-2 ring-primary/50"
                       : "border-white/10 bg-white/5 hover:border-white/30"
                   }`}
                 >
-                  <div className="relative aspect-square w-full rounded-lg overflow-hidden bg-black/40">
+                  <div className="relative aspect-square w-full rounded-xl overflow-hidden bg-black/40">
                     {m.photo_paths?.[0] ? (
                       <StoredImage path={m.photo_paths[0]} alt={m.name} className="size-full object-cover" />
                     ) : (
@@ -565,11 +500,11 @@ export function CatalogLightbox({
                         <Scissors className="size-6" />
                       </div>
                     )}
-                    <span className="absolute top-1 left-1 rounded bg-black/70 px-1 text-[9px] font-bold">
+                    <span className="absolute top-1 left-1 rounded-md bg-black/75 px-1.5 py-0.5 text-[10px] font-black text-white">
                       #{idx + 1}
                     </span>
                   </div>
-                  <p className="mt-1 text-[11px] font-bold text-white truncate px-0.5">{m.name}</p>
+                  <p className="mt-1 text-xs font-bold text-white truncate px-1">{m.name}</p>
                 </button>
               ))}
             </div>
@@ -578,168 +513,104 @@ export function CatalogLightbox({
       </div>
 
       {/* ══════════════════════════════════════════════════════════════════
-          3. BARRE INFÉRIEURE : CONTRÔLE 360°, ZOOM, MINIATURES & ACTIONS
+          3. BARRE INFÉRIEURE : INFOS MODÈLE, ZOOM, MINIATURES & WHATSAPP
          ══════════════════════════════════════════════════════════════════ */}
-      <footer className="relative z-50 shrink-0 border-t border-white/15 bg-neutral-950/95 px-3 py-2 sm:px-4 backdrop-blur-md pb-[max(env(safe-area-inset-bottom),8px)]">
-        {/* BANDEAU DE COMMANDE 360° SI LE MODE 360 EST ACTIF */}
-        {is360 ? (
-          <div className="space-y-2 py-1">
-            <div className="flex items-center justify-between gap-3">
-              <button
-                type="button"
-                onClick={() => setAutoSpin((v) => !v)}
-                className={`flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-black shadow-md transition-all ${
-                  autoSpin ? "bg-amber-500 text-black" : "bg-primary text-primary-foreground"
-                }`}
-              >
-                {autoSpin ? <Pause className="size-3.5 fill-black" /> : <Play className="size-3.5 fill-current" />}
-                <span>{autoSpin ? "Pause" : "Auto-Rotation 360°"}</span>
-              </button>
-
-              <div className="flex-1 flex items-center gap-2 max-w-md">
-                <span className="text-[10px] font-mono font-bold text-white/70">0°</span>
-                <input
-                  type="range"
-                  min="0"
-                  max="359"
-                  value={Math.round(angle360)}
-                  onChange={(e) => {
-                    setAutoSpin(false);
-                    const val = Number(e.target.value);
-                    setAngle360(val);
-                    if (photos.length > 1) {
-                      const idx = Math.floor((val / 360) * photos.length) % photos.length;
-                      setPhotoIndex(idx);
-                    }
-                  }}
-                  className="flex-1 h-2 bg-white/20 rounded-lg appearance-none cursor-pointer accent-primary"
-                />
-                <span className="text-[10px] font-mono font-bold text-white/70">360°</span>
+      <footer
+        className="relative z-50 shrink-0 bg-neutral-950/90 border-t border-white/20 px-3 py-2 sm:px-5 backdrop-blur-md"
+        style={{
+          paddingBottom: "max(env(safe-area-inset-bottom, 10px), 10px)",
+        }}
+      >
+        <div className="max-w-7xl mx-auto w-full space-y-2">
+          {/* LIGNE INFO ET CONTRÔLES */}
+          <div className="flex items-center justify-between gap-2">
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-2">
+                <h3 className="font-black text-sm sm:text-base text-white truncate">{model.name}</h3>
+                {priceStr && <span className="font-black text-xs sm:text-sm text-primary">{priceStr}</span>}
               </div>
-
-              <button
-                type="button"
-                onClick={() => {
-                  setIs360(false);
-                  setAutoSpin(false);
-                  setAngle360(0);
-                }}
-                className="rounded-lg bg-white/15 px-2.5 py-1.5 text-[11px] font-bold text-white hover:bg-white/25"
-              >
-                Quitter 360°
-              </button>
+              {model.fabric_needed && (
+                <p className="text-[10px] sm:text-xs text-white/70 truncate">🧵 {model.fabric_needed}</p>
+              )}
             </div>
-          </div>
-        ) : (
-          <div className="flex flex-col gap-2">
-            {/* LIGNE INFO ET CONTRÔLES */}
-            <div className="flex items-center justify-between gap-2">
-              <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-2">
-                  <h3 className="font-bold text-sm text-white truncate">{model.name}</h3>
-                  {priceStr && <span className="font-black text-xs text-primary">{priceStr}</span>}
-                </div>
-                {model.fabric_needed && (
-                  <p className="text-[10px] text-white/70 truncate">🧵 {model.fabric_needed}</p>
-                )}
-              </div>
 
-              {/* BOUTONS D'ACTION : 360°, ZOOM, COMMANDER */}
-              <div className="flex items-center gap-1.5 shrink-0">
-                {/* BOUTON MODE 360° (DÉMARRE DIRECTEMENT LA ROTATION) */}
+            {/* BOUTONS : ZOOM & WHATSAPP / COMMANDER */}
+            <div className="flex items-center gap-2 shrink-0">
+              {/* ZOOM CONTROLS */}
+              <div className="flex items-center rounded-full bg-white/15 p-0.5">
                 <button
                   type="button"
+                  onClick={zoomOut}
+                  disabled={zoom <= 1}
+                  className="flex size-7 items-center justify-center rounded-full text-white/80 hover:bg-white/20 disabled:opacity-30 disabled:pointer-events-none"
+                >
+                  <ZoomOut className="size-3.5" />
+                </button>
+                <span className="px-1.5 text-[10px] font-mono font-bold text-white/90">
+                  {Math.round(zoom * 100)}%
+                </span>
+                <button
+                  type="button"
+                  onClick={zoomIn}
+                  disabled={zoom >= 3.5}
+                  className="flex size-7 items-center justify-center rounded-full text-white/80 hover:bg-white/20 disabled:opacity-30 disabled:pointer-events-none"
+                >
+                  <ZoomIn className="size-3.5" />
+                </button>
+              </div>
+
+              {/* COMMANDER */}
+              {onOrder && (
+                <button
+                  type="button"
+                  onClick={() => onOrder(model)}
+                  className="flex items-center gap-1.5 rounded-full bg-primary px-3.5 py-1.5 text-xs font-black text-primary-foreground shadow-md active:scale-95"
+                >
+                  <Scissors className="size-3.5" />
+                  <span>Commander</span>
+                </button>
+              )}
+
+              {/* WHATSAPP */}
+              {onShare && (
+                <button
+                  type="button"
+                  onClick={() => onShare(model)}
+                  className="flex items-center gap-1.5 rounded-full bg-green-600 px-3.5 py-1.5 text-xs font-black text-white shadow-md active:scale-95"
+                >
+                  <MessageCircle className="size-3.5" />
+                  <span className="hidden sm:inline">WhatsApp</span>
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* BANDEAU MINIATURES DES PHOTOS (Si le modèle a plus d'1 photo) */}
+          {photos.length > 1 && (
+            <div className="flex items-center gap-2 overflow-x-auto py-0.5 scrollbar-none">
+              {photos.map((p, i) => (
+                <button
+                  key={i}
+                  type="button"
                   onClick={() => {
-                    const next = !is360;
-                    setIs360(next);
                     setZoom(1);
                     setPan({ x: 0, y: 0 });
-                    if (next) {
-                      setAutoSpin(true); // Démarrage immédiat de la rotation !
-                    } else {
-                      setAutoSpin(false);
-                    }
+                    setPhotoIndex(i);
                   }}
-                  className="flex items-center gap-1.5 rounded-xl bg-gradient-to-r from-amber-500 to-primary px-3 py-1.5 text-xs font-black text-black shadow-lg hover:scale-105 active:scale-95 transition-all"
-                  title="Faire tourner le modèle à 360°"
+                  className={`relative size-11 shrink-0 overflow-hidden rounded-xl border-2 transition-all ${
+                    i === photoIndex
+                      ? "border-primary ring-2 ring-primary/60 scale-105 opacity-100"
+                      : "border-white/25 opacity-60 hover:opacity-100"
+                  }`}
                 >
-                  <Rotate3d className="size-4 animate-spin stroke-[2.5]" />
-                  <span>Mode 360°</span>
+                  <StoredImage path={p} alt={`Photo ${i + 1}`} className="size-full object-cover" />
                 </button>
-
-                {/* ZOOM */}
-                <div className="flex items-center rounded-xl bg-white/15 p-0.5">
-                  <button
-                    type="button"
-                    onClick={zoomOut}
-                    disabled={zoom <= 1}
-                    className="flex size-7 items-center justify-center rounded-lg text-white/80 hover:bg-white/20 disabled:opacity-30 disabled:pointer-events-none"
-                  >
-                    <ZoomOut className="size-3.5" />
-                  </button>
-                  <span className="px-1 text-[10px] font-mono font-bold text-white/90">
-                    {Math.round(zoom * 100)}%
-                  </span>
-                  <button
-                    type="button"
-                    onClick={zoomIn}
-                    disabled={zoom >= 3.5}
-                    className="flex size-7 items-center justify-center rounded-lg text-white/80 hover:bg-white/20 disabled:opacity-30 disabled:pointer-events-none"
-                  >
-                    <ZoomIn className="size-3.5" />
-                  </button>
-                </div>
-
-                {/* COMMANDER WHATSAPP */}
-                {onOrder && (
-                  <button
-                    type="button"
-                    onClick={() => onOrder(model)}
-                    className="flex items-center gap-1 rounded-xl bg-primary px-2.5 py-1.5 text-xs font-bold text-primary-foreground shadow-sm active:scale-95"
-                  >
-                    <Scissors className="size-3.5" />
-                    <span className="hidden sm:inline">Commander</span>
-                  </button>
-                )}
-                {onShare && (
-                  <button
-                    type="button"
-                    onClick={() => onShare(model)}
-                    className="flex items-center gap-1 rounded-xl bg-green-600 px-2.5 py-1.5 text-xs font-bold text-white shadow-sm active:scale-95"
-                  >
-                    <MessageCircle className="size-3.5" />
-                    <span className="hidden sm:inline">Partager</span>
-                  </button>
-                )}
-              </div>
+              ))}
             </div>
-
-            {/* BANDEAU MINIATURES DES PHOTOS DU MODÈLE ACTUEL */}
-            {photos.length > 1 && (
-              <div className="flex items-center gap-2 overflow-x-auto py-0.5 scrollbar-none">
-                {photos.map((p, i) => (
-                  <button
-                    key={i}
-                    type="button"
-                    onClick={() => {
-                      setZoom(1);
-                      setPan({ x: 0, y: 0 });
-                      setPhotoIndex(i);
-                    }}
-                    className={`relative size-10 shrink-0 overflow-hidden rounded-lg border-2 transition-all ${
-                      i === photoIndex
-                        ? "border-primary ring-2 ring-primary/60 scale-105 opacity-100"
-                        : "border-white/20 opacity-60 hover:opacity-100"
-                    }`}
-                  >
-                    <StoredImage path={p} alt={`Vue ${i + 1}`} className="size-full object-cover" />
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
+          )}
+        </div>
       </footer>
-    </div>
+    </div>,
+    document.body
   );
 }

@@ -671,7 +671,7 @@ function CataloguePage() {
         }}
       />
 
-      {/* Visionneuse Plein Écran immersive de la taille du téléphone avec slalom entre modèles et rotation 360° */}
+      {/* Visionneuse Plein Écran immersive bord-à-bord avec slalom entre modèles */}
       <CatalogLightbox
         open={lightboxOpen}
         onClose={() => setLightboxOpen(false)}
