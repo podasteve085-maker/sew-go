@@ -63,9 +63,11 @@ import {
   dateLongFr,
   fullName,
   today,
+  addDays,
   initials,
   cleanPhone,
 } from "@/lib/format";
+import { generateWhatsAppReminderUrl } from "@/lib/notifications";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -519,6 +521,81 @@ function OrderDetailPage() {
             <MessageCircle className="mr-1.5 size-3.5" /> Alerter WhatsApp
           </Button>
         </div>
+      )}
+
+      {/* Bannière rappel d'échéance de livraison : Aujourd'hui (Jour J) ou Demain (Veille) */}
+      {order.status !== "livree" && order.status !== "annulee" && order.status !== "prete" && (
+        order.due_date === today() ? (
+          <div className="no-print flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-destructive/40 bg-destructive/10 p-3.5 sm:p-4">
+            <div className="flex items-center gap-3">
+              <span className="flex size-10 items-center justify-center rounded-xl bg-destructive text-destructive-foreground font-bold shrink-0">
+                <Clock className="size-5" />
+              </span>
+              <div>
+                <p className="font-display text-xs sm:text-sm font-bold text-foreground">
+                  Livraison prévue aujourd'hui (Jour J) !
+                </p>
+                <p className="text-[0.7rem] sm:text-xs text-muted-foreground">
+                  L'échéance fixée avec le client arrive à son terme aujourd'hui.
+                </p>
+              </div>
+            </div>
+            {client?.phone && (
+              <a
+                href={generateWhatsAppReminderUrl({
+                  id: order.id,
+                  type: "delivery",
+                  urgency: "today",
+                  clientName: fullName(client),
+                  clientPhone: client.whatsapp || client.phone,
+                  title: `Livraison commande ${order.reference} (${order.garment_type})`,
+                  date: order.due_date ?? "",
+                  atelierName: business?.name ?? "votre atelier",
+                })}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex h-8.5 items-center gap-1.5 rounded-lg bg-success text-success-foreground px-3 text-xs font-bold shadow-xs hover:bg-success/90 transition-all active:scale-95"
+              >
+                <MessageCircle className="size-3.5" /> WhatsApp Jour J
+              </a>
+            )}
+          </div>
+        ) : order.due_date === addDays(1) ? (
+          <div className="no-print flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-warning/40 bg-warning/10 p-3.5 sm:p-4">
+            <div className="flex items-center gap-3">
+              <span className="flex size-10 items-center justify-center rounded-xl bg-warning text-warning-foreground font-bold shrink-0">
+                <Clock className="size-5" />
+              </span>
+              <div>
+                <p className="font-display text-xs sm:text-sm font-bold text-foreground">
+                  Rappel : Livraison prévue demain (La veille) !
+                </p>
+                <p className="text-[0.7rem] sm:text-xs text-muted-foreground">
+                  Préparez la livraison ou envoyez un message de prévenance au client dès aujourd'hui.
+                </p>
+              </div>
+            </div>
+            {client?.phone && (
+              <a
+                href={generateWhatsAppReminderUrl({
+                  id: order.id,
+                  type: "delivery",
+                  urgency: "tomorrow",
+                  clientName: fullName(client),
+                  clientPhone: client.whatsapp || client.phone,
+                  title: `Livraison commande ${order.reference} (${order.garment_type})`,
+                  date: order.due_date ?? "",
+                  atelierName: business?.name ?? "votre atelier",
+                })}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex h-8.5 items-center gap-1.5 rounded-lg bg-warning text-warning-foreground px-3 text-xs font-bold shadow-xs hover:bg-warning/90 transition-all active:scale-95"
+              >
+                <MessageCircle className="size-3.5" /> Rappel veille WhatsApp
+              </a>
+            )}
+          </div>
+        ) : null
       )}
 
       {/* Hero Header Card */}

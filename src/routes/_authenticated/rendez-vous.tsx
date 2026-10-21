@@ -9,8 +9,7 @@ import { useBusiness } from "@/hooks/use-business";
 import { isProOrAdmin, isSubscriptionExpired } from "@/lib/quotas";
 import { UpgradeDialog } from "@/components/upgrade-dialog";
 import { fetchAppointments, fetchClients, type AppointmentRow } from "@/lib/queries";
-import { APPOINTMENT_TYPES, APPOINTMENT_STATUS, appointmentLabel } from "@/lib/domain";
-import { dateLongFr, fullName, today } from "@/lib/format";
+import { dateLongFr, fullName, today, addDays, cleanPhone, waLink } from "@/lib/format";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -423,9 +422,15 @@ function AppointmentsPage() {
 
 function rappelMessage(a: { scheduled_date: string; scheduled_time: string | null; type: string }, atelier?: string | null) {
   const heure = a.scheduled_time ? ` à ${a.scheduled_time.slice(0, 5)}` : "";
-  return `Bonjour, rappel de votre ${appointmentLabel(a.type).toLowerCase()} le ${dateLongFr(
-    a.scheduled_date,
-  )}${heure}. — ${atelier ?? "Votre atelier"}`;
+  const isToday = a.scheduled_date === today();
+  const isTomorrow = a.scheduled_date === addDays(1);
+  const timing = isToday
+    ? "AUJOURD'HUI"
+    : isTomorrow
+    ? "DEMAIN"
+    : `le ${dateLongFr(a.scheduled_date)}`;
+
+  return `Bonjour ! 👋 Nous vous rappelons votre rendez-vous (${appointmentLabel(a.type).toLowerCase()}) prévu ${timing}${heure} à l'atelier ${atelier ?? "notre atelier"}. Merci de nous confirmer votre venue !`;
 }
 
 function AppointmentDialog({
@@ -438,6 +443,7 @@ function AppointmentDialog({
   businessId: string;
 }) {
   const queryClient = useQueryClient();
+  const { data: business } = useBusiness();
   const clients = useQuery({
     queryKey: ["clients", ""],
     queryFn: () => fetchClients(),
@@ -457,10 +463,27 @@ function AppointmentDialog({
         status: "prevu",
       });
       if (error) throw error;
+      return values;
     },
-    onSuccess: () => {
+    onSuccess: (values) => {
       queryClient.invalidateQueries({ queryKey: ["appointments"] });
-      toast.success("Rendez-vous planifié");
+      toast.success("Rendez-vous planifié avec succès");
+
+      // Si demandé, ouverture immédiate de WhatsApp avec le message de confirmation
+      if (values["notify_whatsapp"] === "on" && values["client_id"]) {
+        const client = (clients.data ?? []).find((c) => c.id === values["client_id"]);
+        const phone = client?.whatsapp || client?.phone;
+        if (phone) {
+          const heure = values["scheduled_time"] ? ` à ${values["scheduled_time"].slice(0, 5)}` : "";
+          const typeStr = appointmentLabel(values["type"] || "essayage");
+          const msg = `Bonjour ${fullName(client)} ! 👋 Votre rendez-vous pour ${typeStr.toLowerCase()} est bien programmé pour le ${dateLongFr(
+            values["scheduled_date"] || today(),
+          )}${heure} à l'atelier ${business?.name ?? "notre atelier"}. Au plaisir de vous accueillir !`;
+          const url = waLink(cleanPhone(phone), msg);
+          if (url) window.open(url, "_blank");
+        }
+      }
+
       onOpenChange(false);
     },
     onError: () => toast.error("Enregistrement impossible"),
@@ -542,6 +565,21 @@ function AppointmentDialog({
             <Label htmlFor="notes">Notes</Label>
             <Textarea id="notes" name="notes" rows={2} className="text-base sm:text-sm rounded-xl" />
           </div>
+
+          {/* Option de confirmation WhatsApp immédiate */}
+          <div className="flex items-center space-x-2.5 pt-2 border-t border-border/60">
+            <input
+              type="checkbox"
+              id="notify_whatsapp"
+              name="notify_whatsapp"
+              defaultChecked={true}
+              className="size-4.5 rounded accent-primary cursor-pointer"
+            />
+            <Label htmlFor="notify_whatsapp" className="text-xs font-semibold cursor-pointer select-none">
+              Envoyer la confirmation WhatsApp au client immédiatement
+            </Label>
+          </div>
+
           <DialogFooter>
             <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>
               Annuler

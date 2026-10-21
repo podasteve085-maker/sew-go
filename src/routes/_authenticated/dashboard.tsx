@@ -22,6 +22,7 @@ import { useBusiness } from "@/hooks/use-business";
 import { fetchOrders, fetchAppointments, balance } from "@/lib/queries";
 import { isActive, isLate, appointmentLabel } from "@/lib/domain";
 import { fcfa, dateFr, dateLongFr, today, addDays, fullName, cleanPhone } from "@/lib/format";
+import { generateWhatsAppReminderUrl } from "@/lib/notifications";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { StatCard, EmptyState, SectionTitle, OrderCard, LateBadge } from "@/components/bits";
@@ -89,6 +90,8 @@ function Dashboard() {
   const appts = (appointments.data ?? []).filter((a) => a.status === "prevu");
   const todayAppts = appts.filter((a) => a.scheduled_date === today());
   const tomorrowAppts = appts.filter((a) => a.scheduled_date === addDays(1));
+  const todayDeliveries = active.filter((o) => o.due_date === today());
+  const tomorrowDeliveries = active.filter((o) => o.due_date === addDays(1));
   const weekDeliveries = active.filter(
     (o) => o.due_date && o.due_date >= today() && o.due_date <= addDays(7),
   );
@@ -98,6 +101,7 @@ function Dashboard() {
     .sort((a, b) => (a.due_date ?? "").localeCompare(b.due_date ?? ""))
     .slice(0, 5);
 
+  const [selectedReminderTab, setSelectedReminderTab] = useState<"today" | "tomorrow">("today");
   const [upgradeOpen, setUpgradeOpen] = useState(false);
   const isPro = isProOrAdmin(business);
   const isExpired = isSubscriptionExpired(business);
@@ -301,12 +305,12 @@ function Dashboard() {
             <ReminderRow
               color="bg-destructive"
               label="Aujourd'hui"
-              value={`${todayAppts.length} RDV`}
+              value={`${todayAppts.length} RDV · ${todayDeliveries.length} livr.`}
             />
             <ReminderRow
               color="bg-warning"
-              label="Demain"
-              value={`${tomorrowAppts.length} RDV`}
+              label="Demain (Veille)"
+              value={`${tomorrowAppts.length} RDV · ${tomorrowDeliveries.length} livr.`}
             />
             <ReminderRow
               color="bg-success"
@@ -324,41 +328,196 @@ function Dashboard() {
         </div>
 
         <div>
-          <SectionTitle>RDV du jour</SectionTitle>
-          {todayAppts.length === 0 ? (
-            <div className="card-soft p-5 text-center text-xs text-muted-foreground">
-              Aucun rendez-vous planifié aujourd'hui
+          <div className="flex items-center justify-between gap-2 mb-2">
+            <SectionTitle>Rappels & Échéances</SectionTitle>
+            <div className="flex items-center rounded-lg bg-muted/80 p-0.5 text-xs font-semibold">
+              <button
+                type="button"
+                onClick={() => setSelectedReminderTab("today")}
+                className={`rounded-md px-2.5 py-1 transition-all ${
+                  selectedReminderTab === "today"
+                    ? "bg-background text-foreground shadow-xs font-bold"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                Aujourd'hui ({todayAppts.length + todayDeliveries.length})
+              </button>
+              <button
+                type="button"
+                onClick={() => setSelectedReminderTab("tomorrow")}
+                className={`rounded-md px-2.5 py-1 transition-all ${
+                  selectedReminderTab === "tomorrow"
+                    ? "bg-background text-foreground shadow-xs font-bold"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                Demain ({tomorrowAppts.length + tomorrowDeliveries.length})
+              </button>
             </div>
-          ) : (
-            <div className="space-y-2">
-              {todayAppts.map((a) => (
-                <div key={a.id} className="card-soft flex items-center justify-between gap-2.5 p-3">
-                  <div className="flex items-center gap-2.5 min-w-0">
-                    <span className="rounded-lg bg-primary/10 px-2 py-1 font-display text-xs font-bold text-primary shrink-0">
-                      {a.scheduled_time?.slice(0, 5) ?? "--:--"}
-                    </span>
-                    <div className="min-w-0">
-                      <p className="truncate text-xs sm:text-sm font-semibold">{fullName(a.clients)}</p>
-                      <p className="text-[0.7rem] text-muted-foreground">{appointmentLabel(a.type)}</p>
-                    </div>
-                  </div>
+          </div>
 
-                  {a.clients?.phone && (
-                    <a
-                      href={`https://wa.me/${cleanPhone(a.clients.whatsapp || a.clients.phone)}?text=${encodeURIComponent(
-                        `Bonjour ${a.clients.first_name}, rappel de votre rendez-vous de ${appointmentLabel(a.type)} aujourd'hui à ${a.scheduled_time?.slice(0, 5) ?? ""} chez ${business?.name ?? "votre atelier"}.`,
-                      )}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="inline-flex h-7.5 items-center gap-1 rounded-md border border-success/30 bg-success/10 px-2 text-[0.7rem] font-semibold text-success hover:bg-success/20 shrink-0 active:scale-95 transition-all"
-                      title="Rappeler par WhatsApp"
-                    >
-                      <MessageCircle className="size-3" /> WhatsApp
-                    </a>
-                  )}
-                </div>
-              ))}
-            </div>
+          {selectedReminderTab === "today" ? (
+            todayAppts.length === 0 && todayDeliveries.length === 0 ? (
+              <div className="card-soft p-5 text-center text-xs text-muted-foreground">
+                Aucun rendez-vous ni livraison aujourd'hui.
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {todayAppts.map((a) => (
+                  <div key={a.id} className="card-soft flex items-center justify-between gap-2.5 p-3">
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <span className="rounded-lg bg-primary/10 px-2 py-1 font-display text-xs font-bold text-primary shrink-0">
+                        {a.scheduled_time?.slice(0, 5) ?? "--:--"}
+                      </span>
+                      <div className="min-w-0">
+                        <p className="truncate text-xs sm:text-sm font-semibold">{fullName(a.clients)}</p>
+                        <p className="text-[0.7rem] text-muted-foreground">RDV · {appointmentLabel(a.type)}</p>
+                      </div>
+                    </div>
+
+                    {a.clients?.phone && (
+                      <a
+                        href={generateWhatsAppReminderUrl({
+                          id: a.id,
+                          type: "appointment",
+                          urgency: "today",
+                          clientName: fullName(a.clients),
+                          clientPhone: a.clients.whatsapp || a.clients.phone,
+                          title: appointmentLabel(a.type),
+                          time: a.scheduled_time?.slice(0, 5),
+                          date: a.scheduled_date,
+                          atelierName: business?.name ?? "votre atelier",
+                        })}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex h-7.5 items-center gap-1 rounded-md border border-success/30 bg-success/10 px-2 text-[0.7rem] font-semibold text-success hover:bg-success/20 shrink-0 active:scale-95 transition-all"
+                        title="Rappeler par WhatsApp"
+                      >
+                        <MessageCircle className="size-3" /> WhatsApp
+                      </a>
+                    )}
+                  </div>
+                ))}
+
+                {todayDeliveries.map((o) => (
+                  <div key={o.id} className="card-soft flex items-center justify-between gap-2.5 p-3">
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <span className="rounded-lg bg-emerald-500/10 px-2 py-1 font-display text-xs font-bold text-emerald-600 shrink-0">
+                        Livraison
+                      </span>
+                      <div className="min-w-0">
+                        <p className="truncate text-xs sm:text-sm font-semibold">
+                          {o.garment_type} — {fullName(o.clients)}
+                        </p>
+                        <p className="text-[0.7rem] text-muted-foreground font-mono">{o.reference}</p>
+                      </div>
+                    </div>
+
+                    {o.clients?.phone && (
+                      <a
+                        href={generateWhatsAppReminderUrl({
+                          id: o.id,
+                          type: "delivery",
+                          urgency: "today",
+                          clientName: fullName(o.clients),
+                          clientPhone: o.clients.whatsapp || o.clients.phone,
+                          title: `Livraison commande ${o.reference} (${o.garment_type})`,
+                          date: o.due_date ?? "",
+                          atelierName: business?.name ?? "votre atelier",
+                        })}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex h-7.5 items-center gap-1 rounded-md border border-success/30 bg-success/10 px-2 text-[0.7rem] font-semibold text-success hover:bg-success/20 shrink-0 active:scale-95 transition-all"
+                        title="Aviser de la livraison par WhatsApp"
+                      >
+                        <MessageCircle className="size-3" /> WhatsApp
+                      </a>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )
+          ) : (
+            tomorrowAppts.length === 0 && tomorrowDeliveries.length === 0 ? (
+              <div className="card-soft p-5 text-center text-xs text-muted-foreground">
+                Aucun rendez-vous ni livraison prévus pour demain.
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {tomorrowAppts.map((a) => (
+                  <div key={a.id} className="card-soft flex items-center justify-between gap-2.5 p-3">
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <span className="rounded-lg bg-warning/10 px-2 py-1 font-display text-xs font-bold text-warning shrink-0">
+                        {a.scheduled_time?.slice(0, 5) ?? "--:--"}
+                      </span>
+                      <div className="min-w-0">
+                        <p className="truncate text-xs sm:text-sm font-semibold">{fullName(a.clients)}</p>
+                        <p className="text-[0.7rem] text-muted-foreground">RDV · {appointmentLabel(a.type)} (Veille)</p>
+                      </div>
+                    </div>
+
+                    {a.clients?.phone && (
+                      <a
+                        href={generateWhatsAppReminderUrl({
+                          id: a.id,
+                          type: "appointment",
+                          urgency: "tomorrow",
+                          clientName: fullName(a.clients),
+                          clientPhone: a.clients.whatsapp || a.clients.phone,
+                          title: appointmentLabel(a.type),
+                          time: a.scheduled_time?.slice(0, 5),
+                          date: a.scheduled_date,
+                          atelierName: business?.name ?? "votre atelier",
+                        })}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex h-7.5 items-center gap-1 rounded-md border border-success/30 bg-success/10 px-2 text-[0.7rem] font-semibold text-success hover:bg-success/20 shrink-0 active:scale-95 transition-all"
+                        title="Rappeler la veille par WhatsApp"
+                      >
+                        <MessageCircle className="size-3" /> Rappel veille
+                      </a>
+                    )}
+                  </div>
+                ))}
+
+                {tomorrowDeliveries.map((o) => (
+                  <div key={o.id} className="card-soft flex items-center justify-between gap-2.5 p-3">
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <span className="rounded-lg bg-warning/10 px-2 py-1 font-display text-xs font-bold text-warning shrink-0">
+                        Demain
+                      </span>
+                      <div className="min-w-0">
+                        <p className="truncate text-xs sm:text-sm font-semibold">
+                          {o.garment_type} — {fullName(o.clients)}
+                        </p>
+                        <p className="text-[0.7rem] text-muted-foreground font-mono">{o.reference}</p>
+                      </div>
+                    </div>
+
+                    {o.clients?.phone && (
+                      <a
+                        href={generateWhatsAppReminderUrl({
+                          id: o.id,
+                          type: "delivery",
+                          urgency: "tomorrow",
+                          clientName: fullName(o.clients),
+                          clientPhone: o.clients.whatsapp || o.clients.phone,
+                          title: `Livraison commande ${o.reference} (${o.garment_type})`,
+                          date: o.due_date ?? "",
+                          atelierName: business?.name ?? "votre atelier",
+                        })}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex h-7.5 items-center gap-1 rounded-md border border-success/30 bg-success/10 px-2 text-[0.7rem] font-semibold text-success hover:bg-success/20 shrink-0 active:scale-95 transition-all"
+                        title="Aviser de la livraison de demain"
+                      >
+                        <MessageCircle className="size-3" /> Rappel veille
+                      </a>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )
           )}
         </div>
       </section>

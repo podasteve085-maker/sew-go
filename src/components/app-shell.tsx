@@ -3,6 +3,8 @@ import { useEffect, useState, useRef, type ReactNode } from "react";
 import { PwaInstallButton } from "@/components/pwa-install-banner";
 import { ThemeToggle, ThemeSegmentedControl } from "@/components/theme-toggle";
 import { SyncStatusBadge } from "@/components/sync-status-badge";
+import { NotificationCenter } from "@/components/notification-center";
+import { useNotifications } from "@/hooks/use-notifications";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Home,
@@ -74,6 +76,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   const [upgradeOpen, setUpgradeOpen] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const pathname = useRouterState({ select: (s) => s.location.pathname });
+  const { notifications } = useNotifications();
 
   // Préchargement intelligent en arrière-plan pour navigation instantanée (0ms) sur mobile
   useEffect(() => {
@@ -326,6 +329,11 @@ export function AppShell({ children }: { children: ReactNode }) {
             <div className="shrink-0">
               <SyncStatusBadge compact={true} className="sm:hidden" />
               <SyncStatusBadge compact={false} className="hidden sm:inline-flex" />
+            </div>
+
+            {/* Centre de Notifications & Rappels Jour J & Veille */}
+            <div className="shrink-0 flex items-center">
+              <NotificationCenter notifications={notifications} />
             </div>
 
             {/* Bascule Thème Clair / Sombre / Auto TOUJOURS VISIBLE */}
