@@ -246,11 +246,20 @@ export async function fetchOrders(opts?: { clientId?: string }): Promise<OrderRo
       if (!error && data) {
         const rows = data as unknown as OrderRow[];
         const localOrders = await getAllLocalItems<OrderRow>("orders");
-        const serverIds = new Set(rows.map((r) => r.id));
-        const pendingLocals = localOrders.filter(
-          (l) => !serverIds.has(l.id) && (!businessId || l.business_id === businessId || !l.business_id)
+        const pendingIds = new Set(
+          (await getPendingSyncQueue())
+            .filter((q) => q.entity === "order" && q.action !== "delete")
+            .map((q) => q.payload["id"] as string)
+            .filter(Boolean),
         );
-        const combined = [...rows, ...pendingLocals];
+        const localById = new Map(localOrders.map((order) => [order.id, order]));
+        const combined = rows.map((row) => pendingIds.has(row.id) ? (localById.get(row.id) ?? row) : row);
+        const serverIds = new Set(rows.map((r) => r.id));
+        combined.push(
+          ...localOrders.filter(
+            (l) => !serverIds.has(l.id) && (!businessId || l.business_id === businessId || !l.business_id),
+          ),
+        );
         const enriched = await enrichOrdersWithPayments(combined);
         setLocalItems("orders", enriched).catch(() => {});
         return enriched;
