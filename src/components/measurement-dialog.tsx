@@ -67,13 +67,16 @@ export function MeasurementDialog({
   const [upgradeOpen, setUpgradeOpen] = useState(false);
   const [quotaReason, setQuotaReason] = useState("");
 
+  const [copyAsNew, setCopyAsNew] = useState(false);
+
   useEffect(() => {
     if (!open) return;
+    setCopyAsNew(false);
     setSelectedClientId(initialClientId ?? (initialSet?.client_id ?? ""));
 
     if (initialSet && (mode === "edit" || mode === "copy")) {
       setTemplateName(initialSet.template_name ?? "");
-      setRecordedAt(mode === "edit" ? initialSet.recorded_at : today());
+      setRecordedAt(initialSet.recorded_at || today());
       setNotes(initialSet.notes ?? "");
       const existing = (initialSet.measurement_values ?? [])
         .sort((a, b) => a.position - b.position)
@@ -117,13 +120,15 @@ export function MeasurementDialog({
 
   const save = useMutation({
     mutationFn: async () => {
-      if (!businessId) throw new Error("Atelier non identifié");
       const activeClientId = selectedClientId || initialClientId;
       if (!activeClientId) {
         throw new Error("Veuillez sélectionner un client.");
       }
 
-      if (mode === "edit") {
+      const isActuallyNew = mode === "create" || (mode === "copy" && copyAsNew);
+      const targetId = isActuallyNew ? undefined : initialSet?.id;
+
+      if (!isActuallyNew) {
         if (isSubscriptionExpired(business)) {
           const msg = "Votre atelier est en mode Consultation. Vos mesures restent consultables et sauvegardées en sécurité. Réactivez votre Pass Atelier pour modifier vos fiches existantes.";
           setQuotaReason(msg);
@@ -159,14 +164,20 @@ export function MeasurementDialog({
           };
         });
 
-      const setRes = await saveMeasurementSetOffline({
-        business_id: businessId,
-        client_id: activeClientId,
-        template_name: templateName || null,
-        label: templateName || "Relevé",
-        notes: notes || null,
-        recorded_at: recordedAt,
-      }, formattedValues);
+      const setRes = await saveMeasurementSetOffline(
+        {
+          id: targetId,
+          business_id: businessId,
+          client_id: activeClientId,
+          template_name: templateName || null,
+          label: templateName || "Relevé",
+          notes: notes || null,
+          recorded_at: recordedAt,
+        },
+        formattedValues,
+        isActuallyNew,
+        targetId,
+      );
 
       return setRes.id;
     },
@@ -175,7 +186,11 @@ export function MeasurementDialog({
       if (selectedClientId) {
         queryClient.invalidateQueries({ queryKey: ["measurements", selectedClientId] });
       }
-      toast.success(mode === "edit" ? "Mesures modifiées" : "Mesures enregistrées");
+      toast.success(
+        mode === "edit" || (mode === "copy" && !copyAsNew)
+          ? "Fiche de mesures mise à jour"
+          : "Nouvelle fiche enregistrée"
+      );
       onOpenChange(false);
       setFields([]);
       setTemplateName("");
@@ -200,9 +215,9 @@ export function MeasurementDialog({
           </DialogTitle>
           <DialogDescription>
             {mode === "edit"
-              ? "Corrigez les valeurs de ce relevé."
+              ? "Corrigez les valeurs de ce relevé de mesures."
               : mode === "copy"
-              ? "Crée un nouveau relevé daté avec les valeurs pré-remplies de l'ancien relevé."
+              ? "Actualisez directement cette fiche ou archivez-la pour en créer une nouvelle."
               : "Les anciennes mesures sont conservées : ce relevé s'ajoute au carnet numérique du client."}
           </DialogDescription>
         </DialogHeader>
@@ -214,6 +229,39 @@ export function MeasurementDialog({
           }}
           className="space-y-4"
         >
+          {/* Option mise à jour vs nouvelle fiche en mode reprise */}
+          {mode === "copy" && (
+            <div className="rounded-xl border border-primary/20 bg-primary/5 p-2.5 space-y-2">
+              <Label className="text-xs font-bold text-foreground">Action souhaitée :</Label>
+              <div className="grid grid-cols-2 gap-2 text-xs">
+                <button
+                  type="button"
+                  onClick={() => setCopyAsNew(false)}
+                  className={`rounded-lg p-2 text-left border transition-all cursor-pointer ${
+                    !copyAsNew
+                      ? "border-primary bg-primary text-primary-foreground font-bold shadow-xs"
+                      : "border-border/80 bg-card text-muted-foreground hover:bg-muted"
+                  }`}
+                >
+                  <p className="font-semibold text-xs">Mettre à jour la fiche</p>
+                  <p className="text-[10px] opacity-80">Actualise la fiche existante</p>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setCopyAsNew(true)}
+                  className={`rounded-lg p-2 text-left border transition-all cursor-pointer ${
+                    copyAsNew
+                      ? "border-primary bg-primary text-primary-foreground font-bold shadow-xs"
+                      : "border-border/80 bg-card text-muted-foreground hover:bg-muted"
+                  }`}
+                >
+                  <p className="font-semibold text-xs">Nouvelle fiche datée</p>
+                  <p className="text-[10px] opacity-80">Garde l'ancienne en historique</p>
+                </button>
+              </div>
+            </div>
+          )}
+
           {/* Sélection du client si non pré-défini */}
           {!initialClientId && (
             <div className="space-y-1.5">

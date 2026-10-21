@@ -327,13 +327,20 @@ async function processSyncItem(
     }
 
     case "measurement_set": {
-      if (item.action === "create") {
+      if (item.action === "create" || item.action === "update") {
         const tempId = item.tempId || (payload["id"] as string);
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const values = (payload["values"] as Array<Record<string, any>>) || [];
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const setData: Record<string, any> = { ...payload };
         delete setData["values"];
+        delete setData["clients"];
+
+        // Remapper client_id si créé hors-ligne avec un tempId
+        if (setData["client_id"] && idMapping.has(setData["client_id"])) {
+          setData["client_id"] = idMapping.get(setData["client_id"]);
+        }
+
         if (tempId && tempId.startsWith("temp_")) {
           delete setData["id"];
         }
@@ -345,8 +352,14 @@ async function processSyncItem(
         if (setError) throw setError;
 
         if (values.length > 0 && setRow?.id) {
+          const bizId =
+            setRow.business_id ||
+            setData["business_id"] ||
+            (await (await import("./queries")).currentBusinessId());
+
           await supabase.from("measurement_values").delete().eq("set_id", setRow.id);
           const valuesToInsert = values.map((v) => ({
+            business_id: bizId,
             set_id: setRow.id,
             name: v["name"],
             value: v["value"],
@@ -357,8 +370,10 @@ async function processSyncItem(
         }
 
         if (tempId && setRow?.id) {
-          idMapping.set(tempId, setRow.id);
-          await deleteLocalItem("measurement_sets", tempId);
+          if (tempId !== setRow.id) idMapping.set(tempId, setRow.id);
+          if (tempId.startsWith("temp_")) {
+            await deleteLocalItem("measurement_sets", tempId);
+          }
           await setLocalItem("measurement_sets", setRow);
         }
       } else if (item.action === "delete") {
@@ -374,9 +389,16 @@ async function processSyncItem(
 
     case "appointment": {
       if (item.action === "create" || item.action === "update") {
+        const id = (payload["id"] as string) || item.tempId!;
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const insertData: Record<string, any> = { ...payload };
         delete insertData["clients"];
+
+        // Remapper client_id si créé hors-ligne avec un tempId
+        if (insertData["client_id"] && idMapping.has(insertData["client_id"])) {
+          insertData["client_id"] = idMapping.get(insertData["client_id"]);
+        }
+
         if (typeof insertData["id"] === "string" && insertData["id"].startsWith("temp_")) {
           delete insertData["id"];
         }
@@ -386,7 +408,13 @@ async function processSyncItem(
           .select()
           .single();
         if (error) throw error;
-        if (data) await setLocalItem("appointments", data);
+        if (data) {
+          if (id && id !== data.id) idMapping.set(id, data.id);
+          await setLocalItem("appointments", data);
+          if (id && id.startsWith("temp_")) {
+            await deleteLocalItem("appointments", id);
+          }
+        }
       } else if (item.action === "delete") {
         const id = (payload["id"] as string) || item.tempId!;
         const targetId = idMapping.get(id) || id;

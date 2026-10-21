@@ -22,6 +22,7 @@ import { useBusiness } from "@/hooks/use-business";
 import {
   fetchAllMeasurementSets,
   fetchTemplates,
+  fetchClients,
   deleteMeasurementSetCascade,
   type FullMeasurementSetRow,
 } from "@/lib/queries";
@@ -77,6 +78,11 @@ function MeasurementsPage() {
   const [upgradeOpen, setUpgradeOpen] = useState(false);
   const [quotaReason, setQuotaReason] = useState("");
 
+  const effectiveBusinessId =
+    business?.id ||
+    (typeof window !== "undefined" ? localStorage.getItem("couturpro_current_business_id") : "") ||
+    "";
+
   const isPro = isProOrAdmin(business);
   const isExpired = isSubscriptionExpired(business);
 
@@ -88,6 +94,11 @@ function MeasurementsPage() {
   const templatesQuery = useQuery({
     queryKey: ["templates"],
     queryFn: fetchTemplates,
+  });
+
+  const clientsQuery = useQuery({
+    queryKey: ["clients", ""],
+    queryFn: () => fetchClients(),
   });
 
   const deleteSetMutation = useMutation({
@@ -107,7 +118,27 @@ function MeasurementsPage() {
 
   const filteredSets = useMemo(() => {
     const list = measurementsQuery.data ?? [];
-    return list.filter((set) => {
+    const clientMap = new Map((clientsQuery.data ?? []).map((c) => [c.id, c]));
+
+    const enriched = list.map((set) => {
+      if ((!set.clients || !set.clients.first_name) && set.client_id && clientMap.has(set.client_id)) {
+        const c = clientMap.get(set.client_id)!;
+        return {
+          ...set,
+          clients: {
+            id: c.id,
+            first_name: c.first_name,
+            last_name: c.last_name,
+            phone: c.phone,
+            whatsapp: c.whatsapp,
+            gender: c.gender,
+          },
+        };
+      }
+      return set;
+    });
+
+    return enriched.filter((set) => {
       // Filter by template
       if (selectedTemplate !== "all") {
         if (selectedTemplate === "custom" && set.template_name) return false;
@@ -131,7 +162,7 @@ function MeasurementsPage() {
 
       return true;
     });
-  }, [measurementsQuery.data, selectedTemplate, deferredTerm]);
+  }, [measurementsQuery.data, clientsQuery.data, selectedTemplate, deferredTerm]);
 
   // Génération du texte WhatsApp des mesures
   function shareViaWhatsApp(set: FullMeasurementSetRow) {
@@ -519,15 +550,13 @@ function MeasurementsPage() {
       </AlertDialog>
 
       {/* Modale de gestion des mesures */}
-      {business && (
-        <MeasurementDialog
-          open={openModal}
-          onOpenChange={setOpenModal}
-          businessId={business.id}
-          initialSet={selectedSet}
-          mode={modalMode}
-        />
-      )}
+      <MeasurementDialog
+        open={openModal}
+        onOpenChange={setOpenModal}
+        businessId={effectiveBusinessId}
+        initialSet={selectedSet}
+        mode={modalMode}
+      />
 
       <UpgradeDialog
         open={upgradeOpen}

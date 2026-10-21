@@ -133,12 +133,16 @@ export function CatalogModelDialog({ open, onOpenChange, model, onSaved }: Catal
 
     setUploading(true);
     const newPaths: string[] = [];
+    const bizId =
+      business?.id ||
+      (typeof window !== "undefined" ? localStorage.getItem("couturpro_current_business_id") : "") ||
+      "atelier";
 
     try {
       for (let i = 0; i < files.length; i++) {
         const file = files[i];
         if (file) {
-          const path = await uploadImage(business.id, file, "catalog");
+          const path = await uploadImage(bizId, file, "catalog");
           if (path.startsWith("data:") && typeof navigator !== "undefined" && navigator.onLine) {
             toast.error(`La photo « ${file.name} » n'a pas pu être envoyée. Réessayez.`);
             continue;
@@ -164,11 +168,16 @@ export function CatalogModelDialog({ open, onOpenChange, model, onSaved }: Catal
     const next = previous.filter((_, idx) => idx !== indexToRemove);
     setPhotoPaths(next);
 
+    const bizId =
+      business?.id ||
+      (typeof window !== "undefined" ? localStorage.getItem("couturpro_current_business_id") : "") ||
+      model?.business_id;
+
     try {
       if (isEdit && model?.id) {
         const saved = await saveCatalogModelOffline(
           {
-            business_id: business?.id ?? model.business_id,
+            business_id: bizId,
             name: name.trim() || model.name,
             category,
             description: description.trim() || null,
@@ -190,7 +199,7 @@ export function CatalogModelDialog({ open, onOpenChange, model, onSaved }: Catal
         onSaved?.(saved);
         toast.success("Photo retirée du modèle");
       }
-      await deleteStorageFiles([removed]);
+      await deleteStorageFiles([removed]).catch(() => {});
     } catch (err) {
       setPhotoPaths(previous);
       const msg = err instanceof Error ? err.message : "Impossible de retirer cette photo";
@@ -217,8 +226,13 @@ export function CatalogModelDialog({ open, onOpenChange, model, onSaved }: Catal
       const validPrice =
         parsedPrice !== null && !isNaN(parsedPrice) && parsedPrice >= 0 ? parsedPrice : null;
 
+      const effectiveBizId =
+        business?.id ||
+        (typeof window !== "undefined" ? localStorage.getItem("couturpro_current_business_id") : "") ||
+        model?.business_id;
+
       const payload = {
-        business_id: business?.id,
+        business_id: effectiveBizId,
         name: name.trim(),
         category,
         description: description.trim() || null,
@@ -235,7 +249,7 @@ export function CatalogModelDialog({ open, onOpenChange, model, onSaved }: Catal
         (path) => !photoPaths.includes(path),
       );
       if (removedPhotos.length > 0) {
-        await deleteStorageFiles(removedPhotos);
+        await deleteStorageFiles(removedPhotos).catch(() => {});
       }
       return saved;
     },

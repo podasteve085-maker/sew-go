@@ -359,12 +359,6 @@ export function AppShell({ children }: { children: ReactNode }) {
               )}
             </div>
 
-            {/* Indicateur de connectivité & Synchronisation compact sur mobile */}
-            <div className="shrink-0">
-              <SyncStatusBadge compact={true} className="sm:hidden" />
-              <SyncStatusBadge compact={false} className="hidden sm:inline-flex" />
-            </div>
-
             {/* Centre de Notifications & Rappels Jour J & Veille */}
             <div className="shrink-0 flex items-center">
               <NotificationCenter notifications={notifications} onRefresh={refetchNotifs} />

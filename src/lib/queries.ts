@@ -436,6 +436,60 @@ export type FullMeasurementSetRow = MeasurementSetRow & {
   } | null;
 };
 
+async function enrichMeasurementSetsWithClients(
+  sets: FullMeasurementSetRow[],
+): Promise<FullMeasurementSetRow[]> {
+  try {
+    const localClients = await getAllLocalItems<ClientRow>("clients");
+    const clientMap = new Map(localClients.map((c) => [c.id, c]));
+    return sets.map((s) => {
+      if ((!s.clients || !s.clients.first_name) && s.client_id && clientMap.has(s.client_id)) {
+        const c = clientMap.get(s.client_id)!;
+        return {
+          ...s,
+          clients: {
+            id: c.id,
+            first_name: c.first_name,
+            last_name: c.last_name,
+            phone: c.phone,
+            whatsapp: c.whatsapp,
+            gender: c.gender,
+          },
+        };
+      }
+      return s;
+    });
+  } catch {
+    return sets;
+  }
+}
+
+async function enrichAppointmentsWithClients(
+  appts: AppointmentRow[],
+): Promise<AppointmentRow[]> {
+  try {
+    const localClients = await getAllLocalItems<ClientRow>("clients");
+    const clientMap = new Map(localClients.map((c) => [c.id, c]));
+    return appts.map((a) => {
+      if ((!a.clients || !a.clients.first_name) && a.client_id && clientMap.has(a.client_id)) {
+        const c = clientMap.get(a.client_id)!;
+        return {
+          ...a,
+          clients: {
+            first_name: c.first_name,
+            last_name: c.last_name,
+            phone: c.phone,
+            whatsapp: c.whatsapp,
+          },
+        };
+      }
+      return a;
+    });
+  } catch {
+    return appts;
+  }
+}
+
 export async function fetchAllMeasurementSets(): Promise<FullMeasurementSetRow[]> {
   const businessId = await currentBusinessId();
 
@@ -450,8 +504,15 @@ export async function fetchAllMeasurementSets(): Promise<FullMeasurementSetRow[]
         .order("recorded_at", { ascending: false });
       if (!error && data) {
         const rows = data as unknown as FullMeasurementSetRow[];
-        setLocalItems("measurement_sets", rows).catch(() => {});
-        return rows;
+        const localSets = await getAllLocalItems<FullMeasurementSetRow>("measurement_sets");
+        const serverIds = new Set(rows.map((r) => r.id));
+        const pendingLocals = localSets.filter(
+          (l) => !serverIds.has(l.id) && (!businessId || l.business_id === businessId || !l.business_id),
+        );
+        const combined = [...rows, ...pendingLocals];
+        const enriched = await enrichMeasurementSetsWithClients(combined);
+        setLocalItems("measurement_sets", enriched).catch(() => {});
+        return enriched;
       }
     } catch {
       // Fallback IndexedDB
@@ -459,7 +520,11 @@ export async function fetchAllMeasurementSets(): Promise<FullMeasurementSetRow[]
   }
 
   const all = await getAllLocalItems<FullMeasurementSetRow>("measurement_sets");
-  return all.sort((a, b) => new Date(b.recorded_at).getTime() - new Date(a.recorded_at).getTime());
+  const filtered = businessId
+    ? all.filter((s) => s.business_id === businessId || !s.business_id)
+    : all;
+  const enriched = await enrichMeasurementSetsWithClients(filtered);
+  return enriched.sort((a, b) => new Date(b.recorded_at).getTime() - new Date(a.recorded_at).getTime());
 }
 
 export async function fetchMeasurementSets(clientId: string): Promise<MeasurementSetRow[]> {
@@ -475,8 +540,14 @@ export async function fetchMeasurementSets(clientId: string): Promise<Measuremen
         .order("recorded_at", { ascending: false });
       if (!error && data) {
         const rows = data as unknown as MeasurementSetRow[];
-        setLocalItems("measurement_sets", rows).catch(() => {});
-        return rows;
+        const localSets = await getAllLocalItems<MeasurementSetRow>("measurement_sets");
+        const serverIds = new Set(rows.map((r) => r.id));
+        const pendingLocals = localSets.filter(
+          (l) => l.client_id === clientId && !serverIds.has(l.id),
+        );
+        const combined = [...rows, ...pendingLocals];
+        setLocalItems("measurement_sets", combined).catch(() => {});
+        return combined;
       }
     } catch {
       // Fallback IndexedDB
@@ -496,16 +567,23 @@ export async function fetchAppointments(opts?: { clientId?: string }): Promise<A
     try {
       let query = supabase
         .from("appointments")
-        .select("*, clients(first_name, last_name, phone, whatsapp)")
-        .eq("business_id", businessId);
+        .select("*, clients(first_name, last_name, phone, whatsapp)");
+      if (businessId) query = query.eq("business_id", businessId);
       if (opts?.clientId) query = query.eq("client_id", opts.clientId);
       const { data, error } = await query
         .order("scheduled_date", { ascending: true })
         .order("scheduled_time", { ascending: true, nullsFirst: true });
       if (!error && data) {
         const rows = data as unknown as AppointmentRow[];
-        setLocalItems("appointments", rows).catch(() => {});
-        return rows;
+        const localAppts = await getAllLocalItems<AppointmentRow>("appointments");
+        const serverIds = new Set(rows.map((r) => r.id));
+        const pendingLocals = localAppts.filter(
+          (l) => !serverIds.has(l.id) && (!businessId || l.business_id === businessId || !l.business_id),
+        );
+        const combined = [...rows, ...pendingLocals];
+        const enriched = await enrichAppointmentsWithClients(combined);
+        setLocalItems("appointments", enriched).catch(() => {});
+        return enriched;
       }
     } catch {
       // Fallback IndexedDB
@@ -515,8 +593,10 @@ export async function fetchAppointments(opts?: { clientId?: string }): Promise<A
   const all = await getAllLocalItems<AppointmentRow & { business_id?: string }>("appointments");
   let filtered = all.filter((a) => a.business_id === businessId || !a.business_id);
   if (opts?.clientId) filtered = filtered.filter((a) => a.client_id === opts.clientId);
-  return filtered.sort((a, b) => a.scheduled_date.localeCompare(b.scheduled_date));
+  const enriched = await enrichAppointmentsWithClients(filtered);
+  return enriched.sort((a, b) => a.scheduled_date.localeCompare(b.scheduled_date));
 }
+
 
 export async function fetchPayments(orderId: string): Promise<PaymentRow[]> {
   let businessId = "";
@@ -1451,69 +1531,6 @@ export async function saveOrderOffline(
   return localOrder;
 }
 
-export async function saveAppointmentOffline(
-  appData: Record<string, unknown>,
-  isNew: boolean,
-  existingId?: string,
-): Promise<AppointmentRow> {
-  const businessId = await currentBusinessId();
-  const isOnline = typeof navigator !== "undefined" ? navigator.onLine : true;
-
-  let existingApp: AppointmentRow | null = null;
-  if (!isNew && existingId) {
-    try {
-      existingApp = await getLocalItem<AppointmentRow>("appointments", existingId);
-    } catch {
-      // ignore
-    }
-  }
-
-  const appId = existingId || uuid();
-  const localApp: AppointmentRow = {
-    id: appId,
-    business_id: (appData["business_id"] as string) || existingApp?.business_id || businessId,
-    client_id: (appData["client_id"] as string) || existingApp?.client_id || "",
-    type: (appData["type"] as string) || existingApp?.type || "essayage",
-    status: (appData["status"] as string) || existingApp?.status || "prevu",
-    scheduled_date: (appData["scheduled_date"] as string) || existingApp?.scheduled_date || new Date().toISOString().slice(0, 10),
-    scheduled_time: appData["scheduled_time"] !== undefined
-      ? (appData["scheduled_time"] as string | null)
-      : (existingApp?.scheduled_time ?? null),
-    notes: appData["notes"] !== undefined ? (appData["notes"] as string | null) : (existingApp?.notes ?? null),
-    created_at: existingApp?.created_at || new Date().toISOString(),
-    clients: existingApp?.clients ?? null,
-  };
-
-  await setLocalItem("appointments", localApp);
-
-  if (isOnline && businessId) {
-    try {
-      const { clients: _, ...cleanPayload } = localApp;
-      const { data, error } = await supabase
-        .from("appointments")
-        .upsert(cleanPayload as never, { onConflict: "id" })
-        .select("*, clients(first_name, last_name, phone, whatsapp)")
-        .single();
-      if (!error && data) {
-        const row = data as unknown as AppointmentRow;
-        await setLocalItem("appointments", row);
-        return row;
-      }
-    } catch {
-      // repli sync queue
-    }
-  }
-
-  await addToSyncQueue({
-    entity: "appointment",
-    action: isNew ? "create" : "update",
-    payload: localApp,
-    tempId: appId,
-  });
-
-  return localApp;
-}
-
 export async function savePaymentOffline(paymentData: Record<string, unknown>): Promise<PaymentRow> {
   const isOnline = typeof navigator !== "undefined" ? navigator.onLine : true;
   const paymentId = (paymentData["id"] as string) || uuid();
@@ -1626,45 +1643,99 @@ export async function deletePaymentOffline(paymentId: string, orderId?: string):
 export async function saveMeasurementSetOffline(
   setData: Record<string, unknown>,
   values: Array<{ name: string; value: number | null; unit: string; position: number }>,
-): Promise<MeasurementSetRow> {
+  isNew: boolean = true,
+  existingId?: string,
+): Promise<FullMeasurementSetRow> {
   const isOnline = typeof navigator !== "undefined" ? navigator.onLine : true;
-  const setId = (setData["id"] as string) || uuid();
+  const setId = existingId || (setData["id"] as string) || uuid();
 
-  const localSet: MeasurementSetRow = {
+  let existingSet: FullMeasurementSetRow | null = null;
+  if (existingId) {
+    existingSet = await getLocalItem<FullMeasurementSetRow>("measurement_sets", existingId);
+  }
+
+  const clientId = (setData["client_id"] as string) || existingSet?.client_id || "";
+  let clientInfo = existingSet?.clients ?? null;
+  if (!clientInfo && clientId) {
+    try {
+      const localClient = await getLocalItem<ClientRow>("clients", clientId);
+      if (localClient) {
+        clientInfo = {
+          id: localClient.id,
+          first_name: localClient.first_name,
+          last_name: localClient.last_name,
+          phone: localClient.phone,
+          whatsapp: localClient.whatsapp,
+          gender: localClient.gender,
+        };
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  const businessId = (setData["business_id"] as string) || existingSet?.business_id || (await currentBusinessId());
+
+  const localValues = values.map((v, i) => ({
+    id: `val_${i}`,
+    name: v.name,
+    value: v.value,
+    unit: v.unit || "cm",
+    position: v.position ?? i,
+  }));
+
+  const localSet: FullMeasurementSetRow = {
     id: setId,
-    client_id: (setData["client_id"] as string) || "",
-    label: (setData["label"] as string) || null,
-    template_name: (setData["template_name"] as string) || null,
-    notes: (setData["notes"] as string) || null,
-    recorded_at: new Date().toISOString(),
-    measurement_values: values.map((v, i) => ({ ...v, id: `val_${i}` })),
+    business_id: businessId,
+    client_id: clientId,
+    label: (setData["label"] as string) ?? existingSet?.label ?? null,
+    template_name: (setData["template_name"] as string) ?? existingSet?.template_name ?? null,
+    notes: (setData["notes"] as string) ?? existingSet?.notes ?? null,
+    recorded_at: (setData["recorded_at"] as string) || existingSet?.recorded_at || new Date().toISOString(),
+    created_at: existingSet?.created_at || new Date().toISOString(),
+    clients: clientInfo,
+    measurement_values: localValues,
   };
 
   await setLocalItem("measurement_sets", localSet);
 
-  if (isOnline) {
+  if (isOnline && businessId) {
     try {
+      const payloadSet = {
+        id: setId,
+        business_id: businessId,
+        client_id: clientId,
+        label: localSet.label,
+        template_name: localSet.template_name,
+        notes: localSet.notes,
+        recorded_at: localSet.recorded_at,
+      };
+
       const { data: setRow, error: setError } = await supabase
         .from("measurement_sets")
-        .upsert({ ...setData, id: setId } as never, { onConflict: "id" })
+        .upsert(payloadSet as never, { onConflict: "id" })
         .select()
         .single();
+
       if (!setError && setRow) {
         if (values.length > 0) {
           await supabase.from("measurement_values").delete().eq("set_id", setId);
           await supabase.from("measurement_values").insert(
-            values.map((v) => ({
+            values.map((v, i) => ({
+              business_id: businessId,
               set_id: setId,
               name: v.name,
               value: v.value,
-              unit: v.unit,
-              position: v.position,
+              unit: v.unit || "cm",
+              position: v.position ?? i,
             })) as never,
           );
         }
-        const fullRow: MeasurementSetRow = {
-          ...(setRow as unknown as MeasurementSetRow),
-          measurement_values: values.map((v, i) => ({ ...v, id: `val_${i}` })),
+        const fullRow: FullMeasurementSetRow = {
+          ...localSet,
+          ...(setRow as unknown as FullMeasurementSetRow),
+          clients: clientInfo,
+          measurement_values: localValues,
         };
         await setLocalItem("measurement_sets", fullRow);
         return fullRow;
@@ -1676,12 +1747,183 @@ export async function saveMeasurementSetOffline(
 
   await addToSyncQueue({
     entity: "measurement_set",
-    action: "create",
-    payload: { ...setData, id: setId, values },
+    action: isNew ? "create" : "update",
+    payload: {
+      ...setData,
+      id: setId,
+      business_id: businessId,
+      client_id: clientId,
+      values: values.map((v, i) => ({
+        business_id: businessId,
+        name: v.name,
+        value: v.value,
+        unit: v.unit || "cm",
+        position: v.position ?? i,
+      })),
+    },
     tempId: setId,
   });
 
   return localSet;
+}
+
+export async function saveAppointmentOffline(
+  data: Record<string, unknown>,
+  isNew: boolean,
+  existingId?: string,
+): Promise<AppointmentRow> {
+  const isOnline = typeof navigator !== "undefined" ? navigator.onLine : true;
+  const apptId = existingId || (data["id"] as string) || uuid();
+
+  let existingAppt: AppointmentRow | null = null;
+  if (existingId) {
+    existingAppt = await getLocalItem<AppointmentRow>("appointments", existingId);
+  }
+
+  const businessId = (data["business_id"] as string) || existingAppt?.business_id || (await currentBusinessId());
+  const clientId = (data["client_id"] as string) || existingAppt?.client_id || null;
+
+  let clientInfo = existingAppt?.clients ?? null;
+  if (!clientInfo && clientId) {
+    try {
+      const localClient = await getLocalItem<ClientRow>("clients", clientId);
+      if (localClient) {
+        clientInfo = {
+          first_name: localClient.first_name,
+          last_name: localClient.last_name,
+          phone: localClient.phone,
+          whatsapp: localClient.whatsapp,
+        };
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  const localAppt: AppointmentRow = {
+    id: apptId,
+    business_id: businessId,
+    client_id: clientId,
+    scheduled_date: (data["scheduled_date"] as string) || existingAppt?.scheduled_date || new Date().toISOString().slice(0, 10),
+    scheduled_time: (data["scheduled_time"] as string | null) ?? existingAppt?.scheduled_time ?? null,
+    type: (data["type"] as string) || existingAppt?.type || "essayage",
+    notes: (data["notes"] as string | null) ?? existingAppt?.notes ?? null,
+    status: (data["status"] as string) || existingAppt?.status || "prevu",
+    created_at: existingAppt?.created_at || new Date().toISOString(),
+    clients: clientInfo,
+  };
+
+  await setLocalItem("appointments", localAppt);
+
+  if (isOnline && businessId) {
+    try {
+      const payload = {
+        id: apptId,
+        business_id: businessId,
+        client_id: clientId,
+        scheduled_date: localAppt.scheduled_date,
+        scheduled_time: localAppt.scheduled_time,
+        type: localAppt.type,
+        notes: localAppt.notes,
+        status: localAppt.status,
+      };
+
+      const { data: savedRow, error } = await supabase
+        .from("appointments")
+        .upsert(payload as never, { onConflict: "id" })
+        .select()
+        .single();
+
+      if (!error && savedRow) {
+        const fullRow: AppointmentRow = {
+          ...localAppt,
+          ...(savedRow as unknown as AppointmentRow),
+          clients: clientInfo,
+        };
+        await setLocalItem("appointments", fullRow);
+        return fullRow;
+      }
+    } catch {
+      // Fallback
+    }
+  }
+
+  await addToSyncQueue({
+    entity: "appointment",
+    action: isNew ? "create" : "update",
+    payload: {
+      id: apptId,
+      business_id: businessId,
+      client_id: clientId,
+      scheduled_date: localAppt.scheduled_date,
+      scheduled_time: localAppt.scheduled_time,
+      type: localAppt.type,
+      notes: localAppt.notes,
+      status: localAppt.status,
+    },
+    tempId: apptId,
+  });
+
+  return localAppt;
+}
+
+export async function updateAppointmentStatusOffline(id: string, status: string): Promise<void> {
+  const isOnline = typeof navigator !== "undefined" ? navigator.onLine : true;
+  const existing = await getLocalItem<AppointmentRow>("appointments", id);
+  if (existing) {
+    const updated = { ...existing, status };
+    await setLocalItem("appointments", updated);
+  }
+
+  const businessId = existing?.business_id || (await currentBusinessId());
+
+  if (isOnline && businessId) {
+    try {
+      const { error } = await supabase
+        .from("appointments")
+        .update({ status })
+        .eq("id", id)
+        .eq("business_id", businessId);
+      if (!error) return;
+    } catch {
+      // Fallback
+    }
+  }
+
+  await addToSyncQueue({
+    entity: "appointment",
+    action: "update",
+    payload: { id, business_id: businessId, status },
+    tempId: id,
+  });
+}
+
+export async function deleteAppointmentOffline(id: string): Promise<void> {
+  const isOnline = typeof navigator !== "undefined" ? navigator.onLine : true;
+  const existing = await getLocalItem<AppointmentRow>("appointments", id);
+  await deleteLocalItem("appointments", id);
+
+  const businessId = existing?.business_id || (await currentBusinessId());
+
+  if (isOnline && businessId) {
+    try {
+      const { error } = await supabase
+        .from("appointments")
+        .delete()
+        .eq("id", id)
+        .eq("business_id", businessId);
+      if (!error) return;
+    } catch {
+      // Fallback
+    }
+  }
+
+  await addToSyncQueue({
+    entity: "appointment",
+    action: "delete",
+    payload: { id, business_id: businessId },
+    tempId: id,
+  });
 }
 
 // ============================================================

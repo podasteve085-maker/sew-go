@@ -588,24 +588,20 @@ function ClientDetail() {
         </AlertDialogContent>
       </AlertDialog>
 
-      {business && (
-        <>
-          <ClientFormDialog
-            open={edit}
-            onOpenChange={setEdit}
-            businessId={business.id}
-            client={c}
-          />
-          <MeasurementDialog
-            open={newMeasure}
-            onOpenChange={setNewMeasure}
-            businessId={business.id}
-            clientId={clientId}
-            initialSet={selectedMeasureSet}
-            mode={measureMode}
-          />
-        </>
-      )}
+      <ClientFormDialog
+        open={edit}
+        onOpenChange={setEdit}
+        businessId={business?.id || c.business_id}
+        client={c}
+      />
+      <MeasurementDialog
+        open={newMeasure}
+        onOpenChange={setNewMeasure}
+        businessId={business?.id || c.business_id}
+        clientId={clientId}
+        initialSet={selectedMeasureSet}
+        mode={measureMode}
+      />
 
       <UpgradeDialog
         open={upgradeOpen}

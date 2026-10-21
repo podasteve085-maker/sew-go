@@ -87,6 +87,11 @@ function NewOrder() {
   const [upgradeOpen, setUpgradeOpen] = useState(false);
   const [quotaReason, setQuotaReason] = useState("");
 
+  const effectiveBusinessId =
+    business?.id ||
+    (typeof window !== "undefined" ? localStorage.getItem("couturpro_current_business_id") : "") ||
+    "";
+
   const clients = useQuery({
     queryKey: ["clients", ""],
     queryFn: () => fetchClients(),
@@ -808,11 +813,11 @@ function NewOrder() {
       )}
 
       {/* Modale de prise de mesures rapide */}
-      {business && selectedClientId && (
+      {selectedClientId && (
         <MeasurementDialog
           open={openNewMeasure}
           onOpenChange={setOpenNewMeasure}
-          businessId={business.id}
+          businessId={effectiveBusinessId}
           clientId={selectedClientId}
           onSaved={() => {
             queryClient.invalidateQueries({ queryKey: ["measurements", selectedClientId] });

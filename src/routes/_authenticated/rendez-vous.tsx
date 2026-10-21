@@ -8,7 +8,14 @@ import { supabase } from "@/integrations/supabase/client";
 import { useBusiness } from "@/hooks/use-business";
 import { isProOrAdmin, isSubscriptionExpired } from "@/lib/quotas";
 import { UpgradeDialog } from "@/components/upgrade-dialog";
-import { fetchAppointments, fetchClients, type AppointmentRow } from "@/lib/queries";
+import {
+  fetchAppointments,
+  fetchClients,
+  saveAppointmentOffline,
+  updateAppointmentStatusOffline,
+  deleteAppointmentOffline,
+  type AppointmentRow,
+} from "@/lib/queries";
 import { APPOINTMENT_TYPES, APPOINTMENT_STATUS, appointmentLabel } from "@/lib/domain";
 import { dateLongFr, fullName, today, addDays, cleanPhone, waLink } from "@/lib/format";
 import { Button } from "@/components/ui/button";
@@ -95,13 +102,7 @@ function AppointmentsPage() {
 
   const update = useMutation({
     mutationFn: async ({ id, status }: { id: string; status: string }) => {
-      if (!business?.id) throw new Error("Atelier non identifié");
-      const { error } = await supabase
-        .from("appointments")
-        .update({ status })
-        .eq("id", id)
-        .eq("business_id", business.id);
-      if (error) throw error;
+      await updateAppointmentStatusOffline(id, status);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["appointments"] });
@@ -112,13 +113,7 @@ function AppointmentsPage() {
 
   const remove = useMutation({
     mutationFn: async (id: string) => {
-      if (!business?.id) throw new Error("Atelier non identifié");
-      const { error } = await supabase
-        .from("appointments")
-        .delete()
-        .eq("id", id)
-        .eq("business_id", business.id);
-      if (error) throw error;
+      await deleteAppointmentOffline(id);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["appointments"] });
@@ -453,17 +448,18 @@ function AppointmentDialog({
 
   const create = useMutation({
     mutationFn: async (values: Record<string, string>) => {
-      if (!businessId) throw new Error("Atelier non identifié");
-      const { error } = await supabase.from("appointments").insert({
-        business_id: businessId,
-        client_id: values["client_id"] || null,
-        scheduled_date: values["scheduled_date"] || today(),
-        scheduled_time: values["scheduled_time"] || null,
-        type: values["type"] || "essayage",
-        notes: values["notes"] || null,
-        status: "prevu",
-      });
-      if (error) throw error;
+      await saveAppointmentOffline(
+        {
+          business_id: businessId,
+          client_id: values["client_id"] || null,
+          scheduled_date: values["scheduled_date"] || today(),
+          scheduled_time: values["scheduled_time"] || null,
+          type: values["type"] || "essayage",
+          notes: values["notes"] || null,
+          status: "prevu",
+        },
+        true,
+      );
       return values;
     },
     onSuccess: (values) => {
@@ -615,19 +611,19 @@ function EditAppointmentDialog({
 
   const update = useMutation({
     mutationFn: async (values: Record<string, string>) => {
-      const { error } = await supabase
-        .from("appointments")
-        .update({
+      await saveAppointmentOffline(
+        {
+          business_id: businessId,
           client_id: values["client_id"] || null,
           scheduled_date: values["scheduled_date"] || today(),
           scheduled_time: values["scheduled_time"] || null,
           type: values["type"] || "essayage",
           notes: values["notes"] || null,
           status: values["status"] || "prevu",
-        })
-        .eq("id", appointment.id)
-        .eq("business_id", businessId);
-      if (error) throw error;
+        },
+        false,
+        appointment.id,
+      );
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["appointments"] });
