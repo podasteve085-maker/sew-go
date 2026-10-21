@@ -175,11 +175,9 @@ export function StoredImage({
   fallback?: ReactNode;
 }) {
   const [loadError, setLoadError] = useState(false);
-  const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
     setLoadError(false);
-    setLoaded(false);
   }, [path]);
 
   const isDirect = Boolean(
@@ -203,9 +201,8 @@ export function StoredImage({
         alt={alt}
         loading="lazy"
         decoding="async"
-        onLoad={() => setLoaded(true)}
         onError={() => setLoadError(true)}
-        className={`${cls} transition-opacity duration-300 ${loaded ? "opacity-100" : "opacity-0"}`}
+        className={cls}
       />
     );
   }
@@ -221,12 +218,12 @@ export function StoredImage({
       alt={alt}
       loading="lazy"
       decoding="async"
-      onLoad={() => setLoaded(true)}
       onError={() => setLoadError(true)}
-      className={`${cls} transition-opacity duration-300 ${loaded ? "opacity-100" : "opacity-0"}`}
+      className={cls}
     />
   );
 }
+
 
 export function OrderCard({ order }: { order: OrderRow }) {
   const late = isLate(order);

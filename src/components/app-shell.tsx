@@ -1,7 +1,9 @@
 import { Link, useNavigate, useRouterState } from "@tanstack/react-router";
 import { useEffect, useState, useRef, type ReactNode } from "react";
 import { PwaInstallButton } from "@/components/pwa-install-banner";
-import { ThemeToggle, ThemeSegmentedControl } from "@/components/theme-toggle";
+import { ThemeToggle } from "@/components/theme-toggle";
+
+
 import { SyncStatusBadge } from "@/components/sync-status-badge";
 import { NotificationCenter } from "@/components/notification-center";
 import { useNotifications } from "@/hooks/use-notifications";
@@ -450,110 +452,67 @@ export function AppShell({ children }: { children: ReactNode }) {
       </nav>
 
       {/* Tiroir de navigation mobile complet (Tous les modules + Déconnexion) */}
+      {/* Tiroir de navigation mobile complet (Tous les modules accessibles d'un coup) */}
       <Sheet open={mobileMenuOpen} onOpenChange={setMobileMenuOpen}>
-        <SheetContent side="left" className="w-[85vw] max-w-xs landscape:max-w-sm p-0 flex flex-col bg-sidebar text-sidebar-foreground border-r border-sidebar-border overflow-hidden">
-          {/* En-tête Atelier */}
-          <div className="p-3 landscape:p-2 border-b border-sidebar-border bg-sidebar/50 shrink-0">
-            <div className="flex items-center gap-3 landscape:gap-2">
-              <div className="size-11 landscape:size-8 rounded-xl overflow-hidden shrink-0 border border-sidebar-border/60 bg-sidebar-primary/20 flex items-center justify-center ring-2 ring-primary/20 shadow-xs">
+        <SheetContent side="left" className="w-[88vw] max-w-xs landscape:max-w-lg p-0 flex flex-col bg-sidebar text-sidebar-foreground border-r border-sidebar-border overflow-hidden">
+          {/* En-tête Atelier ultra-compact */}
+          <div className="p-3 landscape:p-2 border-b border-sidebar-border bg-sidebar/60 shrink-0">
+            <div className="flex items-center gap-2.5">
+              <div className="size-9 landscape:size-7.5 rounded-xl overflow-hidden shrink-0 border border-sidebar-border/60 bg-sidebar-primary/20 flex items-center justify-center ring-1 ring-primary/20 shadow-xs">
                 <StoredImage
                   path={business?.logo_url}
                   alt="Logo atelier"
                   className="size-full object-cover"
                   fallback={
                     <span className="flex size-full items-center justify-center bg-sidebar-primary text-sidebar-primary-foreground">
-                      <Scissors className="size-5" />
+                      <Scissors className="size-4 landscape:size-3.5" />
                     </span>
                   }
                 />
               </div>
               <div className="min-w-0 flex-1">
-                <p className="truncate font-display text-sm landscape:text-xs font-bold text-sidebar-foreground">
-                  {business?.name ?? "Mon atelier"}
-                </p>
-                <p className="truncate text-xs text-sidebar-foreground/60 landscape:hidden">
-                  {business?.owner_name || "Couturier & Styliste"}
-                </p>
-                <div className="mt-1 landscape:hidden">
+                <div className="flex items-center gap-1.5">
+                  <p className="truncate font-display text-sm landscape:text-xs font-bold text-sidebar-foreground">
+                    {business?.name ?? "Mon atelier"}
+                  </p>
                   {business?.is_admin ? (
-                    <span className="inline-flex rounded-full bg-purple-600 px-2 py-0.5 text-[9px] font-extrabold text-white">
-                      ADMIN PLATEFORME
+                    <span className="rounded bg-purple-600 px-1.5 py-0.2 text-[8px] font-extrabold text-white shrink-0">
+                      ADMIN
                     </span>
                   ) : isPro ? (
-                    <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 px-2 py-0.5 text-[9px] font-bold">
-                      <Crown className="size-2.5" /> PRO ACTIF
+                    <span className="inline-flex items-center gap-0.5 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 px-1.5 py-0.2 text-[8px] font-bold shrink-0">
+                      <Crown className="size-2" /> PRO
                     </span>
                   ) : isExpired ? (
-                    <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/20 text-amber-800 dark:text-amber-300 border border-amber-500/30 px-2 py-0.5 text-[9px] font-bold">
-                      <Eye className="size-2.5" /> MODE CONSULTATION
+                    <span className="inline-flex items-center gap-0.5 rounded-full bg-amber-500/20 text-amber-800 dark:text-amber-300 border border-amber-500/30 px-1.5 py-0.2 text-[8px] font-bold shrink-0">
+                      <Eye className="size-2" /> CONSULTATION
                     </span>
                   ) : (
-                    <span className="inline-flex items-center gap-1 rounded-full bg-primary/20 text-primary border border-primary/30 px-2 py-0.5 text-[9px] font-bold">
-                      <Crown className="size-2.5" /> FORMULE DÉCOUVERTE
+                    <span className="inline-flex items-center gap-0.5 rounded-full bg-primary/20 text-primary border border-primary/30 px-1.5 py-0.2 text-[8px] font-bold shrink-0">
+                      <Crown className="size-2" /> DÉCOUVERTE
                     </span>
                   )}
                 </div>
+                <p className="truncate text-[11px] landscape:text-[10px] text-sidebar-foreground/60 leading-tight">
+                  {business?.owner_name || "Couturier & Styliste"}
+                </p>
               </div>
             </div>
           </div>
 
-
-          {/* Sélecteur de thème immédiat au sommet du menu mobile */}
-          <div className="landscape:hidden px-3.5 py-2.5 border-b border-sidebar-border bg-sidebar-accent/30 shrink-0">
-            <div className="flex items-center justify-between mb-1.5 px-0.5">
-              <span className="text-[10px] font-bold uppercase tracking-wider text-sidebar-foreground/70">
-                Thème d'affichage
-              </span>
-              <span className="text-[10px] font-medium text-sidebar-foreground/50">
-                Jour / Nuit
-              </span>
-            </div>
-            <ThemeSegmentedControl />
-          </div>
-
-          {/* Liste complète de tous les modules */}
-          <div className="flex-1 overflow-y-auto px-3 py-2 landscape:py-1 space-y-3 landscape:space-y-2">
-
-            <div className="space-y-1">
-              <p className="px-3 text-[10px] font-bold uppercase tracking-wider text-sidebar-foreground/50">
-                Atelier au quotidien
-              </p>
+          {/* Grille complète de tous les modules : 1 colonne en portrait, 2 colonnes en paysage (vue globale d'un coup) */}
+          <div className="flex-1 overflow-y-auto p-2 landscape:p-1.5">
+            <div className="grid grid-cols-1 landscape:grid-cols-2 gap-1">
               {[
                 { to: "/dashboard", label: "Accueil", icon: Home },
                 { to: "/commandes", label: "Commandes", icon: Scissors },
                 { to: "/clients", label: "Clients", icon: Users },
                 { to: "/mesures", label: "Carnet de Mesures", icon: Ruler },
-                { to: "/catalogue", label: "Lookbook / Modèles", icon: BookOpen },
-                { to: "/rendez-vous", label: "Agenda Rendez-vous", icon: CalendarDays },
-              ].map((item) => {
-                const active = pathname.startsWith(item.to);
-                return (
-                  <Link
-                    key={item.to}
-                    to={item.to}
-                    onClick={() => setMobileMenuOpen(false)}
-                    className={`flex items-center gap-3 rounded-xl px-3 py-2 landscape:py-1.5 text-sm landscape:text-xs font-medium transition-colors ${
-                      active
-                        ? "bg-sidebar-accent text-sidebar-accent-foreground font-bold shadow-xs"
-                        : "text-sidebar-foreground/80 hover:bg-sidebar-accent/60 hover:text-sidebar-accent-foreground"
-                    }`}
-                  >
-                    <item.icon className="size-4 shrink-0" />
-                    <span>{item.label}</span>
-                  </Link>
-                );
-              })}
-
-            </div>
-
-            <div className="space-y-1 pt-2 border-t border-sidebar-border">
-              <p className="px-3 text-[10px] font-bold uppercase tracking-wider text-sidebar-foreground/50">
-                Gestion & Performances
-              </p>
-              {[
+                { to: "/catalogue", label: "Lookbook & Modèles", icon: BookOpen },
+                { to: "/rendez-vous", label: "Rendez-vous", icon: CalendarDays },
                 { to: "/statistiques", label: "Statistiques & Finances", icon: BarChart3 },
                 { to: "/abonnement", label: "Mon Forfait & Quotas", icon: Crown },
-                { to: "/atelier", label: "Mon atelier (Paramètres)", icon: Settings },
+                { to: "/atelier", label: "Mon atelier", icon: Settings },
               ].map((item) => {
                 const active = pathname.startsWith(item.to);
                 return (
@@ -561,14 +520,14 @@ export function AppShell({ children }: { children: ReactNode }) {
                     key={item.to}
                     to={item.to}
                     onClick={() => setMobileMenuOpen(false)}
-                    className={`flex items-center gap-3 rounded-xl px-3 py-2 landscape:py-1.5 text-sm landscape:text-xs font-medium transition-colors ${
+                    className={`flex items-center gap-2.5 rounded-xl px-2.5 py-2 landscape:py-1.5 text-xs font-medium transition-colors ${
                       active
                         ? "bg-sidebar-accent text-sidebar-accent-foreground font-bold shadow-xs"
-                        : "text-sidebar-foreground/80 hover:bg-sidebar-accent/60 hover:text-sidebar-accent-foreground"
+                        : "text-sidebar-foreground/85 hover:bg-sidebar-accent/60 hover:text-sidebar-accent-foreground"
                     }`}
                   >
-                    <item.icon className="size-4 shrink-0" />
-                    <span>{item.label}</span>
+                    <item.icon className="size-4 shrink-0 text-primary" />
+                    <span className="truncate">{item.label}</span>
                   </Link>
                 );
               })}
@@ -577,15 +536,15 @@ export function AppShell({ children }: { children: ReactNode }) {
                 <Link
                   to="/admin"
                   onClick={() => setMobileMenuOpen(false)}
-                  className={`flex items-center gap-3 rounded-xl px-3 py-2 landscape:py-1.5 text-sm landscape:text-xs font-bold transition-colors ${
+                  className={`flex items-center gap-2.5 rounded-xl px-2.5 py-2 landscape:py-1.5 text-xs font-bold transition-colors ${
                     pathname.startsWith("/admin")
                       ? "bg-purple-600 text-white shadow-xs"
                       : "text-purple-400 hover:bg-purple-600/20 hover:text-purple-300"
                   }`}
                 >
-                  <ShieldAlert className="size-4 shrink-0" />
-                  <span>Administration Centrale</span>
-                  <span className="ml-auto rounded bg-purple-700 px-1.5 py-0.5 text-[9px] font-extrabold text-white">
+                  <ShieldAlert className="size-4 shrink-0 text-purple-400" />
+                  <span className="truncate">Administration</span>
+                  <span className="ml-auto rounded bg-purple-700 px-1 py-0.2 text-[8px] font-extrabold text-white">
                     ADMIN
                   </span>
                 </Link>
@@ -593,24 +552,20 @@ export function AppShell({ children }: { children: ReactNode }) {
             </div>
           </div>
 
-
-          {/* Pied du tiroir : Réseau + Installation PWA + Bouton Se Déconnecter */}
-          <div className="p-3 landscape:p-2 border-t border-sidebar-border space-y-2 landscape:space-y-1 bg-sidebar/70 shrink-0">
-            <div className="flex items-center justify-between px-1">
-              <span className="text-[10px] font-semibold uppercase tracking-wider text-sidebar-foreground/60">
-                État connexion
-              </span>
-              <SyncStatusBadge />
+          {/* Pied du tiroir : État connexion + Se Déconnecter ultra-compact */}
+          <div className="p-2.5 landscape:p-1.5 border-t border-sidebar-border bg-sidebar/80 shrink-0 flex items-center justify-between gap-2">
+            <div className="flex items-center gap-1.5">
+              <SyncStatusBadge compact={true} />
+              <PwaInstallButton />
             </div>
-            <PwaInstallButton />
             <SignOutButton
               onDone={() => setMobileMenuOpen(false)}
-              className="flex w-full items-center justify-center gap-2 rounded-xl bg-destructive/15 text-destructive border border-destructive/25 py-2 landscape:py-1.5 text-sm font-bold transition-colors active:scale-95 hover:bg-destructive hover:text-destructive-foreground cursor-pointer"
+              className="inline-flex items-center gap-1.5 rounded-lg bg-destructive/15 text-destructive border border-destructive/25 px-2.5 py-1 text-xs font-bold transition-colors active:scale-95 hover:bg-destructive hover:text-destructive-foreground cursor-pointer"
             />
           </div>
-
         </SheetContent>
       </Sheet>
+
 
       <GlobalSearch open={searchOpen} onOpenChange={setSearchOpen} businessId={business?.id} />
       <UpgradeDialog open={upgradeOpen} onOpenChange={setUpgradeOpen} />

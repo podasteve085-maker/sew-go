@@ -2,6 +2,9 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 @custom-variant dark (&:is(.dark *));
+@custom-variant landscape (@media (orientation: landscape));
+@custom-variant portrait (@media (orientation: portrait));
+
 
 /* ═══════════════════════════════════════════════════════════════════════════
    THE ONLY design-tokens file. This single file owns the whole app's visual

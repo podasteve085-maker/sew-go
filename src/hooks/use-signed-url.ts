@@ -32,7 +32,11 @@ export async function getSignedUrl(path: string | null | undefined): Promise<str
     return path;
   }
 
-  // 1. Si en ligne : tenter createSignedUrl ou getPublicUrl
+  // 1. D'abord vérifier le cache binaire local (accès instantané 0ms hors-ligne et en ligne)
+  const cached = await getCachedImageUrl(path);
+  if (cached) return cached;
+
+  // 2. Si en ligne : tenter createSignedUrl, puis getPublicUrl pour TOUS les dossiers
   const isOnline = typeof navigator === "undefined" || navigator.onLine;
   if (isOnline) {
     try {
@@ -40,29 +44,27 @@ export async function getSignedUrl(path: string | null | undefined): Promise<str
         .from(BUCKET)
         .createSignedUrl(path, 60 * 60);
       if (!error && data?.signedUrl) {
-        // En arrière-plan, mettre en cache le binaire pour les futures sessions hors-ligne
         cacheImage(path, data.signedUrl).catch(() => {});
         return data.signedUrl;
       }
+    } catch {
+      // Repli
+    }
 
-      const isCatalogPhoto = String(path).includes("/catalog/");
-      if (isCatalogPhoto) {
-        const { data: publicData } = supabase.storage.from(BUCKET).getPublicUrl(path);
-        if (publicData?.publicUrl) {
-          cacheImage(path, publicData.publicUrl).catch(() => {});
-          return publicData.publicUrl;
-        }
+    // Repli getPublicUrl pour tous les dossiers (clients, atelier, orders, catalog)
+    try {
+      const { data: publicData } = supabase.storage.from(BUCKET).getPublicUrl(path);
+      if (publicData?.publicUrl) {
+        cacheImage(path, publicData.publicUrl).catch(() => {});
+        return publicData.publicUrl;
       }
     } catch {
-      // Repli hors-ligne en cas d'erreur réseau
+      // Repli
     }
   }
 
-  // 2. Repli Hors-ligne : chercher dans le cache local binaire
-  const cached = await getCachedImageUrl(path);
-  if (cached) return cached;
-
   return null;
+
 }
 
 /** Lien temporaire pour afficher un fichier privé du stockage avec fallback hors-ligne. */
@@ -258,7 +260,9 @@ export async function uploadDataUrl(
       upsert: false,
     });
     if (error) return null;
+    cacheBlob(path, blob).catch(() => {});
     return path;
+
   } catch {
     return null;
   }

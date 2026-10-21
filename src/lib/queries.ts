@@ -1,7 +1,8 @@
 import { supabase } from "@/integrations/supabase/client";
 import type { Json } from "@/integrations/supabase/types";
 import type { OrderStatus } from "@/lib/domain";
-import { deleteStorageFiles, materializeStoragePaths, uuid, getSignedUrl } from "@/hooks/use-signed-url";
+import { deleteStorageFiles, materializeStoragePaths, uuid, getSignedUrl, uploadDataUrl } from "@/hooks/use-signed-url";
+
 import { cacheImage } from "@/lib/image-cache";
 import {
   setLocalItem,
@@ -348,8 +349,17 @@ export async function fetchClients(term?: string): Promise<ClientRow[]> {
         const pendingLocals = localClients.filter(
           (l) => !serverIds.has(l.id) && (!businessId || l.business_id === businessId || !l.business_id)
         );
-        const combined = deduplicateClients([...serverRows, ...pendingLocals]);
+        // Préserver la photo locale si le serveur renvoie null pour un client existant
+        const mergedServerRows = serverRows.map((serverItem) => {
+          const localItem = localClients.find((l) => l.id === serverItem.id);
+          if (localItem && !serverItem.photo_url && localItem.photo_url) {
+            return { ...serverItem, photo_url: localItem.photo_url };
+          }
+          return serverItem;
+        });
+        const combined = deduplicateClients([...mergedServerRows, ...pendingLocals]);
         setLocalItems("clients", combined).catch(() => {});
+
 
         // Pré-cache en arrière-plan les photos clients pour disponibilité hors-ligne
         Promise.allSettled(
@@ -1309,6 +1319,15 @@ export async function saveClientOffline(
 
   if (isOnline && businessId) {
     try {
+      // Si la photo est un DataURL local, la téléverser vers le bucket storage pour pérenniser l'URL
+      if (typeof localClient.photo_url === "string" && localClient.photo_url.startsWith("data:")) {
+        const uploadedPath = await uploadDataUrl(businessId, localClient.photo_url, "clients");
+        if (uploadedPath) {
+          localClient.photo_url = uploadedPath;
+          await setLocalItem("clients", localClient);
+        }
+      }
+
       const { data, error } = await supabase
         .from("clients")
         .upsert(localClient as never, { onConflict: "id" })
@@ -1323,6 +1342,7 @@ export async function saveClientOffline(
       // Fallback hors-ligne
     }
   }
+
 
   await addToSyncQueue({
     entity: "client",

@@ -92,9 +92,11 @@ export function ClientFormDialog({
         }
       }
 
+      const bId = businessId || business?.id || (typeof window !== "undefined" ? localStorage.getItem("couturpro_current_business_id") : "") || "";
       const payload = {
-        business_id: businessId,
+        business_id: bId,
         first_name: values["first_name"] ?? "",
+
         last_name: values["last_name"] ?? "",
         phone: values["phone"] || null,
         whatsapp: values["whatsapp"] || null,
@@ -126,14 +128,17 @@ export function ClientFormDialog({
     if (!file) return;
     setUploading(true);
     try {
-      const path = await uploadImage(businessId, file, "clients");
+      const bId = businessId || business?.id || (typeof window !== "undefined" ? localStorage.getItem("couturpro_current_business_id") : "") || "atelier";
+      const path = await uploadImage(bId, file, "clients");
       setPhotoPath(path);
+      toast.success("Photo sélectionnée");
     } catch {
       toast.error("Photo non envoyée");
     } finally {
       setUploading(false);
     }
   }
+
 
   function submit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
