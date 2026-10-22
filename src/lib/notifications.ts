@@ -403,3 +403,38 @@ export async function dispatchScheduledReminders(reminders: AppNotification[]): 
   }
   return count;
 }
+
+export async function scheduleBackgroundReminders(reminders: AppNotification[]): Promise<boolean> {
+  if (!isNotificationSupported() || Notification.permission !== "granted") return false;
+  if (!("serviceWorker" in navigator) || !("TimestampTrigger" in window)) return false;
+
+  try {
+    const registration = await navigator.serviceWorker.ready;
+    const Trigger = (window as Window & {
+      TimestampTrigger?: new (timestamp: number) => { timestamp: number };
+    }).TimestampTrigger;
+    if (!Trigger || !("showNotification" in registration)) return false;
+
+    const scheduled = reminders.filter(
+      (reminder) => reminder.timing === "tomorrow" && reminder.targetDate,
+    );
+
+    for (const reminder of scheduled) {
+      const timestamp = new Date(`${reminder.targetDate}T09:00:00`).getTime();
+      if (!Number.isFinite(timestamp) || timestamp <= Date.now()) continue;
+
+      await registration.showNotification(reminder.title, {
+        body: reminder.body,
+        icon: "/icon-192.png",
+        badge: "/icon-192.png",
+        data: { url: reminder.linkUrl },
+        tag: `scheduled-${getStableNotificationId(reminder)}`,
+        showTrigger: new Trigger(timestamp),
+      } as NotificationOptions & { showTrigger: { timestamp: number } });
+    }
+
+    return scheduled.length > 0;
+  } catch {
+    return false;
+  }
+}

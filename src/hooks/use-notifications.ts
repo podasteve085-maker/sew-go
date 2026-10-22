@@ -5,6 +5,7 @@ import { useBusiness } from "@/hooks/use-business";
 import {
   generateReminders,
   dispatchScheduledReminders,
+  scheduleBackgroundReminders,
   type AppNotification,
 } from "@/lib/notifications";
 
@@ -38,6 +39,7 @@ export function useNotifications() {
   useEffect(() => {
     if (notifications.length > 0) {
       dispatchScheduledReminders(notifications).catch(() => {});
+      scheduleBackgroundReminders(notifications).catch(() => {});
     }
   }, [notifications]);
 
