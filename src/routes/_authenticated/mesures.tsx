@@ -427,7 +427,7 @@ function MeasurementsPage() {
 
                   {/* Measurement Values Grid */}
                   <dl className="mt-3 grid grid-cols-2 gap-x-3 gap-y-1.5 border-t border-border/70 pt-2.5 sm:grid-cols-3">
-                    {values.slice(0, 9).map((v) => (
+                    {values.map((v) => (
                       <div
                         key={v.id}
                         className="flex items-baseline justify-between gap-1.5 border-b border-dashed border-border/50 pb-1"
@@ -440,13 +440,6 @@ function MeasurementsPage() {
                         </dd>
                       </div>
                     ))}
-                    {values.length > 9 && (
-                      <div className="col-span-2 text-right sm:col-span-3">
-                        <span className="text-[0.65rem] italic text-muted-foreground">
-                          +{values.length - 9} autre(s) mesure(s)…
-                        </span>
-                      </div>
-                    )}
                   </dl>
 
                   {set.notes && (

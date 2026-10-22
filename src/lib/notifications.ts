@@ -73,6 +73,10 @@ export interface AppNotification {
   referenceId: string;
 }
 
+export function getStableNotificationId(notification: Pick<AppNotification, "category" | "referenceId">): string {
+  return `${notification.category}-${notification.referenceId}`;
+}
+
 export interface WhatsAppReminderParams {
   id?: string;
   type: "appointment" | "delivery";
@@ -144,6 +148,8 @@ export function generateReminders(
   const todayStr = getTodayStr();
   const tomorrowStr = getTomorrowStr();
   const dismissed = getDismissedNotifIds();
+  const isDismissed = (notification: Pick<AppNotification, "id" | "category" | "referenceId">) =>
+    dismissed.has(notification.id) || dismissed.has(getStableNotificationId(notification));
   const notifications: AppNotification[] = [];
 
   /* ── 1. Rendez-vous (Essayages, Mesures, Livraisons en atelier) ── */
@@ -160,7 +166,7 @@ export function generateReminders(
     // A. Rendez-vous AUJOURD'HUI (Jour J)
     if (a.scheduled_date === todayStr) {
       const notifId = `rdv-today-${a.id}-${todayStr}`;
-      if (!dismissed.has(notifId)) {
+      if (!isDismissed({ id: notifId, category: "appointment", referenceId: a.id })) {
         notifications.push({
           id: notifId,
           category: "appointment",
@@ -182,7 +188,7 @@ export function generateReminders(
     // B. Rendez-vous DEMAIN (La veille / J-1)
     else if (a.scheduled_date === tomorrowStr) {
       const notifId = `rdv-tomorrow-${a.id}-${todayStr}`;
-      if (!dismissed.has(notifId)) {
+      if (!isDismissed({ id: notifId, category: "appointment", referenceId: a.id })) {
         notifications.push({
           id: notifId,
           category: "appointment",
@@ -216,7 +222,7 @@ export function generateReminders(
     // A. Livraison AUJOURD'HUI (Jour J)
     if (o.due_date === todayStr) {
       const notifId = `order-today-${o.id}-${todayStr}`;
-      if (!dismissed.has(notifId)) {
+      if (!isDismissed({ id: notifId, category: "order_delivery", referenceId: o.id })) {
         notifications.push({
           id: notifId,
           category: "order_delivery",
@@ -237,7 +243,7 @@ export function generateReminders(
     // B. Livraison DEMAIN (La veille / J-1)
     else if (o.due_date === tomorrowStr) {
       const notifId = `order-tomorrow-${o.id}-${todayStr}`;
-      if (!dismissed.has(notifId)) {
+      if (!isDismissed({ id: notifId, category: "order_delivery", referenceId: o.id })) {
         notifications.push({
           id: notifId,
           category: "order_delivery",
@@ -258,7 +264,7 @@ export function generateReminders(
     // C. Livraison EN RETARD (Date dépassée pour une commande encore active)
     else if (o.due_date < todayStr) {
       const notifId = `order-overdue-${o.id}-${todayStr}`;
-      if (!dismissed.has(notifId)) {
+      if (!isDismissed({ id: notifId, category: "order_delivery", referenceId: o.id })) {
         notifications.push({
           id: notifId,
           category: "order_delivery",

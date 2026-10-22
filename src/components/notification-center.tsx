@@ -23,6 +23,7 @@ import {
   requestNotificationPermission,
   dismissNotificationId,
   dismissAllNotificationIds,
+  getStableNotificationId,
 } from "@/lib/notifications";
 import { waLink, cleanPhone, addDays, dateFr, today } from "@/lib/format";
 import { saveOrderOffline, saveAppointmentOffline } from "@/lib/queries";
@@ -74,6 +75,7 @@ export function NotificationCenter({ notifications, onRefresh }: NotificationCen
 
   const handleDismissOne = (item: AppNotification) => {
     dismissNotificationId(item.id);
+    dismissNotificationId(getStableNotificationId(item));
     queryClient.invalidateQueries({ queryKey: ["orders"] });
     queryClient.invalidateQueries({ queryKey: ["appointments"] });
     if (onRefresh) onRefresh();
@@ -81,7 +83,9 @@ export function NotificationCenter({ notifications, onRefresh }: NotificationCen
   };
 
   const handleDismissAll = () => {
-    dismissAllNotificationIds(notifications.map((n) => n.id));
+    dismissAllNotificationIds(
+      notifications.flatMap((n) => [n.id, getStableNotificationId(n)]),
+    );
     queryClient.invalidateQueries({ queryKey: ["orders"] });
     queryClient.invalidateQueries({ queryKey: ["appointments"] });
     if (onRefresh) onRefresh();

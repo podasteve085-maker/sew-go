@@ -21,23 +21,18 @@ export const Route = createFileRoute("/")({
   beforeLoad: async () => {
     // Si l'utilisateur est déjà connecté ou a un atelier local hors-ligne légitime, aller directement au tableau de bord
     if (typeof window !== "undefined") {
+      if (typeof navigator !== "undefined" && !navigator.onLine) {
+        const offlineBiz = localStorage.getItem("couturpro_current_business_id");
+        const offlineUserId = localStorage.getItem("couturpro_current_user_id");
+        if (offlineBiz && offlineUserId) throw redirect({ to: "/dashboard" });
+        return;
+      }
+
       try {
         const { data: sessionData } = await supabase.auth.getSession();
-        if (sessionData?.session?.user) {
-          throw redirect({ to: "/dashboard" });
-        }
-        // Mode secours hors-ligne strict (PWA)
-        if (typeof navigator !== "undefined" && !navigator.onLine) {
-          const offlineBiz = localStorage.getItem("couturpro_current_business_id");
-          const offlineUserId = localStorage.getItem("couturpro_current_user_id");
-          if (offlineBiz && offlineUserId) {
-            throw redirect({ to: "/dashboard" });
-          }
-        }
+        if (sessionData?.session?.user) throw redirect({ to: "/dashboard" });
       } catch (e) {
-        if (e && typeof e === "object" && "to" in e) {
-          throw e;
-        }
+        if (e && typeof e === "object" && "to" in e) throw e;
       }
     }
   },
@@ -98,16 +93,15 @@ function Landing() {
 
   useEffect(() => {
     if (typeof window !== "undefined") {
+      if (typeof navigator !== "undefined" && !navigator.onLine) {
+        const offlineBiz = localStorage.getItem("couturpro_current_business_id");
+        const offlineUserId = localStorage.getItem("couturpro_current_user_id");
+        if (offlineBiz && offlineUserId) navigate({ to: "/dashboard", replace: true });
+        return;
+      }
+
       supabase.auth.getSession().then(({ data }) => {
-        if (data?.session?.user) {
-          navigate({ to: "/dashboard", replace: true });
-        } else if (typeof navigator !== "undefined" && !navigator.onLine) {
-          const offlineBiz = localStorage.getItem("couturpro_current_business_id");
-          const offlineUserId = localStorage.getItem("couturpro_current_user_id");
-          if (offlineBiz && offlineUserId) {
-            navigate({ to: "/dashboard", replace: true });
-          }
-        }
+        if (data?.session?.user) navigate({ to: "/dashboard", replace: true });
       });
     }
   }, [navigate]);
