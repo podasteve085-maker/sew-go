@@ -48,7 +48,17 @@ export async function cacheImage(storagePath: string, imageUrl: string): Promise
           "X-Cached-At": Date.now().toString(),
         },
       });
-      await cache.put(key, responseToCache);
+      await cache.put(key, responseToCache.clone());
+
+      // Stocker aussi sous l'URL Supabase propre pour interception directe par le Service Worker
+      try {
+        if (imageUrl.includes("supabase.co/storage/v1/object/")) {
+          const cleanUrl = imageUrl.split("?")[0];
+          await cache.put(cleanUrl, responseToCache.clone());
+        }
+      } catch {
+        // ignore
+      }
     }
 
     // Garder également un blob URL mémoire pour un accès synchrone ultra rapide
@@ -118,7 +128,17 @@ export async function cacheBlob(storagePath: string, blob: Blob): Promise<boolea
           "X-Cached-At": Date.now().toString(),
         },
       });
-      await cache.put(key, responseToCache);
+      await cache.put(key, responseToCache.clone());
+
+      // Stocker aussi sous l'URL Supabase propre pour interception directe par le Service Worker
+      try {
+        if (imageUrl.includes("supabase.co/storage/v1/object/")) {
+          const cleanUrl = imageUrl.split("?")[0];
+          await cache.put(cleanUrl, responseToCache.clone());
+        }
+      } catch {
+        // ignore
+      }
     }
 
     // Rafraîchir aussi le blob URL mémoire

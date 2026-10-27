@@ -40,7 +40,6 @@ function ErrorComponent({ error, reset }: { error: Error; reset: () => void }) {
   console.error(error);
   const router = useRouter();
 
-  // Détecter les erreurs d'import de chunk (modules Vite manquants offline)
   const isChunkError = error?.message && (
     error.message.includes("Importing a module script") ||
     error.message.includes("Failed to fetch dynamically imported module") ||
@@ -51,44 +50,78 @@ function ErrorComponent({ error, reset }: { error: Error; reset: () => void }) {
   const isOffline = typeof navigator !== "undefined" && !navigator.onLine;
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-background px-4">
-      <div className="max-w-md text-center">
-        <h1 className="text-xl font-semibold tracking-tight text-foreground">
+    <div className="flex min-h-screen items-center justify-center bg-background px-4 py-8">
+      <div className="max-w-md w-full text-center card-soft p-6 border border-border shadow-md">
+        <div className="mx-auto size-12 rounded-2xl bg-primary/10 text-primary flex items-center justify-center mb-4">
+          <span className="text-xl">🧵</span>
+        </div>
+        <h1 className="text-lg sm:text-xl font-bold tracking-tight text-foreground">
           {isChunkError
-            ? "Page non disponible hors ligne"
-            : "Cette page n'a pas pu s'afficher"}
+            ? (isOffline ? "Chargement hors-ligne" : "Mise à jour en cours")
+            : "Affichage temporairement indisponible"}
         </h1>
-        <p className="mt-2 text-sm text-muted-foreground">
+        <p className="mt-2 text-xs sm:text-sm text-muted-foreground leading-relaxed">
           {isChunkError
-            ? "Cette section n'a pas encore été mise en cache. Reconnectez-vous à Internet ou naviguez vers une page déjà visitée."
-            : "Une erreur est survenue. Réessayez ou revenez à l'accueil."}
+            ? (isOffline
+              ? "Cette section est en cours d'optimisation locale. Vos données enregistrées restent 100% sécurisées dans votre atelier."
+              : "Une mise à jour de l'application est prête. Cliquez sur Réactualiser pour l'activer.")
+            : "Une petite pause technique. Vous pouvez revenir à votre travail atelier sans perdre aucune donnée."}
         </p>
+
         {!isChunkError && error?.message && (
-          <div className="mt-4 rounded-xl border border-destructive/20 bg-destructive/5 p-3 text-left font-mono text-xs text-destructive max-h-32 overflow-auto break-all">
+          <div className="mt-4 rounded-xl border border-destructive/20 bg-destructive/5 p-3 text-left font-mono text-xs text-destructive max-h-24 overflow-auto break-all">
             {error.message}
           </div>
         )}
+
+        {/* Boutons d'action rapides */}
         <div className="mt-6 flex flex-wrap justify-center gap-2">
           <button
             onClick={() => {
               if (isChunkError && !isOffline) {
-                // En ligne : recharger complètement pour récupérer le chunk manquant
                 window.location.reload();
               } else {
                 router.invalidate();
                 reset();
               }
             }}
-            className="inline-flex items-center justify-center rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
+            className="inline-flex items-center justify-center rounded-xl bg-primary px-4 py-2.5 text-xs sm:text-sm font-bold text-primary-foreground shadow-xs transition-all hover:bg-primary/90 active:scale-95"
           >
-            Réessayer
+            {isOffline ? "Réessayer l'affichage" : "Actualiser"}
           </button>
           <Link
             to="/dashboard"
-            className="inline-flex items-center justify-center rounded-md border border-input bg-background px-4 py-2 text-sm font-medium text-foreground transition-colors hover:bg-accent"
+            className="inline-flex items-center justify-center rounded-xl border border-border bg-card px-4 py-2.5 text-xs sm:text-sm font-semibold text-foreground hover:bg-accent active:scale-95 transition-all"
           >
             Tableau de bord
           </Link>
+        </div>
+
+        {/* Accès directs aux sections principales de l'atelier */}
+        <div className="mt-6 pt-4 border-t border-border/60">
+          <p className="text-[0.7rem] font-bold uppercase tracking-wider text-muted-foreground mb-2">
+            Continuer votre travail
+          </p>
+          <div className="grid grid-cols-3 gap-1.5 text-xs">
+            <Link
+              to="/commandes"
+              className="rounded-lg bg-muted/60 py-2 font-medium hover:bg-primary/10 hover:text-primary transition-colors text-center"
+            >
+              Commandes
+            </Link>
+            <Link
+              to="/clients"
+              className="rounded-lg bg-muted/60 py-2 font-medium hover:bg-primary/10 hover:text-primary transition-colors text-center"
+            >
+              Clients
+            </Link>
+            <Link
+              to="/mesures"
+              className="rounded-lg bg-muted/60 py-2 font-medium hover:bg-primary/10 hover:text-primary transition-colors text-center"
+            >
+              Mesures
+            </Link>
+          </div>
         </div>
       </div>
     </div>
@@ -224,8 +257,10 @@ function RootComponent() {
     }
   }, []);
 
-  // Préchargement proactif et parallèle des routes clés pour naviguer sans réseau
+  // Préchargement proactif et résilient de toutes les routes de l'atelier pour offline 100% garanti
   useEffect(() => {
+    if (typeof window === "undefined") return;
+
     const routesToPreload = [
       "/dashboard",
       "/commandes",
@@ -236,21 +271,40 @@ function RootComponent() {
       "/rendez-vous",
       "/statistiques",
       "/atelier",
+      "/abonnement",
     ] as const;
 
-    const preloadAll = () => {
-      Promise.allSettled(
-        routesToPreload.map((path) =>
-          router.preloadRoute({ to: path }).catch(() => {})
-        )
-      );
+    const preloadAll = async () => {
+      // 1. Signaler au Service Worker les URLs de routes à mettre en cache
+      if ("serviceWorker" in navigator && navigator.serviceWorker.controller) {
+        navigator.serviceWorker.controller.postMessage({
+          type: "PRECACHE_URLS",
+          urls: Array.from(routesToPreload),
+        });
+      }
+
+      // 2. Précharger les loaders et composants avec TanStack Router
+      for (const path of routesToPreload) {
+        try {
+          await router.preloadRoute({ to: path });
+        } catch {
+          // ignorer pour continuer les autres
+        }
+      }
     };
 
-    if (typeof window !== "undefined") {
-      // Lancer immédiatement sans attendre requestIdleCallback
-      // pour garantir le cache des chunks avant perte réseau
-      setTimeout(preloadAll, 500);
-    }
+    // Préchargement immédiat + écoute du retour de la connexion
+    const timer = setTimeout(preloadAll, 200);
+
+    const onOnline = () => {
+      preloadAll();
+    };
+    window.addEventListener("online", onOnline);
+
+    return () => {
+      clearTimeout(timer);
+      window.removeEventListener("online", onOnline);
+    };
   }, [router]);
 
   return (

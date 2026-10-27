@@ -209,7 +209,13 @@ export function StoredImage({
 
   if (isLoading) return <Skeleton className={cls} />;
   if (isError || !data || loadError) {
-    return fallback ? <>{fallback}</> : null;
+    if (fallback) return <>{fallback}</>;
+    return (
+      <div className={`flex flex-col items-center justify-center gap-1.5 bg-muted/70 text-muted-foreground ${cls}`}>
+        <Scissors className="size-6 stroke-[1.5] text-muted-foreground/60" />
+        <span className="text-[0.65rem] font-medium text-center px-2 line-clamp-1">{alt || "Modèle"}</span>
+      </div>
+    );
   }
 
   return (

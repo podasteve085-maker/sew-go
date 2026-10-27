@@ -1102,6 +1102,24 @@ export async function fetchCatalogModels(
         );
         const combined = [...serverRows, ...pendingLocals];
         setLocalItems("catalog_models", combined).catch(() => {});
+
+        // Pré-cache en arrière-plan des photos du catalogue pour consultation 100% hors-ligne
+        Promise.allSettled(
+          combined
+            .flatMap((m) => m.photo_paths || [])
+            .filter((p) => typeof p === "string" && !p.startsWith("data:") && p.length > 0)
+            .map(async (path) => {
+              try {
+                const url = await getSignedUrl(path);
+                if (url && !url.startsWith("blob:") && !url.startsWith("data:")) {
+                  cacheImage(path, url).catch(() => {});
+                }
+              } catch {
+                // ignore
+              }
+            })
+        ).catch(() => {});
+
         return combined;
       }
     } catch (err) {
