@@ -362,7 +362,21 @@ export function ClientFormDialog({
                     <span className="text-border">·</span>
                     <button
                       type="button"
-                      onClick={() => setPhotoPath(null)}
+                      onClick={async () => {
+                        setPhotoPath(null);
+                        // Si modification d'un client existant : sauvegarder immédiatement la suppression de photo
+                        if (client?.id) {
+                          try {
+                            const bId = businessId || business?.id || (typeof window !== "undefined" ? localStorage.getItem("couturpro_current_business_id") : "") || "";
+                            await saveClientOffline({ ...client, business_id: bId, photo_url: null }, false, client.id);
+                            queryClient.invalidateQueries({ queryKey: ["clients"] });
+                            queryClient.invalidateQueries({ queryKey: ["client", client.id] });
+                            toast.success("Photo supprimée");
+                          } catch {
+                            toast.error("Suppression de photo impossible");
+                          }
+                        }
+                      }}
                       className="text-xs font-bold text-destructive hover:underline cursor-pointer"
                     >
                       Supprimer

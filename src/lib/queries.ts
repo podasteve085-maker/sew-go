@@ -841,13 +841,15 @@ export async function saveOrderImageOffline(
     }
   }
 
-  // 3. Mettre en file d'attente de synchronisation
-  await addToSyncQueue({
-    entity: "order_image",
-    action: "create",
-    payload: localRow,
-    tempId: imageId,
-  });
+  // 3. Mettre en file d'attente de synchronisation (ne jamais throw ici)
+  try {
+    await addToSyncQueue({
+      entity: "order_image",
+      action: "create",
+      payload: localRow,
+      tempId: imageId,
+    });
+  } catch { /* ignore */ }
 
   return localRow;
 }
@@ -885,13 +887,15 @@ export async function deleteOrderImageOffline(
     }
   }
 
-  // 4. Mettre en file de synchronisation
-  await addToSyncQueue({
-    entity: "order_image",
-    action: "delete",
-    payload: { id: imageId, order_id: orderId, path },
-    tempId: imageId,
-  });
+  // 4. Mettre en file de synchronisation (ne jamais throw ici)
+  try {
+    await addToSyncQueue({
+      entity: "order_image",
+      action: "delete",
+      payload: { id: imageId, order_id: orderId, path },
+      tempId: imageId,
+    });
+  } catch { /* ignore */ }
 }
 
 export const DEFAULT_GARMENT_TYPES: { id: string; name: string; default_price: number | null }[] = [
@@ -1213,11 +1217,13 @@ export async function deleteCatalogModel(id: string): Promise<void> {
 
   async function queueOfflineDelete() {
     await deleteLocalItem("catalog_models", id);
-    await addToSyncQueue({
-      entity: "catalog_model",
-      action: "delete",
-      payload: { id, business_id: businessId, photo_paths: localPhotoPaths },
-    });
+    try {
+      await addToSyncQueue({
+        entity: "catalog_model",
+        action: "delete",
+        payload: { id, business_id: businessId, photo_paths: localPhotoPaths },
+      });
+    } catch { /* ignore */ }
   }
 
   if (isOnline) {
@@ -1384,12 +1390,14 @@ export async function saveCatalogModelOffline(
     }
   }
 
-  await addToSyncQueue({
-    entity: "catalog_model",
-    action: isNew ? "create" : "update",
-    payload: localModel,
-    tempId: modelId,
-  });
+  try {
+    await addToSyncQueue({
+      entity: "catalog_model",
+      action: isNew ? "create" : "update",
+      payload: localModel,
+      tempId: modelId,
+    });
+  } catch { /* ignore */ }
 
   return localModel;
 }
@@ -1408,8 +1416,39 @@ export async function saveClientOffline(
   const cData: Record<string, any> = clientData;
 
   let existingClient: ClientRow | null = null;
+  let resolvedId = existingId;
+
   if (existingId) {
+    // 1. Chercher par l'ID fourni dans IndexedDB
     existingClient = await getLocalItem<ClientRow>("clients", existingId);
+
+    // 2. Si non trouvé localement et que c'est un ID temp_ déjà synchronisé,
+    //    chercher via Supabase pour obtenir le vrai UUID
+    if (!existingClient && existingId.startsWith("temp_") && isOnline) {
+      try {
+        const bId = (cData["business_id"] as string) || (await currentBusinessId());
+        const { data } = await supabase
+          .from("clients")
+          .select("*")
+          .eq("business_id", bId)
+          .eq("first_name", cData["first_name"] as string)
+          .maybeSingle();
+        if (data) {
+          existingClient = data as unknown as ClientRow;
+          resolvedId = existingClient.id; // Utiliser le vrai UUID Supabase
+        }
+      } catch { /* ignore */ }
+    }
+
+    // 3. Si toujours pas trouvé localement, essayer getAllLocalItems pour matcher par ID
+    if (!existingClient) {
+      try {
+        const allLocal = await getAllLocalItems<ClientRow>("clients");
+        // Chercher un client dont l'ID correspond (peut-être stocké différemment)
+        const found = allLocal.find((c) => c.id === existingId);
+        if (found) existingClient = found;
+      } catch { /* ignore */ }
+    }
   }
 
   const businessId =
@@ -1417,7 +1456,8 @@ export async function saveClientOffline(
     existingClient?.business_id ||
     (await currentBusinessId());
 
-  const clientId = existingId || uuid();
+  // Toujours utiliser le resolvedId (peut être le vrai UUID si temp_ était mappé)
+  const clientId = resolvedId || uuid();
 
   const localClient: ClientRow = {
     id: clientId,
@@ -1448,28 +1488,60 @@ export async function saveClientOffline(
         }
       }
 
-      const { data, error } = await supabase
-        .from("clients")
-        .upsert(localClient as never, { onConflict: "id" })
-        .select()
-        .single();
+      // Utiliser UPDATE si c'est une modification existante, INSERT+UPSERT pour création
+      let data: unknown = null;
+      let error: unknown = null;
+      if (!isNew && resolvedId && !resolvedId.startsWith("temp_")) {
+        // Modification d'un client connu - UPDATE ciblé par ID
+        const { data: d, error: e } = await supabase
+          .from("clients")
+          .update({
+            first_name: localClient.first_name,
+            last_name: localClient.last_name,
+            phone: localClient.phone,
+            whatsapp: localClient.whatsapp,
+            gender: localClient.gender,
+            birth_date: localClient.birth_date,
+            address: localClient.address,
+            city: localClient.city,
+            notes: localClient.notes,
+            photo_url: localClient.photo_url,
+          })
+          .eq("id", resolvedId)
+          .eq("business_id", businessId)
+          .select()
+          .single();
+        data = d; error = e;
+      } else {
+        // Nouveau client ou temp_ ID - UPSERT par ID
+        const { data: d, error: e } = await supabase
+          .from("clients")
+          .upsert(localClient as never, { onConflict: "id" })
+          .select()
+          .single();
+        data = d; error = e;
+      }
       if (!error && data) {
         const row = data as unknown as ClientRow;
         await setLocalItem("clients", row);
         return row;
       }
+      // Si l'UPDATE n'a rien retourné (client non trouvé en base), continuer vers sync_queue
     } catch {
       // Fallback hors-ligne
     }
   }
 
 
-  await addToSyncQueue({
-    entity: "client",
-    action: isNew ? "create" : "update",
-    payload: localClient,
-    tempId: clientId,
-  });
+  // Ne jamais throw ici : la sauvegarde locale a déjà réussi
+  try {
+    await addToSyncQueue({
+      entity: "client",
+      action: isNew ? "create" : "update",
+      payload: localClient,
+      tempId: clientId,
+    });
+  } catch { /* ignore - données déjà sauvegardées en local */ }
 
   return localClient;
 }
@@ -1561,12 +1633,14 @@ export async function saveOrderOffline(
     }
   }
 
-  await addToSyncQueue({
-    entity: "order",
-    action: isNew ? "create" : "update",
-    payload: localOrder,
-    tempId: orderId,
-  });
+  try {
+    await addToSyncQueue({
+      entity: "order",
+      action: isNew ? "create" : "update",
+      payload: localOrder,
+      tempId: orderId,
+    });
+  } catch { /* ignore */ }
 
   return localOrder;
 }
@@ -1629,12 +1703,14 @@ export async function savePaymentOffline(paymentData: Record<string, unknown>): 
     }
   }
 
-  await addToSyncQueue({
-    entity: "payment",
-    action: "create",
-    payload: localPayment,
-    tempId: paymentId,
-  });
+  try {
+    await addToSyncQueue({
+      entity: "payment",
+      action: "create",
+      payload: localPayment,
+      tempId: paymentId,
+    });
+  } catch { /* ignore */ }
 
   return localPayment;
 }
@@ -1671,13 +1747,15 @@ export async function deletePaymentOffline(paymentId: string, orderId?: string):
     }
   }
 
-  // 4. Mettre en file de synchronisation
-  await addToSyncQueue({
-    entity: "payment",
-    action: "delete",
-    payload: { id: paymentId, order_id: orderId },
-    tempId: paymentId,
-  });
+  // 4. Mettre en file de synchronisation (ne jamais throw ici)
+  try {
+    await addToSyncQueue({
+      entity: "payment",
+      action: "delete",
+      payload: { id: paymentId, order_id: orderId },
+      tempId: paymentId,
+    });
+  } catch { /* ignore */ }
 }
 
 export async function saveMeasurementSetOffline(
@@ -1792,24 +1870,27 @@ export async function saveMeasurementSetOffline(
     }
   }
 
-  await addToSyncQueue({
-    entity: "measurement_set",
-    action: isNew ? "create" : "update",
-    payload: {
-      ...setData,
-      id: setId,
-      business_id: businessId,
-      client_id: clientId,
-      values: values.map((v, i) => ({
+  // Ne jamais throw ici : la sauvegarde locale a déjà réussi
+  try {
+    await addToSyncQueue({
+      entity: "measurement_set",
+      action: isNew ? "create" : "update",
+      payload: {
+        ...setData,
+        id: setId,
         business_id: businessId,
-        name: v.name,
-        value: v.value,
-        unit: v.unit || "cm",
-        position: v.position ?? i,
-      })),
-    },
-    tempId: setId,
-  });
+        client_id: clientId,
+        values: values.map((v, i) => ({
+          business_id: businessId,
+          name: v.name,
+          value: v.value,
+          unit: v.unit || "cm",
+          position: v.position ?? i,
+        })),
+      },
+      tempId: setId,
+    });
+  } catch { /* ignore - données déjà sauvegardées en local */ }
 
   return localSet;
 }
@@ -1895,21 +1976,24 @@ export async function saveAppointmentOffline(
     }
   }
 
-  await addToSyncQueue({
-    entity: "appointment",
-    action: isNew ? "create" : "update",
-    payload: {
-      id: apptId,
-      business_id: businessId,
-      client_id: clientId,
-      scheduled_date: localAppt.scheduled_date,
-      scheduled_time: localAppt.scheduled_time,
-      type: localAppt.type,
-      notes: localAppt.notes,
-      status: localAppt.status,
-    },
-    tempId: apptId,
-  });
+  // Ne jamais throw ici : la sauvegarde locale a déjà réussi
+  try {
+    await addToSyncQueue({
+      entity: "appointment",
+      action: isNew ? "create" : "update",
+      payload: {
+        id: apptId,
+        business_id: businessId,
+        client_id: clientId,
+        scheduled_date: localAppt.scheduled_date,
+        scheduled_time: localAppt.scheduled_time,
+        type: localAppt.type,
+        notes: localAppt.notes,
+        status: localAppt.status,
+      },
+      tempId: apptId,
+    });
+  } catch { /* ignore */ }
 
   return localAppt;
 }
@@ -1937,12 +2021,14 @@ export async function updateAppointmentStatusOffline(id: string, status: string)
     }
   }
 
-  await addToSyncQueue({
-    entity: "appointment",
-    action: "update",
-    payload: { id, business_id: businessId, status },
-    tempId: id,
-  });
+  try {
+    await addToSyncQueue({
+      entity: "appointment",
+      action: "update",
+      payload: { id, business_id: businessId, status },
+      tempId: id,
+    });
+  } catch { /* ignore */ }
 }
 
 export async function deleteAppointmentOffline(id: string): Promise<void> {
@@ -1965,12 +2051,14 @@ export async function deleteAppointmentOffline(id: string): Promise<void> {
     }
   }
 
-  await addToSyncQueue({
-    entity: "appointment",
-    action: "delete",
-    payload: { id, business_id: businessId },
-    tempId: id,
-  });
+  try {
+    await addToSyncQueue({
+      entity: "appointment",
+      action: "delete",
+      payload: { id, business_id: businessId },
+      tempId: id,
+    });
+  } catch { /* ignore */ }
 }
 
 // ============================================================
@@ -1984,11 +2072,13 @@ export async function deleteClientCascade(clientId: string, businessId?: string)
   await deleteLocalItem("clients", clientId);
 
   if (!isOnline) {
-    await addToSyncQueue({
-      entity: "client",
-      action: "delete",
-      payload: { id: clientId, business_id: businessId },
-    });
+    try {
+      await addToSyncQueue({
+        entity: "client",
+        action: "delete",
+        payload: { id: clientId, business_id: businessId },
+      });
+    } catch { /* ignore - suppression locale déjà effectuée */ }
     return;
   }
 
@@ -2070,11 +2160,13 @@ export async function deleteOrderCascade(orderId: string, businessId?: string) {
   await deleteLocalItem("orders", orderId);
 
   if (!isOnline) {
-    await addToSyncQueue({
-      entity: "order",
-      action: "delete",
-      payload: { id: orderId, business_id: businessId },
-    });
+    try {
+      await addToSyncQueue({
+        entity: "order",
+        action: "delete",
+        payload: { id: orderId, business_id: businessId },
+      });
+    } catch { /* ignore - suppression locale déjà effectuée */ }
     return;
   }
 
@@ -2112,11 +2204,13 @@ export async function deleteMeasurementSetCascade(setId: string, businessId?: st
   await deleteLocalItem("measurement_sets", setId);
 
   if (!isOnline) {
-    await addToSyncQueue({
-      entity: "measurement_set",
-      action: "delete",
-      payload: { id: setId, business_id: businessId },
-    });
+    try {
+      await addToSyncQueue({
+        entity: "measurement_set",
+        action: "delete",
+        payload: { id: setId, business_id: businessId },
+      });
+    } catch { /* ignore - suppression locale déjà effectuée */ }
     return;
   }
 

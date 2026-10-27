@@ -3,7 +3,7 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Loader2, Plus, Trash2, Image as ImageIcon, KeyRound, LogOut, ShieldCheck, Download, AlertTriangle, FileSpreadsheet, ExternalLink, Eye, EyeOff, Check } from "lucide-react";
 import { toast } from "sonner";
-import { clearOfflineDatabase, addToSyncQueue, setLocalItem } from "@/lib/offline-storage";
+import { clearOfflineDatabase, addToSyncQueue, setLocalItem, getAllLocalItems, deleteLocalItem } from "@/lib/offline-storage";
 import { exportCompleteWorkshopJson, exportClientsCsv, exportMeasurementsCsv } from "@/lib/export-data";
 import {
   AlertDialog,
@@ -89,13 +89,15 @@ function WorkshopPage() {
         } catch { /* Fallback vers sync_queue */ }
       }
 
-      // 2. Hors-ligne ou erreur réseau : planifier la synchronisation
-      await addToSyncQueue({
-        entity: "business",
-        action: "update",
-        payload: { id: business.id, ...updatedData },
-        tempId: business.id,
-      });
+      // 2. Hors-ligne ou erreur réseau : planifier la synchronisation (ne jamais throw)
+      try {
+        await addToSyncQueue({
+          entity: "business",
+          action: "update",
+          payload: { id: business.id, ...updatedData },
+          tempId: business.id,
+        });
+      } catch { /* ignore - déjà sauvegardé en local */ }
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["business"] });
@@ -341,15 +343,22 @@ function GarmentTypes({ businessId }: { businessId: string }) {
   const add = useMutation({
     mutationFn: async (values: { name: string; price: string }) => {
       if (!businessId) throw new Error("Atelier non identifié");
+      const isOnline = typeof navigator !== "undefined" ? navigator.onLine : true;
       const parsedPrice = values.price ? Number(values.price) : null;
-      const defaultPrice =
-        parsedPrice !== null && !isNaN(parsedPrice) && parsedPrice >= 0 ? parsedPrice : null;
-      const { error } = await supabase.from("garment_types").insert({
-        business_id: businessId,
-        name: values.name,
-        default_price: defaultPrice,
-      });
-      if (error) throw error;
+      const defaultPrice = parsedPrice !== null && !isNaN(parsedPrice) && parsedPrice >= 0 ? parsedPrice : null;
+      const newId = crypto.randomUUID ? crypto.randomUUID() : `gt_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+      const localItem = { id: newId, business_id: businessId, name: values.name, default_price: defaultPrice };
+      // 1. Sauvegarder en local immédiatement
+      await setLocalItem("garment_types", localItem);
+      // 2. Tenter insertion Supabase si en ligne
+      if (isOnline) {
+        try {
+          const { data, error } = await supabase.from("garment_types").insert(localItem).select().single();
+          if (!error && data) { await setLocalItem("garment_types", data); return; }
+        } catch { /* Fallback sync_queue */ }
+      }
+      // 3. Offline : planifier la synchro
+      try { await addToSyncQueue({ entity: "garment_type", action: "create", payload: localItem, tempId: newId }); } catch { /* ignore */ }
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["garment-types"] });
@@ -361,12 +370,24 @@ function GarmentTypes({ businessId }: { businessId: string }) {
   const remove = useMutation({
     mutationFn: async (id: string) => {
       if (!businessId) throw new Error("Atelier non identifié");
-      const { error } = await supabase
-        .from("garment_types")
-        .delete()
-        .eq("id", id)
-        .eq("business_id", businessId);
-      if (error) throw error;
+      const isOnline = typeof navigator !== "undefined" ? navigator.onLine : true;
+      // 1. Supprimer localement d'abord (offline-first)
+      try { await deleteLocalItem("garment_types", id); } catch { /* ignore */ }
+      // 2. Tenter suppression Supabase si en ligne
+      if (isOnline) {
+        try {
+          const { error } = await supabase
+            .from("garment_types")
+            .delete()
+            .eq("id", id)
+            .eq("business_id", businessId);
+          if (!error) return;
+        } catch { /* Fallback sync_queue */ }
+      }
+      // 3. Offline ou erreur réseau : planifier la synchro
+      try {
+        await addToSyncQueue({ entity: "garment_type", action: "delete", payload: { id, business_id: businessId }, tempId: id });
+      } catch { /* ignore */ }
     },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["garment-types"] }),
   });
@@ -445,14 +466,38 @@ function Templates({ businessId }: { businessId: string }) {
   const add = useMutation({
     mutationFn: async (values: { name: string; fields: string }) => {
       if (!businessId) throw new Error("Atelier non identifié");
+      const isOnline = typeof navigator !== "undefined" ? navigator.onLine : true;
       const fields = values.fields
         .split(",")
         .map((f) => f.trim())
         .filter(Boolean);
-      const { error } = await supabase
-        .from("measurement_templates")
-        .insert({ business_id: businessId, name: values.name, fields });
-      if (error) throw error;
+      const newItem = { business_id: businessId, name: values.name, fields };
+      // 1. Tenter insertion Supabase si en ligne
+      if (isOnline) {
+        try {
+          const { data, error } = await supabase
+            .from("measurement_templates")
+            .insert(newItem)
+            .select()
+            .single();
+          if (!error && data) {
+            // Mettre à jour le cache localStorage pour offline
+            try {
+              const cached = JSON.parse(localStorage.getItem("couturpro_cached_templates") ?? "[]");
+              cached.push(data);
+              localStorage.setItem("couturpro_cached_templates", JSON.stringify(cached));
+            } catch { /* ignore */ }
+            return;
+          }
+        } catch { /* Fallback localStorage */ }
+      }
+      // 2. Offline : sauvegarder dans le cache localStorage
+      try {
+        const tempItem = { id: `temp_tpl_${Date.now()}`, ...newItem };
+        const cached = JSON.parse(localStorage.getItem("couturpro_cached_templates") ?? "[]");
+        cached.push(tempItem);
+        localStorage.setItem("couturpro_cached_templates", JSON.stringify(cached));
+      } catch { /* ignore */ }
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["templates"] });
@@ -464,12 +509,25 @@ function Templates({ businessId }: { businessId: string }) {
   const remove = useMutation({
     mutationFn: async (id: string) => {
       if (!businessId) throw new Error("Atelier non identifié");
-      const { error } = await supabase
-        .from("measurement_templates")
-        .delete()
-        .eq("id", id)
-        .eq("business_id", businessId);
-      if (error) throw error;
+      const isOnline = typeof navigator !== "undefined" ? navigator.onLine : true;
+      // 1. Supprimer du cache localStorage immédiatement
+      try {
+        const cached = JSON.parse(localStorage.getItem("couturpro_cached_templates") ?? "[]");
+        const updated = cached.filter((t: { id: string }) => t.id !== id);
+        localStorage.setItem("couturpro_cached_templates", JSON.stringify(updated));
+      } catch { /* ignore */ }
+      // 2. Tenter suppression Supabase si en ligne
+      if (isOnline) {
+        try {
+          const { error } = await supabase
+            .from("measurement_templates")
+            .delete()
+            .eq("id", id)
+            .eq("business_id", businessId);
+          if (!error) return;
+        } catch { /* ignore */ }
+      }
+      // (pas de sync_queue pour templates — localStorage suffit pour l'offline)
     },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["templates"] }),
   });
