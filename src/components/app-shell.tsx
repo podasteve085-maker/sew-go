@@ -109,12 +109,14 @@ export function AppShell({ children }: { children: ReactNode }) {
     }
   }, [business?.id, queryClient]);
 
-  // Préchargement des chunks JS des routes principales pour navigation hors-ligne instantanée
+  // Préchargement des chunks JS de TOUTES les routes pour navigation hors-ligne instantanée
   // Ces imports dynamiques forcent le service worker à mettre les bundles en cache
+  // Exécuté toujours (même offline) car les chunks sont peut-être déjà en cache SW
   useEffect(() => {
-    if (typeof navigator === "undefined" || !navigator.onLine) return;
     const preloadRouteChunks = () => {
       const routeImports = [
+        // Routes principales de navigation
+        () => import("@/routes/_authenticated/dashboard"),
         () => import("@/routes/_authenticated/commandes.index"),
         () => import("@/routes/_authenticated/clients.index"),
         () => import("@/routes/_authenticated/mesures"),
@@ -123,20 +125,25 @@ export function AppShell({ children }: { children: ReactNode }) {
         () => import("@/routes/_authenticated/catalogue"),
         () => import("@/routes/_authenticated/atelier"),
         () => import("@/routes/_authenticated/abonnement"),
+        // Sous-routes fréquentes (fiche client, commande, nouvelle commande)
+        () => import("@/routes/_authenticated/clients.$clientId"),
+        () => import("@/routes/_authenticated/commandes.$orderId"),
+        () => import("@/routes/_authenticated/commandes.nouvelle"),
       ];
       // Importer séquentiellement avec délai pour ne pas saturer la bande passante
       routeImports.reduce((chain, fn, i) => {
         return chain.then(() => new Promise<void>((res) => {
-          setTimeout(() => { fn().catch(() => {}).finally(res); }, i * 400);
+          setTimeout(() => { fn().catch(() => {}).finally(res); }, i * 300);
         }));
       }, Promise.resolve());
     };
 
+    // Délai initial : attendre que l'app soit chargée et stable
     if (typeof window !== "undefined" && "requestIdleCallback" in window) {
       (window as unknown as { requestIdleCallback: (cb: () => void, opts: { timeout: number }) => void })
-        .requestIdleCallback(preloadRouteChunks, { timeout: 5000 });
+        .requestIdleCallback(preloadRouteChunks, { timeout: 6000 });
     } else {
-      setTimeout(preloadRouteChunks, 2000);
+      setTimeout(preloadRouteChunks, 1500);
     }
   }, []);
 
