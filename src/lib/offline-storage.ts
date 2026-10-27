@@ -4,7 +4,7 @@
  */
 
 const DB_NAME = "couturpro_offline_v1";
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 
 export type SyncQueueItem = {
   id: string; // UUID de l'action de synchronisation
@@ -79,6 +79,16 @@ function getDB(): Promise<IDBDatabase> {
       if (!db.objectStoreNames.contains("measurement_sets")) {
         const measureStore = db.createObjectStore("measurement_sets", { keyPath: "id" });
         measureStore.createIndex("by_client", "client_id", { unique: false });
+        measureStore.createIndex("by_business", "business_id", { unique: false });
+      } else if ((event as IDBVersionChangeEvent).oldVersion < 3) {
+        // Migration v3 : ajout index by_business
+        const tx = (event.target as IDBOpenDBRequest).transaction;
+        if (tx) {
+          const st = tx.objectStore("measurement_sets");
+          if (!st.indexNames.contains("by_business")) {
+            st.createIndex("by_business", "business_id", { unique: false });
+          }
+        }
       }
 
       // 6. Rendez-vous

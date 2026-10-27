@@ -1,9 +1,9 @@
-import { createFileRoute } from "@tanstack/react-router";
+﻿import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Loader2, Plus, Trash2, Image as ImageIcon, KeyRound, LogOut, ShieldCheck, Download, AlertTriangle, FileSpreadsheet, ExternalLink, Eye, EyeOff, Check } from "lucide-react";
 import { toast } from "sonner";
-import { clearOfflineDatabase } from "@/lib/offline-storage";
+import { clearOfflineDatabase, addToSyncQueue, setLocalItem } from "@/lib/offline-storage";
 import { exportCompleteWorkshopJson, exportClientsCsv, exportMeasurementsCsv } from "@/lib/export-data";
 import {
   AlertDialog,
@@ -54,21 +54,48 @@ function WorkshopPage() {
   const save = useMutation({
     mutationFn: async (values: Record<string, string>) => {
       if (!business) return;
-      const { error } = await supabase
-        .from("businesses")
-        .update({
-          name: values["name"] || business.name,
-          owner_name: values["owner_name"] || null,
-          phone: values["phone"] || null,
-          whatsapp: values["whatsapp"] || null,
-          address: values["address"] || null,
-          city: values["city"] || null,
-          currency: values["currency"] || "FCFA",
-          receipt_note: values["receipt_note"] || null,
-          ...(logoPath ? { logo_url: logoPath } : {}),
-        })
-        .eq("id", business.id);
-      if (error) throw error;
+      const isOnline = typeof navigator !== "undefined" ? navigator.onLine : true;
+
+      const updatedData = {
+        name: values["name"] || business.name,
+        owner_name: values["owner_name"] || null,
+        phone: values["phone"] || null,
+        whatsapp: values["whatsapp"] || null,
+        address: values["address"] || null,
+        city: values["city"] || null,
+        currency: values["currency"] || "FCFA",
+        receipt_note: values["receipt_note"] || null,
+        ...(logoPath ? { logo_url: logoPath } : {}),
+      };
+
+      // 1. Mettre à jour le cache local IMMÉDIATEMENT (offline-first) pour synchronisation sur nouveau téléphone
+      const updatedBusiness = { ...business, ...updatedData };
+      try {
+        localStorage.setItem("couturpro_cached_business", JSON.stringify(updatedBusiness));
+        localStorage.setItem("couturpro_current_business_id", business.id);
+      } catch { /* ignore */ }
+      // Persister dans IndexedDB workshop_data
+      try {
+        await setLocalItem("workshop_data", { id: business.id, ...updatedBusiness });
+      } catch { /* ignore */ }
+
+      if (isOnline) {
+        try {
+          const { error } = await supabase
+            .from("businesses")
+            .update(updatedData)
+            .eq("id", business.id);
+          if (!error) return; // Succès réseau
+        } catch { /* Fallback vers sync_queue */ }
+      }
+
+      // 2. Hors-ligne ou erreur réseau : planifier la synchronisation
+      await addToSyncQueue({
+        entity: "business",
+        action: "update",
+        payload: { id: business.id, ...updatedData },
+        tempId: business.id,
+      });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["business"] });

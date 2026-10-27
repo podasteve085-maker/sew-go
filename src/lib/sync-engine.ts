@@ -475,7 +475,14 @@ async function processSyncItem(
         delete updateData["id"];
         const { data, error } = await supabase.from("businesses").update(updateData as never).eq("id", id).select().single();
         if (error) throw error;
-        if (data) await setLocalItem("workshop_data", data);
+        if (data) {
+          // Persister dans IndexedDB ET localStorage pour disponibilite hors-ligne multi-appareils
+          await setLocalItem("workshop_data", data);
+          try {
+            localStorage.setItem("couturpro_cached_business", JSON.stringify(data));
+            localStorage.setItem("couturpro_current_business_id", String((data as Record<string, unknown>)["id"] ?? id));
+          } catch { /* ignore */ }
+        }
       }
       break;
     }

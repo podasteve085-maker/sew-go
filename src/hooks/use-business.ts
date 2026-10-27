@@ -1,4 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
+import { setLocalItem } from "@/lib/offline-storage";
 import { supabase } from "@/integrations/supabase/client";
 import type { SubscriptionPlan, SubscriptionStatus } from "@/lib/quotas";
 
@@ -107,6 +108,8 @@ export function useBusiness() {
           }
         }
 
+        // Persister dans IndexedDB workshop_data pour disponibilite hors-ligne complete (nouveau telephone)
+        setLocalItem("workshop_data", { id: result.id, ...result }).catch(() => {});
         return result;
       } catch (err) {
         // En cas d'échec réseau, renvoyer l'atelier mis en cache sans jamais bloquer l'interface

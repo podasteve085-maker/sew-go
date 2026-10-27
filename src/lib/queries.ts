@@ -1,4 +1,4 @@
-import { supabase } from "@/integrations/supabase/client";
+﻿import { supabase } from "@/integrations/supabase/client";
 import type { Json } from "@/integrations/supabase/types";
 import type { OrderStatus } from "@/lib/domain";
 import { deleteStorageFiles, materializeStoragePaths, uuid, getSignedUrl, uploadDataUrl } from "@/hooks/use-signed-url";
@@ -159,11 +159,14 @@ export type OrderImageRow = {
 
 export type MeasurementSetRow = {
   id: string;
+  /** Identifiant atelier — requis en offline pour filtrage strict */
+  business_id?: string;
   client_id: string;
   label: string | null;
   template_name: string | null;
   notes: string | null;
   recorded_at: string;
+  created_at?: string;
   measurement_values?: {
     id: string;
     name: string;
@@ -582,8 +585,9 @@ export async function fetchMeasurementSets(clientId: string): Promise<Measuremen
   }
 
   const all = await getAllLocalItems<MeasurementSetRow>("measurement_sets");
+  const bId = await currentBusinessId().catch(() => "");
   return all
-    .filter((s) => s.client_id === clientId)
+    .filter((s) => s.client_id === clientId && (!bId || !s.business_id || s.business_id === bId))
     .sort((a, b) => new Date(b.recorded_at).getTime() - new Date(a.recorded_at).getTime());
 }
 
