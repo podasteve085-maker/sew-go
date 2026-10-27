@@ -260,11 +260,18 @@ export async function fetchOrders(opts?: { clientId?: string }): Promise<OrderRo
         const serverIds = new Set(rows.map((r) => r.id));
         combined.push(
           ...localOrders.filter(
-            (l) => !serverIds.has(l.id) && (!businessId || l.business_id === businessId || !l.business_id),
+            (l) => !serverIds.has(l.id)
+              && (!businessId || l.business_id === businessId || !l.business_id)
+              && (!opts?.clientId || l.client_id === opts.clientId),
           ),
         );
         const enriched = await enrichOrdersWithPayments(combined);
-        setLocalItems("orders", enriched).catch(() => {});
+        // Ne pas écraser tout le store quand on filtre par clientId
+        if (!opts?.clientId) {
+          setLocalItems("orders", enriched).catch(() => {});
+        } else {
+          enriched.forEach((order) => setLocalItem("orders", order).catch(() => {}));
+        }
         return enriched;
       }
     } catch {
@@ -576,7 +583,8 @@ export async function fetchMeasurementSets(clientId: string): Promise<Measuremen
         combined.push(
           ...localSets.filter((l) => l.client_id === clientId && !serverIds.has(l.id)),
         );
-        setLocalItems("measurement_sets", combined).catch(() => {});
+        // Ne pas écraser tout le store quand on filtre par clientId
+        combined.forEach((set) => setLocalItem("measurement_sets", set).catch(() => {}));
         return combined;
       }
     } catch {
@@ -618,11 +626,18 @@ export async function fetchAppointments(opts?: { clientId?: string }): Promise<A
         const serverIds = new Set(rows.map((r) => r.id));
         combined.push(
           ...localAppts.filter(
-            (l) => !serverIds.has(l.id) && (!businessId || l.business_id === businessId || !l.business_id),
+            (l) => !serverIds.has(l.id)
+              && (!businessId || l.business_id === businessId || !l.business_id)
+              && (!opts?.clientId || l.client_id === opts.clientId),
           ),
         );
         const enriched = await enrichAppointmentsWithClients(combined);
-        setLocalItems("appointments", enriched).catch(() => {});
+        // Ne pas écraser tout le store quand on filtre par clientId
+        if (!opts?.clientId) {
+          setLocalItems("appointments", enriched).catch(() => {});
+        } else {
+          enriched.forEach((appt) => setLocalItem("appointments", appt).catch(() => {}));
+        }
         return enriched;
       }
     } catch {
