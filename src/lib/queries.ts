@@ -14,6 +14,24 @@ import {
   getPendingSyncQueue,
 } from "./offline-storage";
 
+// ─── Helper : timeout strict pour les appels Supabase en écriture ──────────────
+// Garantit que les mutations ne pendent jamais plus de 3 secondes.
+// Les données sont déjà écrites en local (IndexedDB) avant l'appel réseau.
+const SUPABASE_WRITE_TIMEOUT_MS = 3000;
+
+async function withSupabaseTimeout<T>(promise: Promise<T>): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<T>((_, reject) =>
+      setTimeout(
+        () => reject(new Error("supabase_timeout")),
+        SUPABASE_WRITE_TIMEOUT_MS
+      )
+    ),
+  ]);
+}
+
+
 
 export async function currentBusinessId(): Promise<string> {
   // 1. Accès instantané au cache local (0ms de latence, fonctionne toujours en ligne et hors-ligne)
@@ -889,7 +907,7 @@ export async function deleteOrderImageOffline(
   // 3. Si en ligne, tenter la suppression distante
   if (isOnline) {
     try {
-      const { error } = await supabase.from("order_images").delete().eq("id", imageId);
+      const { error } = await withSupabaseTimeout(supabase.from("order_images").delete().eq("id", imageId));
       if (!error) {
         if (path && !path.startsWith("data:")) {
           const { deleteStorageFile } = await import("@/hooks/use-signed-url");
@@ -1383,9 +1401,11 @@ export async function saveCatalogModelOffline(
 
   if (isOnline && businessId && !hasLocalOnlyPhotos) {
     try {
-      const rpc = await supabase.rpc("save_catalog_model", {
-        p_model: localModel as unknown as Json,
-      });
+      const rpc = await withSupabaseTimeout(
+        supabase.rpc("save_catalog_model", {
+          p_model: localModel as unknown as Json,
+        })
+      );
       if (!rpc.error) {
         const row = catalogRpcRow(rpc.data);
         if (row) {
@@ -1407,11 +1427,13 @@ export async function saveCatalogModelOffline(
       }
     }
 
-    const { data, error } = await supabase
-      .from("catalog_models")
-      .upsert(localModel as never, { onConflict: "id" })
-      .select()
-      .single();
+    const { data, error } = await withSupabaseTimeout(
+      supabase
+        .from("catalog_models")
+        .upsert(localModel as never, { onConflict: "id" })
+        .select()
+        .single()
+    );
     if (error) {
       if (!isNetworkError(error)) {
         throw new Error(error.message || "Impossible d'enregistrer le modèle.");
@@ -1526,32 +1548,36 @@ export async function saveClientOffline(
       let error: unknown = null;
       if (!isNew && resolvedId && !resolvedId.startsWith("temp_")) {
         // Modification d'un client connu - UPDATE ciblé par ID
-        const { data: d, error: e } = await supabase
-          .from("clients")
-          .update({
-            first_name: localClient.first_name,
-            last_name: localClient.last_name,
-            phone: localClient.phone,
-            whatsapp: localClient.whatsapp,
-            gender: localClient.gender,
-            birth_date: localClient.birth_date,
-            address: localClient.address,
-            city: localClient.city,
-            notes: localClient.notes,
-            photo_url: localClient.photo_url,
-          })
-          .eq("id", resolvedId)
-          .eq("business_id", businessId)
-          .select()
-          .single();
+        const { data: d, error: e } = await withSupabaseTimeout(
+          supabase
+            .from("clients")
+            .update({
+              first_name: localClient.first_name,
+              last_name: localClient.last_name,
+              phone: localClient.phone,
+              whatsapp: localClient.whatsapp,
+              gender: localClient.gender,
+              birth_date: localClient.birth_date,
+              address: localClient.address,
+              city: localClient.city,
+              notes: localClient.notes,
+              photo_url: localClient.photo_url,
+            })
+            .eq("id", resolvedId)
+            .eq("business_id", businessId)
+            .select()
+            .single()
+        );
         data = d; error = e;
       } else {
         // Nouveau client ou temp_ ID - UPSERT par ID
-        const { data: d, error: e } = await supabase
-          .from("clients")
-          .upsert(localClient as never, { onConflict: "id" })
-          .select()
-          .single();
+        const { data: d, error: e } = await withSupabaseTimeout(
+          supabase
+            .from("clients")
+            .upsert(localClient as never, { onConflict: "id" })
+            .select()
+            .single()
+        );
         data = d; error = e;
       }
       if (!error && data) {
@@ -1646,11 +1672,13 @@ export async function saveOrderOffline(
       const upsertPayload: Record<string, any> = { ...localOrder };
       delete upsertPayload["clients"];
       delete upsertPayload["payments"];
-      const { data, error } = await supabase
-        .from("orders")
-        .upsert(upsertPayload as never, { onConflict: "id" })
-        .select()
-        .single();
+      const { data, error } = await withSupabaseTimeout(
+        supabase
+          .from("orders")
+          .upsert(upsertPayload as never, { onConflict: "id" })
+          .select()
+          .single()
+      );
       if (!error && data) {
         const row: OrderRow = {
           ...localOrder,
@@ -1721,11 +1749,13 @@ export async function savePaymentOffline(paymentData: Record<string, unknown>): 
 
   if (isOnline && businessId) {
     try {
-      const { data, error } = await supabase
-        .from("payments")
-        .upsert(localPayment as never, { onConflict: "id" })
-        .select()
-        .single();
+      const { data, error } = await withSupabaseTimeout(
+        supabase
+          .from("payments")
+          .upsert(localPayment as never, { onConflict: "id" })
+          .select()
+          .single()
+      );
       if (!error && data) {
         const row = data as unknown as PaymentRow;
         await setLocalItem("payments", row);
@@ -1862,31 +1892,37 @@ export async function saveMeasurementSetOffline(
         recorded_at: localSet.recorded_at,
       };
 
-      const { data: setRow, error: setError } = await supabase
-        .from("measurement_sets")
-        .upsert(payloadSet as never, { onConflict: "id" })
-        .select()
-        .single();
+      const { data: setRow, error: setError } = await withSupabaseTimeout(
+        supabase
+          .from("measurement_sets")
+          .upsert(payloadSet as never, { onConflict: "id" })
+          .select()
+          .single()
+      );
 
       if (!setError && setRow) {
-        const { error: deleteValuesError } = await supabase
-          .from("measurement_values")
-          .delete()
-          .eq("set_id", setId);
+        const { error: deleteValuesError } = await withSupabaseTimeout(
+          supabase
+            .from("measurement_values")
+            .delete()
+            .eq("set_id", setId)
+        );
         if (deleteValuesError) throw deleteValuesError;
         if (values.length > 0) {
-          const { error: insertValuesError } = await supabase
-            .from("measurement_values")
-            .insert(
-              values.map((v, i) => ({
-                business_id: businessId,
-                set_id: setId,
-                name: v.name,
-                value: v.value,
-                unit: v.unit || "cm",
-                position: v.position ?? i,
-              })) as never,
-            );
+          const { error: insertValuesError } = await withSupabaseTimeout(
+            supabase
+              .from("measurement_values")
+              .insert(
+                values.map((v, i) => ({
+                  business_id: businessId,
+                  set_id: setId,
+                  name: v.name,
+                  value: v.value,
+                  unit: v.unit || "cm",
+                  position: v.position ?? i,
+                })) as never,
+            )
+          );
           if (insertValuesError) throw insertValuesError;
         }
         const fullRow: FullMeasurementSetRow = {
@@ -1989,11 +2025,13 @@ export async function saveAppointmentOffline(
         status: localAppt.status,
       };
 
-      const { data: savedRow, error } = await supabase
-        .from("appointments")
-        .upsert(payload as never, { onConflict: "id" })
-        .select()
-        .single();
+      const { data: savedRow, error } = await withSupabaseTimeout(
+        supabase
+          .from("appointments")
+          .upsert(payload as never, { onConflict: "id" })
+          .select()
+          .single()
+      );
 
       if (!error && savedRow) {
         const fullRow: AppointmentRow = {
@@ -2043,11 +2081,13 @@ export async function updateAppointmentStatusOffline(id: string, status: string)
 
   if (isOnline && businessId) {
     try {
-      const { error } = await supabase
-        .from("appointments")
-        .update({ status })
-        .eq("id", id)
-        .eq("business_id", businessId);
+      const { error } = await withSupabaseTimeout(
+        supabase
+          .from("appointments")
+          .update({ status })
+          .eq("id", id)
+          .eq("business_id", businessId)
+      );
       if (!error) return;
     } catch {
       // Fallback
@@ -2073,11 +2113,13 @@ export async function deleteAppointmentOffline(id: string): Promise<void> {
 
   if (isOnline && businessId) {
     try {
-      const { error } = await supabase
-        .from("appointments")
-        .delete()
-        .eq("id", id)
-        .eq("business_id", businessId);
+      const { error } = await withSupabaseTimeout(
+        supabase
+          .from("appointments")
+          .delete()
+          .eq("id", id)
+          .eq("business_id", businessId)
+      );
       if (!error) return;
     } catch {
       // Fallback

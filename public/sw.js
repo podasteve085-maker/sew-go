@@ -1,5 +1,5 @@
 /**
- * CouturPro — Service Worker (v8)
+ * CouturPro — Service Worker (v9)
  * Architecture Offline-First pour artisans couturiers.
  *
  * Stratégies :
@@ -10,7 +10,7 @@
  * 5. Données API (Supabase) : Laissées au SyncEngine / IndexedDB client
  */
 
-const CACHE_NAME = "couturpro-v8";
+const CACHE_NAME = "couturpro-v9";
 const IMAGES_CACHE_NAME = "couturpro-images-v1";
 const OFFLINE_FALLBACK = "/offline.html";
 
@@ -133,10 +133,21 @@ self.addEventListener("message", (event) => {
         Promise.allSettled(
           event.data.urls.map(async (u) => {
             try {
-              const res = await fetch(u);
-              if (res && res.ok) await cache.put(u, res);
+              // Normaliser : retirer les query params pour les chunks /assets/
+              const cleanUrl = u.split("?")[0];
+              // Vérifier si déjà en cache (ne pas re-fetcher inutilement)
+              const existing = await cache.match(cleanUrl);
+              if (existing) return;
+              const res = await fetch(u, { cache: "default" });
+              if (res && res.ok) {
+                await cache.put(cleanUrl, res.clone());
+                // Pour les navigations, stocker aussi avec l'URL exacte
+                if (!cleanUrl.startsWith("/assets/")) {
+                  await cache.put(u, res);
+                }
+              }
             } catch {
-              // ignore
+              // ignore — peut être hors-ligne au moment du précache
             }
           })
         )

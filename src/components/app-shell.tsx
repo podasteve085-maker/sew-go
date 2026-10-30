@@ -133,17 +133,34 @@ export function AppShell({ children }: { children: ReactNode }) {
       // Importer séquentiellement avec délai pour ne pas saturer la bande passante
       routeImports.reduce((chain, fn, i) => {
         return chain.then(() => new Promise<void>((res) => {
-          setTimeout(() => { fn().catch(() => {}).finally(res); }, i * 300);
+          setTimeout(() => { fn().catch(() => {}).finally(res); }, i * 100);
         }));
       }, Promise.resolve());
+
+      // Après tous les imports, informer le SW de tous les chunks disponibles pour offline
+      // C'est la méthode la plus fiable pour découvrir les chunks Vite générés dynamiquement
+      try {
+        if ("serviceWorker" in navigator && navigator.serviceWorker.controller && navigator.onLine) {
+          const perfEntries = performance.getEntriesByType("resource") as PerformanceResourceTiming[];
+          const chunks = perfEntries
+            .filter((e) => e.name.includes("/assets/") && (e.name.endsWith(".js") || e.name.endsWith(".css")))
+            .map((e) => { try { return new URL(e.name).pathname; } catch { return null; } })
+            .filter((p): p is string => !!p && p.startsWith("/assets/"));
+          if (chunks.length > 0) {
+            navigator.serviceWorker.controller.postMessage({ type: "PRECACHE_URLS", urls: chunks });
+          }
+        }
+      } catch {
+        // ignore — serviceWorker peut être absent dans certains contextes
+      }
     };
 
     // Délai initial : attendre que l'app soit chargée et stable
     if (typeof window !== "undefined" && "requestIdleCallback" in window) {
       (window as unknown as { requestIdleCallback: (cb: () => void, opts: { timeout: number }) => void })
-        .requestIdleCallback(preloadRouteChunks, { timeout: 6000 });
+        .requestIdleCallback(preloadRouteChunks, { timeout: 2000 });
     } else {
-      setTimeout(preloadRouteChunks, 1500);
+      setTimeout(preloadRouteChunks, 800);
     }
   }, []);
 

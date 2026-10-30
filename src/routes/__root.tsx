@@ -291,6 +291,23 @@ function RootComponent() {
           // ignorer pour continuer les autres
         }
       }
+
+      // Collecter et précacher tous les chunks JS/CSS chargés dans le SW
+      // performance.getEntriesByType révèle les chunks Vite que TanStack Router a réellement chargés
+      try {
+        if ("serviceWorker" in navigator && navigator.serviceWorker.controller && navigator.onLine) {
+          const entries = performance.getEntriesByType("resource") as PerformanceResourceTiming[];
+          const chunks = entries
+            .filter((e) => e.name.includes("/assets/") && (e.name.endsWith(".js") || e.name.endsWith(".css")))
+            .map((e) => { try { return new URL(e.name).pathname; } catch { return null; } })
+            .filter((p): p is string => !!p && p.startsWith("/assets/"));
+          if (chunks.length > 0) {
+            navigator.serviceWorker.controller.postMessage({ type: "PRECACHE_URLS", urls: chunks });
+          }
+        }
+      } catch {
+        // ignore
+      }
     };
 
     // Préchargement immédiat + écoute du retour de la connexion
