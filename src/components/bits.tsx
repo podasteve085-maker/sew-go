@@ -242,6 +242,7 @@ export function OrderCard({ order }: { order: OrderRow }) {
       <Link
         to="/commandes/$orderId"
         params={{ orderId: order.id }}
+        preload="intent"
         className="block min-w-0 flex-1 space-y-2"
       >
         <div className="flex items-start justify-between gap-2">
@@ -313,7 +314,7 @@ export function OrderCard({ order }: { order: OrderRow }) {
           </>
         )}
         <Button size="sm" variant="ghost" className="h-7.5 text-xs font-semibold px-2" asChild>
-          <Link to="/commandes/$orderId" params={{ orderId: order.id }}>
+          <Link to="/commandes/$orderId" params={{ orderId: order.id }} preload="intent">
             Détails →
           </Link>
         </Button>

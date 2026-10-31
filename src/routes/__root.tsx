@@ -295,7 +295,7 @@ function RootComponent() {
       // Collecter et précacher tous les chunks JS/CSS chargés dans le SW
       // performance.getEntriesByType révèle les chunks Vite que TanStack Router a réellement chargés
       try {
-        if ("serviceWorker" in navigator && navigator.serviceWorker.controller && navigator.onLine) {
+        if ("serviceWorker" in navigator && navigator.serviceWorker.controller) {
           const entries = performance.getEntriesByType("resource") as PerformanceResourceTiming[];
           const chunks = entries
             .filter((e) => e.name.includes("/assets/") && (e.name.endsWith(".js") || e.name.endsWith(".css")))

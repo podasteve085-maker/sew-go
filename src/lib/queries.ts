@@ -19,6 +19,20 @@ import {
 // Les données sont déjà écrites en local (IndexedDB) avant l'appel réseau.
 const SUPABASE_WRITE_TIMEOUT_MS = 3000;
 
+const SUPABASE_READ_TIMEOUT_MS = 2500;
+
+async function withSupabaseReadTimeout<T>(promise: Promise<T>): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<T>((_, reject) =>
+      setTimeout(
+        () => reject(new Error("supabase_read_timeout")),
+        SUPABASE_READ_TIMEOUT_MS
+      )
+    ),
+  ]);
+}
+
 async function withSupabaseTimeout<T>(promise: Promise<T>): Promise<T> {
   return Promise.race([
     promise,
@@ -261,9 +275,11 @@ export async function fetchOrders(opts?: { clientId?: string }): Promise<OrderRo
         query = query.eq("business_id", businessId);
       }
       if (opts?.clientId) query = query.eq("client_id", opts.clientId);
-      const { data, error } = await query
-        .order("due_date", { ascending: true, nullsFirst: false })
-        .order("created_at", { ascending: false });
+      const { data, error } = await withSupabaseReadTimeout(
+        query
+          .order("due_date", { ascending: true, nullsFirst: false })
+          .order("created_at", { ascending: false })
+      );
       if (!error && data) {
         const rows = data as unknown as OrderRow[];
         const localOrders = await getAllLocalItems<OrderRow>("orders");
@@ -317,7 +333,7 @@ export async function fetchOrder(id: string): Promise<OrderRow | null> {
       if (businessId) {
         query = query.eq("business_id", businessId);
       }
-      const { data, error } = await query.maybeSingle();
+      const { data, error } = await withSupabaseReadTimeout(query.maybeSingle());
       if (!error && data) {
         const order = data as unknown as OrderRow;
         const [enriched] = await enrichOrdersWithPayments([order]);
@@ -378,7 +394,7 @@ export async function fetchClients(term?: string): Promise<ClientRow[]> {
         const like = `%${term.trim()}%`;
         query = query.or(`first_name.ilike.${like},last_name.ilike.${like},phone.ilike.${like}`);
       }
-      const { data, error } = await query.order("first_name", { ascending: true });
+      const { data, error } = await withSupabaseReadTimeout(query.order("first_name", { ascending: true }));
       if (!error && data) {
         const serverRows = deduplicateClients(data as unknown as ClientRow[]);
         const localClients = await getAllLocalItems<ClientRow>("clients");
@@ -448,7 +464,7 @@ export async function fetchClient(id: string): Promise<ClientRow | null> {
       if (businessId) {
         query = query.eq("business_id", businessId);
       }
-      const { data, error } = await query.maybeSingle();
+      const { data, error } = await withSupabaseReadTimeout(query.maybeSingle());
       if (!error && data) {
         const row = data as unknown as ClientRow;
         setLocalItem("clients", row).catch(() => {});
@@ -532,13 +548,15 @@ export async function fetchAllMeasurementSets(): Promise<FullMeasurementSetRow[]
 
   if (typeof navigator === "undefined" || navigator.onLine) {
     try {
-      const { data, error } = await supabase
-        .from("measurement_sets")
-        .select(
-          "*, clients(id, first_name, last_name, phone, whatsapp, gender), measurement_values(id, name, value, unit, position)",
-        )
-        .eq("business_id", businessId)
-        .order("recorded_at", { ascending: false });
+      const { data, error } = await withSupabaseReadTimeout(
+        supabase
+          .from("measurement_sets")
+          .select(
+            "*, clients(id, first_name, last_name, phone, whatsapp, gender), measurement_values(id, name, value, unit, position)",
+          )
+          .eq("business_id", businessId)
+          .order("recorded_at", { ascending: false })
+      );
       if (!error && data) {
         const rows = data as unknown as FullMeasurementSetRow[];
         const localSets = await getAllLocalItems<FullMeasurementSetRow>("measurement_sets");
@@ -578,12 +596,14 @@ export async function fetchMeasurementSets(clientId: string): Promise<Measuremen
 
   if (typeof navigator === "undefined" || navigator.onLine) {
     try {
-      const { data, error } = await supabase
-        .from("measurement_sets")
-        .select("*, measurement_values(id, name, value, unit, position)")
-        .eq("client_id", clientId)
-        .eq("business_id", businessId)
-        .order("recorded_at", { ascending: false });
+      const { data, error } = await withSupabaseReadTimeout(
+        supabase
+          .from("measurement_sets")
+          .select("*, measurement_values(id, name, value, unit, position)")
+          .eq("client_id", clientId)
+          .eq("business_id", businessId)
+          .order("recorded_at", { ascending: false })
+      );
       if (!error && data) {
         const rows = data as unknown as MeasurementSetRow[];
         const localSets = await getAllLocalItems<MeasurementSetRow>("measurement_sets");
@@ -627,9 +647,11 @@ export async function fetchAppointments(opts?: { clientId?: string }): Promise<A
         .select("*, clients(first_name, last_name, phone, whatsapp)");
       if (businessId) query = query.eq("business_id", businessId);
       if (opts?.clientId) query = query.eq("client_id", opts.clientId);
-      const { data, error } = await query
-        .order("scheduled_date", { ascending: true })
-        .order("scheduled_time", { ascending: true, nullsFirst: true });
+      const { data, error } = await withSupabaseReadTimeout(
+        query
+          .order("scheduled_date", { ascending: true })
+          .order("scheduled_time", { ascending: true, nullsFirst: true })
+      );
       if (!error && data) {
         const rows = data as unknown as AppointmentRow[];
         const localAppts = await getAllLocalItems<AppointmentRow>("appointments");
@@ -698,7 +720,7 @@ export async function fetchPayments(orderId: string): Promise<PaymentRow[]> {
     try {
       let query = supabase.from("payments").select("*").eq("order_id", orderId);
       if (businessId) query = query.eq("business_id", businessId);
-      const { data, error } = await query.order("paid_at", { ascending: false });
+      const { data, error } = await withSupabaseReadTimeout(query.order("paid_at", { ascending: false }));
       if (!error && data) {
         const serverRows = data as unknown as PaymentRow[];
         const serverIds = new Set(serverRows.map((p) => p.id));
@@ -737,12 +759,14 @@ export async function fetchOrderImages(orderId: string): Promise<OrderImageRow[]
 
   if (isOnline) {
     try {
-      const { data, error } = await supabase
-        .from("order_images")
-        .select("*")
-        .eq("order_id", orderId)
-        .eq("business_id", businessId)
-        .order("created_at", { ascending: true });
+      const { data, error } = await withSupabaseReadTimeout(
+        supabase
+          .from("order_images")
+          .select("*")
+          .eq("order_id", orderId)
+          .eq("business_id", businessId)
+          .order("created_at", { ascending: true })
+      );
       if (!error && data) {
         const rows = data as unknown as OrderImageRow[];
         // Sauvegarder dans IndexedDB pour la consultation hors-ligne
@@ -1003,11 +1027,13 @@ export async function fetchGarmentTypes(): Promise<{ id: string; name: string; d
 
   if (typeof navigator === "undefined" || navigator.onLine) {
     try {
-      const { data, error } = await supabase
-        .from("garment_types")
-        .select("id, name, default_price")
-        .eq("business_id", businessId)
-        .order("name");
+      const { data, error } = await withSupabaseReadTimeout(
+        supabase
+          .from("garment_types")
+          .select("id, name, default_price")
+          .eq("business_id", businessId)
+          .order("name")
+      );
       if (!error && data && data.length > 0) {
         const rows = data as unknown as { id: string; name: string; default_price: number | null }[];
         setLocalItems("garment_types", rows).catch(() => {});
@@ -1100,9 +1126,11 @@ export async function fetchCatalogModels(
       if (category && category !== "all") {
         query = query.eq("category", category);
       }
-      const { data, error } = await query
-        .eq("is_active", true)
-        .order("created_at", { ascending: false });
+      const { data, error } = await withSupabaseReadTimeout(
+        query
+          .eq("is_active", true)
+          .order("created_at", { ascending: false })
+      );
       if (error) throw error;
       if (data) {
         const deletingIds = publicAccess ? new Set<string>() : await pendingCatalogDeleteIds();

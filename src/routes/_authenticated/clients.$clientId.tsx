@@ -10,6 +10,8 @@ import { useBusiness } from "@/hooks/use-business";
 import { isProOrAdmin, isSubscriptionExpired } from "@/lib/quotas";
 import { UpgradeDialog } from "@/components/upgrade-dialog";
 import {
+  type ClientRow,
+  type OrderRow,
   fetchClient,
   fetchMeasurementSets,
   fetchOrders,
@@ -85,6 +87,12 @@ function ClientDetail() {
     queryKey: ["client", clientId],
     queryFn: () => fetchClient(clientId),
     enabled: Boolean(clientId),
+    initialData: () => {
+      const cached =
+        queryClient.getQueryData<ClientRow[]>(["clients", ""]) ||
+        queryClient.getQueryData<ClientRow[]>(["clients"]);
+      return cached?.find((c) => c.id === clientId);
+    },
   });
   const sets = useQuery({
     queryKey: ["measurements", clientId],
@@ -95,6 +103,10 @@ function ClientDetail() {
     queryKey: ["orders", { clientId }],
     queryFn: () => fetchOrders({ clientId }),
     enabled: Boolean(clientId),
+    initialData: () => {
+      const all = queryClient.getQueryData<OrderRow[]>(["orders"]);
+      return all ? all.filter((o) => o.client_id === clientId) : undefined;
+    },
   });
   const appointments = useQuery({
     queryKey: ["appointments", { clientId }],

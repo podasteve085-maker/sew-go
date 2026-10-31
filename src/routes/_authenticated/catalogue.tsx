@@ -158,7 +158,7 @@ function CataloguePage() {
       queryClient.invalidateQueries({ queryKey: ["public-catalog-models"] });
       toast.success("Modèle supprimé avec succès du catalogue");
       setModelToDelete(null);
-      if (presentationModel) setPresentationModel(null);
+      setLightboxOpen(false); // Fermer la lightbox si elle est ouverte
     },
     onError: (err: unknown) => {
       const msg = err instanceof Error ? err.message : "Erreur lors de la suppression";

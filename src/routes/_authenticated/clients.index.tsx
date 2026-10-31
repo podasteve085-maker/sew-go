@@ -238,6 +238,7 @@ function ClientsPage() {
               <Link
                 to="/clients/$clientId"
                 params={{ clientId: c.id }}
+                preload="intent"
                 className="flex items-center gap-3 min-w-0"
               >
                 {c.photo_url ? (
@@ -314,7 +315,7 @@ function ClientsPage() {
                   </a>
                 )}
                 <Button size="sm" variant="ghost" className="h-7.5 text-xs font-semibold px-2" asChild>
-                  <Link to="/clients/$clientId" params={{ clientId: c.id }}>
+                  <Link to="/clients/$clientId" params={{ clientId: c.id }} preload="intent">
                     Fiche →
                   </Link>
                 </Button>

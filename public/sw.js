@@ -10,7 +10,7 @@
  * 5. Données API (Supabase) : Laissées au SyncEngine / IndexedDB client
  */
 
-const CACHE_NAME = "couturpro-v9";
+const CACHE_NAME = "couturpro-v10";
 const IMAGES_CACHE_NAME = "couturpro-images-v1";
 const OFFLINE_FALLBACK = "/offline.html";
 
@@ -236,16 +236,25 @@ self.addEventListener("fetch", (event) => {
   if (request.mode === "navigate") {
     event.respondWith(
       (async () => {
-        // En mode hors-ligne direct : servir immédiatement le Shell sans tenter le réseau
+                // En mode hors-ligne direct : servir immédiatement le Shell sans tenter le réseau
         if (typeof navigator !== "undefined" && !navigator.onLine) {
-          const cached =
-            (await caches.match(request)) ||
-            (await caches.match(url.pathname)) ||
-            (await caches.match("/dashboard")) ||
-            (await caches.match("/"));
+          // 1. Essayer l'URL exacte ou le pathname exact
+          let cached = (await caches.match(request)) || (await caches.match(url.pathname));
+          if (cached) return cached;
+
+          // 2. Pour les routes dynamiques (/commandes/:id, /clients/:id, /mesures/:id)
+          // Servir le shell de la section parente (ex: /commandes, /clients, /mesures)
+          const pathSegments = url.pathname.split('/').filter(Boolean);
+          if (pathSegments.length >= 2) {
+            const parentPath = '/' + pathSegments[0];
+            const parentCached = await caches.match(parentPath);
+            if (parentCached) return parentCached;
+          }
+
+          // 3. Fallback dashboard ou racine
+          cached = (await caches.match("/dashboard")) || (await caches.match("/"));
           if (cached) return cached;
         }
-
         try {
           // Tenter le réseau avec un timeout de 2.5s max pour réactivité immédiate
           const timeoutPromise = new Promise((_, reject) =>
@@ -263,8 +272,15 @@ self.addEventListener("fetch", (event) => {
           return networkResponse;
         } catch {
           // Hors-ligne ou réseau lent : servir le Shell SPA correspondant ou le shell racine
-          const cachedUrl = (await caches.match(request)) || (await caches.match(url.pathname));
+          let cachedUrl = (await caches.match(request)) || (await caches.match(url.pathname));
           if (cachedUrl) return cachedUrl;
+
+          // Pour les routes dynamiques, essayer le shell de la section parente
+          const segments = url.pathname.split('/').filter(Boolean);
+          if (segments.length >= 2) {
+            const parentShell = await caches.match('/' + segments[0]);
+            if (parentShell) return parentShell;
+          }
 
           const cachedDashboard = await caches.match("/dashboard");
           if (cachedDashboard) return cachedDashboard;

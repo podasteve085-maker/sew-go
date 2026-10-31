@@ -113,7 +113,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   // Ces imports dynamiques forcent le service worker à mettre les bundles en cache
   // Exécuté toujours (même offline) car les chunks sont peut-être déjà en cache SW
   useEffect(() => {
-    const preloadRouteChunks = () => {
+    const preloadRouteChunks = async () => {
       const routeImports = [
         // Routes principales de navigation
         () => import("@/routes/_authenticated/dashboard"),
@@ -129,25 +129,40 @@ export function AppShell({ children }: { children: ReactNode }) {
         () => import("@/routes/_authenticated/clients.$clientId"),
         () => import("@/routes/_authenticated/commandes.$orderId"),
         () => import("@/routes/_authenticated/commandes.nouvelle"),
+        () => import("@/routes/_authenticated/admin"),
       ];
-      // Importer séquentiellement avec délai pour ne pas saturer la bande passante
-      routeImports.reduce((chain, fn, i) => {
-        return chain.then(() => new Promise<void>((res) => {
-          setTimeout(() => { fn().catch(() => {}).finally(res); }, i * 100);
-        }));
-      }, Promise.resolve());
+      // Importer rapidement par petits lots parallèles de 3 pour disponibilité offline immédiate
+      for (let i = 0; i < routeImports.length; i += 3) {
+        await Promise.allSettled(routeImports.slice(i, i + 3).map((fn) => fn()));
+      }
+
+      // Délai supplémentaire : laisser le navigateur enregistrer les entrées perf
+      await new Promise<void>((res) => setTimeout(res, 500));
 
       // Après tous les imports, informer le SW de tous les chunks disponibles pour offline
       // C'est la méthode la plus fiable pour découvrir les chunks Vite générés dynamiquement
       try {
-        if ("serviceWorker" in navigator && navigator.serviceWorker.controller && navigator.onLine) {
+        if ("serviceWorker" in navigator && navigator.serviceWorker.controller) {
           const perfEntries = performance.getEntriesByType("resource") as PerformanceResourceTiming[];
           const chunks = perfEntries
             .filter((e) => e.name.includes("/assets/") && (e.name.endsWith(".js") || e.name.endsWith(".css")))
             .map((e) => { try { return new URL(e.name).pathname; } catch { return null; } })
             .filter((p): p is string => !!p && p.startsWith("/assets/"));
-          if (chunks.length > 0) {
-            navigator.serviceWorker.controller.postMessage({ type: "PRECACHE_URLS", urls: chunks });
+          // Scanner aussi les balises script/link injectées dans le DOM
+          if (typeof document !== "undefined") {
+            document.querySelectorAll<HTMLScriptElement | HTMLLinkElement>("script[src], link[href]").forEach((el) => {
+              const src = (el as HTMLScriptElement).src || (el as HTMLLinkElement).href;
+              if (src && src.includes("/assets/")) {
+                try {
+                  const p = new URL(src).pathname;
+                  if (p.startsWith("/assets/")) chunks.push(p);
+                } catch {}
+              }
+            });
+          }
+          const uniqueChunks = Array.from(new Set(chunks));
+          if (uniqueChunks.length > 0) {
+            navigator.serviceWorker.controller.postMessage({ type: "PRECACHE_URLS", urls: uniqueChunks });
           }
         }
       } catch {
@@ -158,9 +173,9 @@ export function AppShell({ children }: { children: ReactNode }) {
     // Délai initial : attendre que l'app soit chargée et stable
     if (typeof window !== "undefined" && "requestIdleCallback" in window) {
       (window as unknown as { requestIdleCallback: (cb: () => void, opts: { timeout: number }) => void })
-        .requestIdleCallback(preloadRouteChunks, { timeout: 2000 });
+        .requestIdleCallback(preloadRouteChunks, { timeout: 500 });
     } else {
-      setTimeout(preloadRouteChunks, 800);
+      setTimeout(preloadRouteChunks, 250);
     }
   }, []);
 

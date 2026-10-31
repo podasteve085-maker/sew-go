@@ -37,6 +37,8 @@ import { isProOrAdmin, isSubscriptionExpired } from "@/lib/quotas";
 import { UpgradeDialog } from "@/components/upgrade-dialog";
 import { uploadImage, deleteStorageFile } from "@/hooks/use-signed-url";
 import {
+  type OrderRow,
+  type ClientRow,
   fetchOrder,
   fetchPayments,
   fetchOrderImages,
@@ -147,6 +149,10 @@ function OrderDetailPage() {
     queryKey: ["order", orderId],
     queryFn: () => fetchOrder(orderId),
     enabled: Boolean(orderId),
+    initialData: () => {
+      const cachedOrders = queryClient.getQueryData<OrderRow[]>(["orders"]);
+      return cachedOrders?.find((o) => o.id === orderId);
+    },
   });
 
   const paymentsQuery = useQuery({
@@ -168,6 +174,13 @@ function OrderDetailPage() {
     queryKey: ["client", clientId],
     queryFn: () => fetchClient(clientId!),
     enabled: Boolean(clientId),
+    initialData: () => {
+      if (!clientId) return undefined;
+      const cachedClients =
+        queryClient.getQueryData<ClientRow[]>(["clients", ""]) ||
+        queryClient.getQueryData<ClientRow[]>(["clients"]);
+      return cachedClients?.find((c) => c.id === clientId);
+    },
   });
 
   const measuresQuery = useQuery({
