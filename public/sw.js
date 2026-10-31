@@ -10,7 +10,7 @@
  * 5. Données API (Supabase) : Laissées au SyncEngine / IndexedDB client
  */
 
-const CACHE_NAME = "couturpro-v10";
+const CACHE_NAME = "couturpro-v11";
 const IMAGES_CACHE_NAME = "couturpro-images-v1";
 const OFFLINE_FALLBACK = "/offline.html";
 

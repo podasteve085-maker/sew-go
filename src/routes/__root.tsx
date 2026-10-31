@@ -315,6 +315,7 @@ function RootComponent() {
 
     const onOnline = () => {
       preloadAll();
+      syncPendingMutations();
     };
     window.addEventListener("online", onOnline);
 

@@ -283,14 +283,22 @@ export async function fetchOrders(opts?: { clientId?: string }): Promise<OrderRo
       if (!error && data) {
         const rows = data as unknown as OrderRow[];
         const localOrders = await getAllLocalItems<OrderRow>("orders");
-        const pendingIds = new Set(
-          (await getPendingSyncQueue())
-            .filter((q) => q.entity === "order" && q.action !== "delete")
-            .map((q) => q.payload["id"] as string)
-            .filter(Boolean),
-        );
+        const queue = await getPendingSyncQueue();
+        const pendingQueueMap = new Map<string, Record<string, unknown>>();
+        for (const q of queue) {
+          if (q.entity === "order" && q.action !== "delete") {
+            const qId = (q.payload?.["id"] as string) || q.tempId;
+            if (qId) pendingQueueMap.set(qId, q.payload);
+          }
+        }
         const localById = new Map(localOrders.map((order) => [order.id, order]));
-        const combined = rows.map((row) => pendingIds.has(row.id) ? (localById.get(row.id) ?? row) : row);
+        const combined = rows.map((row) => {
+          if (pendingQueueMap.has(row.id)) {
+            const local = localById.get(row.id) ?? row;
+            return { ...row, ...local, ...pendingQueueMap.get(row.id) };
+          }
+          return row;
+        });
         const serverIds = new Set(rows.map((r) => r.id));
         combined.push(
           ...localOrders.filter(
@@ -326,6 +334,20 @@ export async function fetchOrders(opts?: { clientId?: string }): Promise<OrderRo
 
 export async function fetchOrder(id: string): Promise<OrderRow | null> {
   const businessId = await currentBusinessId();
+  const local = await getLocalItem<OrderRow>("orders", id);
+
+  let pendingOrderPayload: Partial<OrderRow> | null = null;
+  try {
+    const queue = await getPendingSyncQueue();
+    const pending = queue.find(
+      (q) => q.entity === "order" && (q.payload?.["id"] === id || q.tempId === id) && q.action !== "delete"
+    );
+    if (pending) {
+      pendingOrderPayload = pending.payload as Partial<OrderRow>;
+    }
+  } catch {
+    // ignore
+  }
 
   if (typeof navigator === "undefined" || navigator.onLine) {
     try {
@@ -336,16 +358,18 @@ export async function fetchOrder(id: string): Promise<OrderRow | null> {
       const { data, error } = await withSupabaseReadTimeout(query.maybeSingle());
       if (!error && data) {
         const order = data as unknown as OrderRow;
-        const [enriched] = await enrichOrdersWithPayments([order]);
-        setLocalItem("orders", enriched || order).catch(() => {});
-        return enriched || order;
+        const merged = pendingOrderPayload && local
+          ? { ...order, ...local, ...pendingOrderPayload }
+          : order;
+        const [enriched] = await enrichOrdersWithPayments([merged]);
+        setLocalItem("orders", enriched || merged).catch(() => {});
+        return enriched || merged;
       }
     } catch {
       // Fallback IndexedDB
     }
   }
 
-  const local = await getLocalItem<OrderRow>("orders", id);
   if (!local) return null;
   const [enriched] = await enrichOrdersWithPayments([local]);
   return enriched || local;
@@ -398,13 +422,25 @@ export async function fetchClients(term?: string): Promise<ClientRow[]> {
       if (!error && data) {
         const serverRows = deduplicateClients(data as unknown as ClientRow[]);
         const localClients = await getAllLocalItems<ClientRow>("clients");
+        const queue = await getPendingSyncQueue();
+        const pendingQueueMap = new Map<string, Record<string, unknown>>();
+        for (const q of queue) {
+          if (q.entity === "client" && q.action !== "delete") {
+            const qId = (q.payload?.["id"] as string) || q.tempId;
+            if (qId) pendingQueueMap.set(qId, q.payload);
+          }
+        }
+        const localById = new Map(localClients.map((c) => [c.id, c]));
         const serverIds = new Set(serverRows.map((r) => r.id));
         const pendingLocals = localClients.filter(
           (l) => !serverIds.has(l.id) && (!businessId || l.business_id === businessId || !l.business_id)
         );
-        // Préserver la photo locale si le serveur renvoie null pour un client existant
         const mergedServerRows = serverRows.map((serverItem) => {
-          const localItem = localClients.find((l) => l.id === serverItem.id);
+          const localItem = localById.get(serverItem.id);
+          const pending = pendingQueueMap.get(serverItem.id);
+          if (pending && localItem) {
+            return { ...serverItem, ...localItem, ...pending } as ClientRow;
+          }
           if (localItem && !serverItem.photo_url && localItem.photo_url) {
             return { ...serverItem, photo_url: localItem.photo_url };
           }
@@ -457,6 +493,20 @@ export async function fetchClients(term?: string): Promise<ClientRow[]> {
 
 export async function fetchClient(id: string): Promise<ClientRow | null> {
   const businessId = await currentBusinessId();
+  const local = await getLocalItem<ClientRow>("clients", id);
+
+  let pendingClientPayload: Partial<ClientRow> | null = null;
+  try {
+    const queue = await getPendingSyncQueue();
+    const pending = queue.find(
+      (q) => q.entity === "client" && (q.payload?.["id"] === id || q.tempId === id) && q.action !== "delete"
+    );
+    if (pending) {
+      pendingClientPayload = pending.payload as Partial<ClientRow>;
+    }
+  } catch {
+    // ignore
+  }
 
   if (typeof navigator === "undefined" || navigator.onLine) {
     try {
@@ -467,15 +517,18 @@ export async function fetchClient(id: string): Promise<ClientRow | null> {
       const { data, error } = await withSupabaseReadTimeout(query.maybeSingle());
       if (!error && data) {
         const row = data as unknown as ClientRow;
-        setLocalItem("clients", row).catch(() => {});
-        return row;
+        const merged = pendingClientPayload && local
+          ? { ...row, ...local, ...pendingClientPayload }
+          : { ...row, ...(local?.photo_url && !row.photo_url ? { photo_url: local.photo_url } : {}) };
+        setLocalItem("clients", merged).catch(() => {});
+        return merged;
       }
     } catch {
       // Fallback IndexedDB
     }
   }
 
-  return getLocalItem<ClientRow>("clients", id);
+  return local;
 }
 
 export type FullMeasurementSetRow = MeasurementSetRow & {
@@ -560,14 +613,22 @@ export async function fetchAllMeasurementSets(): Promise<FullMeasurementSetRow[]
       if (!error && data) {
         const rows = data as unknown as FullMeasurementSetRow[];
         const localSets = await getAllLocalItems<FullMeasurementSetRow>("measurement_sets");
-        const pendingIds = new Set(
-          (await getPendingSyncQueue())
-            .filter((q) => q.entity === "measurement_set" && q.action !== "delete")
-            .map((q) => q.payload["id"] as string)
-            .filter(Boolean),
-        );
+        const queue = await getPendingSyncQueue();
+        const pendingQueueMap = new Map<string, Record<string, unknown>>();
+        for (const q of queue) {
+          if (q.entity === "measurement_set" && q.action !== "delete") {
+            const qId = (q.payload?.["id"] as string) || q.tempId;
+            if (qId) pendingQueueMap.set(qId, q.payload);
+          }
+        }
         const localById = new Map(localSets.map((set) => [set.id, set]));
-        const combined = rows.map((row) => pendingIds.has(row.id) ? (localById.get(row.id) ?? row) : row);
+        const combined = rows.map((row) => {
+          if (pendingQueueMap.has(row.id)) {
+            const local = localById.get(row.id) ?? row;
+            return { ...row, ...local, ...pendingQueueMap.get(row.id) };
+          }
+          return row;
+        });
         const serverIds = new Set(rows.map((r) => r.id));
         combined.push(
           ...localSets.filter(
@@ -607,16 +668,24 @@ export async function fetchMeasurementSets(clientId: string): Promise<Measuremen
       if (!error && data) {
         const rows = data as unknown as MeasurementSetRow[];
         const localSets = await getAllLocalItems<MeasurementSetRow>("measurement_sets");
-        const pendingIds = new Set(
-          (await getPendingSyncQueue())
-            .filter((q) => q.entity === "measurement_set" && q.action !== "delete")
-            .map((q) => q.payload["id"] as string)
-            .filter(Boolean),
-        );
+        const queue = await getPendingSyncQueue();
+        const pendingQueueMap = new Map<string, Record<string, unknown>>();
+        for (const q of queue) {
+          if (q.entity === "measurement_set" && q.action !== "delete") {
+            const qId = (q.payload?.["id"] as string) || q.tempId;
+            if (qId) pendingQueueMap.set(qId, q.payload);
+          }
+        }
         const localById = new Map(localSets.map((set) => [set.id, set]));
         const combined = rows
           .filter((row) => row.client_id === clientId)
-          .map((row) => pendingIds.has(row.id) ? (localById.get(row.id) ?? row) : row);
+          .map((row) => {
+            if (pendingQueueMap.has(row.id)) {
+              const local = localById.get(row.id) ?? row;
+              return { ...row, ...local, ...pendingQueueMap.get(row.id) };
+            }
+            return row;
+          });
         const serverIds = new Set(rows.map((r) => r.id));
         combined.push(
           ...localSets.filter((l) => l.client_id === clientId && !serverIds.has(l.id)),
@@ -655,14 +724,22 @@ export async function fetchAppointments(opts?: { clientId?: string }): Promise<A
       if (!error && data) {
         const rows = data as unknown as AppointmentRow[];
         const localAppts = await getAllLocalItems<AppointmentRow>("appointments");
-        const pendingIds = new Set(
-          (await getPendingSyncQueue())
-            .filter((q) => q.entity === "appointment" && q.action !== "delete")
-            .map((q) => q.payload["id"] as string)
-            .filter(Boolean),
-        );
+        const queue = await getPendingSyncQueue();
+        const pendingQueueMap = new Map<string, Record<string, unknown>>();
+        for (const q of queue) {
+          if (q.entity === "appointment" && q.action !== "delete") {
+            const qId = (q.payload?.["id"] as string) || q.tempId;
+            if (qId) pendingQueueMap.set(qId, q.payload);
+          }
+        }
         const localById = new Map(localAppts.map((appointment) => [appointment.id, appointment]));
-        const combined = rows.map((row) => pendingIds.has(row.id) ? (localById.get(row.id) ?? row) : row);
+        const combined = rows.map((row) => {
+          if (pendingQueueMap.has(row.id)) {
+            const local = localById.get(row.id) ?? row;
+            return { ...row, ...local, ...pendingQueueMap.get(row.id) };
+          }
+          return row;
+        });
         const serverIds = new Set(rows.map((r) => r.id));
         combined.push(
           ...localAppts.filter(
@@ -1700,22 +1777,67 @@ export async function saveOrderOffline(
       const upsertPayload: Record<string, any> = { ...localOrder };
       delete upsertPayload["clients"];
       delete upsertPayload["payments"];
-      const { data, error } = await withSupabaseTimeout(
-        supabase
-          .from("orders")
-          .upsert(upsertPayload as never, { onConflict: "id" })
-          .select()
-          .single()
-      );
-      if (!error && data) {
-        const row: OrderRow = {
-          ...localOrder,
-          ...(data as unknown as OrderRow),
-          clients: localOrder.clients,
-          payments: localOrder.payments,
-        };
-        await setLocalItem("orders", row);
-        return row;
+
+      if (!isNew && existingId) {
+        // Stepwise update to comply with trg_validate_order_status
+        const targetStatus = localOrder.status;
+        if (targetStatus && targetStatus !== "annulee") {
+          const STATUS_ORDER: OrderStatus[] = [
+            "nouvelle",
+            "preparation",
+            "confection",
+            "finition",
+            "prete",
+            "livree",
+          ];
+          const targetIdx = STATUS_ORDER.indexOf(targetStatus);
+          const currentStatus = existingOrder?.status || "nouvelle";
+          const currentIdx = STATUS_ORDER.indexOf(currentStatus);
+          if (currentIdx >= 0 && targetIdx > currentIdx + 1) {
+            for (let step = currentIdx + 1; step <= targetIdx; step++) {
+              await withSupabaseTimeout(
+                supabase.from("orders").update({ status: STATUS_ORDER[step] }).eq("id", existingId)
+              );
+            }
+          }
+        }
+        delete upsertPayload["id"];
+        const { data, error } = await withSupabaseTimeout(
+          supabase
+            .from("orders")
+            .update(upsertPayload as never)
+            .eq("id", existingId)
+            .select()
+            .single()
+        );
+        if (!error && data) {
+          const row: OrderRow = {
+            ...localOrder,
+            ...(data as unknown as OrderRow),
+            clients: localOrder.clients,
+            payments: localOrder.payments,
+          };
+          await setLocalItem("orders", row);
+          return row;
+        }
+      } else {
+        const { data, error } = await withSupabaseTimeout(
+          supabase
+            .from("orders")
+            .upsert(upsertPayload as never, { onConflict: "id" })
+            .select()
+            .single()
+        );
+        if (!error && data) {
+          const row: OrderRow = {
+            ...localOrder,
+            ...(data as unknown as OrderRow),
+            clients: localOrder.clients,
+            payments: localOrder.payments,
+          };
+          await setLocalItem("orders", row);
+          return row;
+        }
       }
     } catch {
       // Fallback hors-ligne
@@ -2100,8 +2222,8 @@ export async function saveAppointmentOffline(
 export async function updateAppointmentStatusOffline(id: string, status: string): Promise<void> {
   const isOnline = typeof navigator !== "undefined" ? navigator.onLine : true;
   const existing = await getLocalItem<AppointmentRow>("appointments", id);
-  if (existing) {
-    const updated = { ...existing, status };
+  const updated = existing ? { ...existing, status } : null;
+  if (updated) {
     await setLocalItem("appointments", updated);
   }
 
@@ -2126,7 +2248,7 @@ export async function updateAppointmentStatusOffline(id: string, status: string)
     await addToSyncQueue({
       entity: "appointment",
       action: "update",
-      payload: { id, business_id: businessId, status },
+      payload: updated || { id, business_id: businessId, status },
       tempId: id,
     });
   } catch { /* ignore */ }

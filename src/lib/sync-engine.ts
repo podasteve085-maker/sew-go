@@ -7,7 +7,14 @@ import { useState, useEffect } from "react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { deleteStorageFiles, uploadDataUrl } from "@/hooks/use-signed-url";
-import { isMissingDbRoutine, parseCatalogRpcPayload } from "@/lib/queries";
+import {
+  isMissingDbRoutine,
+  parseCatalogRpcPayload,
+  type OrderRow,
+  type ClientRow,
+  type AppointmentRow,
+} from "@/lib/queries";
+import type { OrderStatus } from "@/lib/domain";
 import type { Json } from "@/integrations/supabase/types";
 import {
   getPendingSyncQueue,
