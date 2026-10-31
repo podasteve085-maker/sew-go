@@ -12,6 +12,7 @@ import {
   DEFAULT_MEASUREMENT_TEMPLATES,
 } from "@/lib/queries";
 import { today, fullName } from "@/lib/format";
+import { getAllLocalItems } from "@/lib/offline-storage";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -25,7 +26,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { useBusiness } from "@/hooks/use-business";
-import { checkMeasurementQuota, isSubscriptionExpired } from "@/lib/quotas";
+import { checkMeasurementQuota, isSubscriptionExpired, isProOrAdmin } from "@/lib/quotas";
 import { UpgradeDialog } from "@/components/upgrade-dialog";
 
 export function MeasurementDialog({
@@ -136,12 +137,37 @@ export function MeasurementDialog({
           throw new Error(msg);
         }
       } else {
-        const { count, error: countErr } = await supabase
-          .from("measurement_sets")
-          .select("id", { count: "exact", head: true })
-          .eq("business_id", businessId);
-
-        if (!countErr && typeof count === "number") {
+        // Contrôle de quota résilient : 0ms pour Pro/Admin, timeout 1.5s max si en ligne, repli IndexedDB
+        if (!isProOrAdmin(business)) {
+          let count: number | null = null;
+          if (typeof navigator !== "undefined" && navigator.onLine) {
+            try {
+              const timeoutPromise = new Promise<{ count: number | null; error: any }>((_, reject) =>
+                setTimeout(() => reject(new Error("timeout")), 1500)
+              );
+              const queryPromise = supabase
+                .from("measurement_sets")
+                .select("id", { count: "exact", head: true })
+                .eq("business_id", businessId);
+        
+              const res = await Promise.race([queryPromise, timeoutPromise]);
+              if (!res.error && typeof res.count === "number") {
+                count = res.count;
+              }
+            } catch {
+              // Réseau lent ou défaillant -> repli local
+            }
+          }
+        
+          if (count === null) {
+            try {
+              const localSets = await getAllLocalItems<{ business_id?: string }>("measurement_sets");
+              count = localSets.filter((s) => !s.business_id || s.business_id === businessId).length;
+            } catch {
+              count = 0;
+            }
+          }
+        
           const quota = checkMeasurementQuota(business, count);
           if (!quota.allowed) {
             setQuotaReason(quota.message || "Quota de fiches de mesures atteint.");

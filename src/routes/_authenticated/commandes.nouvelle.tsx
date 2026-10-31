@@ -33,6 +33,7 @@ import {
   saveOrderImageOffline,
 } from "@/lib/queries";
 import { IMAGE_KINDS, PAYMENT_METHODS } from "@/lib/domain";
+import { getAllLocalItems } from "@/lib/offline-storage";
 import { addDays, fullName, today, dateFr, fcfa } from "@/lib/format";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -41,7 +42,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { StoredImage } from "@/components/bits";
 import { ClientFormDialog } from "@/components/client-form-dialog";
 import { MeasurementDialog } from "@/components/measurement-dialog";
-import { checkOrderQuota, isSubscriptionExpired } from "@/lib/quotas";
+import { checkOrderQuota, isSubscriptionExpired, isProOrAdmin } from "@/lib/quotas";
 import { UpgradeDialog } from "@/components/upgrade-dialog";
 
 export const Route = createFileRoute("/_authenticated/commandes/nouvelle")({
@@ -156,12 +157,37 @@ function NewOrder() {
       }
 
       // Contrôle strict du quota de commandes pour la formule Découverte
-      const { count, error: countErr } = await supabase
-        .from("orders")
-        .select("id", { count: "exact", head: true })
-        .eq("business_id", business.id);
-
-      if (!countErr && typeof count === "number") {
+      // Contrôle de quota résilient : 0ms pour Pro/Admin, timeout 1.5s max si en ligne, repli IndexedDB
+      if (!isProOrAdmin(business)) {
+        let count: number | null = null;
+        if (typeof navigator !== "undefined" && navigator.onLine) {
+          try {
+            const timeoutPromise = new Promise<{ count: number | null; error: any }>((_, reject) =>
+              setTimeout(() => reject(new Error("timeout")), 1500)
+            );
+            const queryPromise = supabase
+              .from("orders")
+              .select("id", { count: "exact", head: true })
+              .eq("business_id", business.id);
+      
+            const res = await Promise.race([queryPromise, timeoutPromise]);
+            if (!res.error && typeof res.count === "number") {
+              count = res.count;
+            }
+          } catch {
+            // Réseau lent ou défaillant -> repli local
+          }
+        }
+      
+        if (count === null) {
+          try {
+            const localOrders = await getAllLocalItems<{ business_id?: string }>("orders");
+            count = localOrders.filter((o) => !o.business_id || o.business_id === business.id).length;
+          } catch {
+            count = 0;
+          }
+        }
+      
         const quota = checkOrderQuota(business, count);
         if (!quota.allowed) {
           setQuotaReason(quota.message || "Limite de 10 commandes atteinte.");
