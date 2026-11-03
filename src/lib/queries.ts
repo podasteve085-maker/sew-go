@@ -785,8 +785,13 @@ export async function fetchPayments(orderId: string): Promise<PaymentRow[]> {
     // ignore
   }
 
-  // 1. Récupérer les paiements locaux enregistrés (IndexedDB)
-  const localPayments = await getAllLocalItems<PaymentRow>("payments");
+  // 1. Récupérer les paiements locaux enregistrés (IndexedDB) — protégé contre tout échec IDB
+  let localPayments: PaymentRow[] = [];
+  try {
+    localPayments = await getAllLocalItems<PaymentRow>("payments");
+  } catch {
+    // IDB indisponible — on continue avec tableau vide
+  }
   const localForOrder = localPayments.filter((p) => p.order_id === orderId);
 
   // 2. Récupérer les paiements encore en file d'attente de synchronisation
@@ -838,18 +843,23 @@ export async function fetchPayments(orderId: string): Promise<PaymentRow[]> {
 }
 
 export async function fetchOrderImages(orderId: string): Promise<OrderImageRow[]> {
-  const businessId = await currentBusinessId();
+  let businessId = "";
+  try {
+    businessId = await currentBusinessId();
+  } catch {
+    // ignore — businessId facultatif pour le filtre
+  }
   const isOnline = typeof navigator === "undefined" || navigator.onLine;
 
   if (isOnline) {
     try {
+      let imgQuery = supabase
+        .from("order_images")
+        .select("*")
+        .eq("order_id", orderId);
+      if (businessId) imgQuery = imgQuery.eq("business_id", businessId);
       const { data, error } = await withSupabaseReadTimeout(
-        supabase
-          .from("order_images")
-          .select("*")
-          .eq("order_id", orderId)
-          .eq("business_id", businessId)
-          .order("created_at", { ascending: true })
+        imgQuery.order("created_at", { ascending: true })
       );
       if (!error && data) {
         const rows = data as unknown as OrderImageRow[];
