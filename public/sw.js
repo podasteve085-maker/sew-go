@@ -10,7 +10,7 @@
  * 5. Données API (Supabase) : Laissées au SyncEngine / IndexedDB client
  */
 
-const CACHE_NAME = "couturpro-v11";
+const CACHE_NAME = "couturpro-v12";
 const IMAGES_CACHE_NAME = "couturpro-images-v1";
 const OFFLINE_FALLBACK = "/offline.html";
 
@@ -43,20 +43,77 @@ function extractAssetUrlsFromHtml(html) {
   const urls = new Set();
   if (!html || typeof html !== "string") return [];
 
-  // Balises script (module ou standard)
-  const scriptRegex = /<script[^>]+src=["'](\/assets\/[^"']+)["']/gi;
+  const assetRegex = /(?:src|href)=["'](\/assets\/[^"']+)["']/gi;
   let match;
-  while ((match = scriptRegex.exec(html)) !== null) {
-    if (match[1]) urls.add(match[1].split("?")[0]);
-  }
-
-  // Balises link stylesheet ou modulepreload
-  const linkRegex = /<link[^>]+href=["'](\/assets\/[^"']+)["']/gi;
-  while ((match = linkRegex.exec(html)) !== null) {
+  while ((match = assetRegex.exec(html)) !== null) {
     if (match[1]) urls.add(match[1].split("?")[0]);
   }
 
   return Array.from(urls);
+}
+
+function extractAssetUrlsFromModule(source, baseUrl) {
+  const urls = new Set();
+  if (!source || typeof source !== "string") return [];
+
+  const referenceRegex = /["']([^"']+\.(?:js|css)(?:\?[^"']*)?)["']/g;
+  const cssAssetRegex = /url\(\s*["']?([^"')]+)["']?\s*\)/g;
+  let match;
+  while ((match = referenceRegex.exec(source)) !== null) {
+    try {
+      const resolved = new URL(match[1], new URL(baseUrl, self.location.origin));
+      if (resolved.origin === self.location.origin && resolved.pathname.startsWith("/assets/")) {
+        urls.add(resolved.pathname + resolved.search);
+      }
+    } catch {
+      // Ignore malformed build references.
+    }
+  }
+  while ((match = cssAssetRegex.exec(source)) !== null) {
+    try {
+      const resolved = new URL(match[1], new URL(baseUrl, self.location.origin));
+      if (resolved.origin === self.location.origin && resolved.pathname.startsWith("/assets/")) {
+        urls.add(resolved.pathname + resolved.search);
+      }
+    } catch {
+      // Ignore malformed build references.
+    }
+  }
+  return Array.from(urls);
+}
+
+async function cacheAssetTree(cache, urls) {
+  const pending = [...new Set(urls)];
+  const visited = new Set();
+
+  while (pending.length > 0) {
+    const requestedUrl = pending.shift();
+    if (!requestedUrl) continue;
+
+    const resolvedUrl = new URL(requestedUrl, self.location.origin);
+    const cacheUrl = resolvedUrl.pathname;
+    if (visited.has(cacheUrl)) continue;
+    visited.add(cacheUrl);
+
+    try {
+      const response = await fetch(resolvedUrl.href, { cache: "default" });
+      if (!response.ok) continue;
+
+      await cache.put(cacheUrl, response.clone());
+      const contentType = response.headers.get("content-type") || "";
+      if (
+        contentType.includes("javascript") ||
+        cacheUrl.endsWith(".js") ||
+        contentType.includes("text/css") ||
+        cacheUrl.endsWith(".css")
+      ) {
+        const dependencies = extractAssetUrlsFromModule(await response.text(), resolvedUrl.href);
+        pending.push(...dependencies);
+      }
+    } catch {
+      // A later online visit can complete the tree.
+    }
+  }
 }
 
 /* ─── Installation : Mise en cache du Shell de base et des Chunks ─ */
@@ -79,18 +136,7 @@ self.addEventListener("install", (event) => {
                 const text = await response.text();
                 const assetUrls = extractAssetUrlsFromHtml(text);
                 if (assetUrls.length > 0) {
-                  await Promise.allSettled(
-                    assetUrls.map(async (assetUrl) => {
-                      try {
-                        const assetRes = await fetch(assetUrl, { cache: "default" });
-                        if (assetRes && assetRes.ok) {
-                          await cache.put(assetUrl, assetRes);
-                        }
-                      } catch {
-                        // ignore asset fetch failure
-                      }
-                    })
-                  );
+                  await cacheAssetTree(cache, assetUrls);
                 }
               }
             }
@@ -129,29 +175,7 @@ self.addEventListener("message", (event) => {
   }
   if (event.data && event.data.type === "PRECACHE_URLS" && Array.isArray(event.data.urls)) {
     event.waitUntil(
-      caches.open(CACHE_NAME).then((cache) =>
-        Promise.allSettled(
-          event.data.urls.map(async (u) => {
-            try {
-              // Normaliser : retirer les query params pour les chunks /assets/
-              const cleanUrl = u.split("?")[0];
-              // Vérifier si déjà en cache (ne pas re-fetcher inutilement)
-              const existing = await cache.match(cleanUrl);
-              if (existing) return;
-              const res = await fetch(u, { cache: "default" });
-              if (res && res.ok) {
-                await cache.put(cleanUrl, res.clone());
-                // Pour les navigations, stocker aussi avec l'URL exacte
-                if (!cleanUrl.startsWith("/assets/")) {
-                  await cache.put(u, res);
-                }
-              }
-            } catch {
-              // ignore — peut être hors-ligne au moment du précache
-            }
-          })
-        )
-      )
+      caches.open(CACHE_NAME).then((cache) => cacheAssetTree(cache, event.data.urls))
     );
   }
 });

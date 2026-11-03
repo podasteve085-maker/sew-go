@@ -74,24 +74,24 @@ export async function syncPendingMutations(): Promise<number> {
         const currentRetries = (item.retryCount || 0) + 1;
         const errMsg = err instanceof Error ? err.message : String(err);
 
-        // Si l'erreur est fatale (clé étrangère absente, entité orpheline, ou > 3 échecs en ligne)
-        // on retire l'élément empoisonné pour ne pas bloquer indéfiniment l'interface et le badge
+        await updateSyncQueueItem({
+          ...item,
+          retryCount: currentRetries,
+          status: "failed",
+          errorMessage: errMsg,
+        });
+
+        // Conserver toute mutation échouée permet une reprise ultérieure sans perte de données.
+        // Arrêter la file maintient l'ordre des dépendances jusqu'à résolution de cette action.
         if (
           currentRetries >= 3 ||
           errMsg.includes("foreign key") ||
           errMsg.includes("Paiement sans business_id") ||
           errMsg.includes("not found")
         ) {
-          console.warn(`[Sync Engine] Action défectueuse retirée de la file : ${item.id} (${item.entity}) :`, errMsg);
-          await removeSyncQueueItem(item.id);
-        } else {
-          await updateSyncQueueItem({
-            ...item,
-            retryCount: currentRetries,
-            status: "failed",
-            errorMessage: errMsg,
-          });
+          console.warn(`[Sync Engine] Action conservée pour reprise : ${item.id} (${item.entity}) :`, errMsg);
         }
+        break;
       }
     }
 
