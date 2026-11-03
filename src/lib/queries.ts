@@ -334,20 +334,6 @@ export async function fetchOrders(opts?: { clientId?: string }): Promise<OrderRo
 
 export async function fetchOrder(id: string): Promise<OrderRow | null> {
   const businessId = await currentBusinessId();
-  const local = await getLocalItem<OrderRow>("orders", id);
-
-  let pendingOrderPayload: Partial<OrderRow> | null = null;
-  try {
-    const queue = await getPendingSyncQueue();
-    const pending = queue.find(
-      (q) => q.entity === "order" && (q.payload?.["id"] === id || q.tempId === id) && q.action !== "delete"
-    );
-    if (pending) {
-      pendingOrderPayload = pending.payload as Partial<OrderRow>;
-    }
-  } catch {
-    // ignore
-  }
 
   if (typeof navigator === "undefined" || navigator.onLine) {
     try {
@@ -358,21 +344,42 @@ export async function fetchOrder(id: string): Promise<OrderRow | null> {
       const { data, error } = await withSupabaseReadTimeout(query.maybeSingle());
       if (!error && data) {
         const order = data as unknown as OrderRow;
-        const merged = pendingOrderPayload && local
-          ? { ...order, ...local, ...pendingOrderPayload }
-          : order;
+        // Overlay pending local changes safely — never block on failure
+        let merged: OrderRow = order;
+        try {
+          const local = await getLocalItem<OrderRow>("orders", id);
+          const queue = await getPendingSyncQueue();
+          const pending = queue.find(
+            (q) =>
+              q.entity === "order" &&
+              (q.payload?.["id"] === id || q.tempId === id) &&
+              q.action !== "delete"
+          );
+          if (pending && local) {
+            merged = { ...order, ...local, ...(pending.payload as Partial<OrderRow>) };
+          }
+        } catch {
+          // overlay is optional — IndexedDB failure must never block online path
+        }
         const [enriched] = await enrichOrdersWithPayments([merged]);
         setLocalItem("orders", enriched || merged).catch(() => {});
         return enriched || merged;
       }
     } catch {
-      // Fallback IndexedDB
+      // Supabase failed — fall through to IndexedDB offline fallback
     }
   }
 
-  if (!local) return null;
-  const [enriched] = await enrichOrdersWithPayments([local]);
-  return enriched || local;
+  // Offline fallback: read from IndexedDB — wrap in try/catch so any IDB error
+  // returns null instead of crashing the route component
+  try {
+    const local = await getLocalItem<OrderRow>("orders", id);
+    if (!local) return null;
+    const [enriched] = await enrichOrdersWithPayments([local]);
+    return enriched || local;
+  } catch {
+    return null;
+  }
 }
 
 export function deduplicateClients(clients: ClientRow[]): ClientRow[] {
