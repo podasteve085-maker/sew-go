@@ -1,4 +1,4 @@
-﻿import { supabase } from "@/integrations/supabase/client";
+import { supabase } from "@/integrations/supabase/client";
 import type { Json } from "@/integrations/supabase/types";
 import type { OrderStatus } from "@/lib/domain";
 import { deleteStorageFiles, materializeStoragePaths, uuid, getSignedUrl, uploadDataUrl } from "@/hooks/use-signed-url";
@@ -12,6 +12,7 @@ import {
   deleteLocalItem,
   addToSyncQueue,
   getPendingSyncQueue,
+  removeSyncQueueItem,
 } from "./offline-storage";
 
 // ─── Helper : timeout strict pour les appels Supabase en écriture ──────────────
@@ -1232,15 +1233,37 @@ export async function fetchCatalogModels(
         if (publicAccess) return serverRows;
 
         const localModels = await getAllLocalItems<CatalogModelRow>("catalog_models");
-        const serverIds = new Set(serverRows.map((m) => m.id));
-        const pendingLocals = localModels.filter(
-          (m) =>
-            m.is_active &&
-            !serverIds.has(m.id) &&
-            !deletingIds.has(m.id) &&
-            (!businessId || m.business_id === businessId || !m.business_id)
+        const pendingItems = await getPendingSyncQueue();
+        const pendingById = new Map<string, CatalogModelRow>();
+        for (const item of pendingItems) {
+          if (item.entity !== "catalog_model" || item.action === "delete") continue;
+          const payload = item.payload as Partial<CatalogModelRow>;
+          const id = typeof payload.id === "string" ? payload.id : item.tempId;
+          if (!id || payload.business_id !== businessId) continue;
+          const local = localModels.find((model) => model.id === id);
+          if (local) pendingById.set(id, { ...local, ...payload, id } as CatalogModelRow);
+        }
+
+        const mergedServerRows = serverRows.map((row) => {
+          const pending = pendingById.get(row.id);
+          if (!pending) return row;
+          pendingById.delete(row.id);
+          return { ...row, ...pending };
+        });
+        const pendingLocals = [
+          ...Array.from(pendingById.values()),
+          ...localModels.filter(
+            (m) =>
+              m.is_active &&
+              !serverRows.some((server) => server.id === m.id) &&
+              !pendingById.has(m.id) &&
+              !deletingIds.has(m.id) &&
+              (!businessId || m.business_id === businessId || !m.business_id),
+          ),
+        ];
+        const combined = [...mergedServerRows, ...pendingLocals].filter(
+          (model) => model.is_active && !deletingIds.has(model.id),
         );
-        const combined = [...serverRows, ...pendingLocals];
         setLocalItems("catalog_models", combined).catch(() => {});
 
         // Pré-cache en arrière-plan des photos du catalogue pour consultation 100% hors-ligne
@@ -1387,10 +1410,34 @@ export async function deleteCatalogModel(id: string): Promise<void> {
   const isOnline = typeof navigator !== "undefined" ? navigator.onLine : true;
   const local = await getLocalItem<CatalogModelRow>("catalog_models", id);
   const localPhotoPaths = local?.photo_paths ?? [];
+  const queuedItems = await getPendingSyncQueue();
+  const pendingCreate = queuedItems.find(
+    (item) =>
+      item.entity === "catalog_model" &&
+      item.action === "create" &&
+      ((item.payload["id"] as string) === id || item.tempId === id),
+  );
+
+  if (pendingCreate) {
+    await deleteLocalItem("catalog_models", id);
+    await removeSyncQueueItem(pendingCreate.id);
+    return;
+  }
 
   async function queueOfflineDelete() {
     await deleteLocalItem("catalog_models", id);
     try {
+      const queued = await getPendingSyncQueue();
+      const pendingCreate = queued.find(
+        (item) =>
+          item.entity === "catalog_model" &&
+          item.action === "create" &&
+          ((item.payload["id"] as string) === id || item.tempId === id),
+      );
+      if (pendingCreate) {
+        await removeSyncQueueItem(pendingCreate.id);
+        return;
+      }
       await addToSyncQueue({
         entity: "catalog_model",
         action: "delete",
