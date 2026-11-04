@@ -225,6 +225,10 @@ export async function addToSyncQueue(
     );
 
     if (existing) {
+      if (existing.action === "create" && item.action === "delete") {
+        await removeSyncQueueItem(existing.id);
+        return existing;
+      }
       const mergedAction =
         existing.action === "create" && item.action === "update" ? "create" : item.action;
       const updatedItem: SyncQueueItem = {
