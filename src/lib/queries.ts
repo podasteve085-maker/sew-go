@@ -1,4 +1,4 @@
-import { supabase } from "@/integrations/supabase/client";
+﻿import { supabase } from "@/integrations/supabase/client";
 import type { Json } from "@/integrations/supabase/types";
 import type { OrderStatus } from "@/lib/domain";
 import { deleteStorageFiles, materializeStoragePaths, uuid, getSignedUrl, uploadDataUrl } from "@/hooks/use-signed-url";
@@ -308,7 +308,14 @@ export async function fetchOrders(opts?: { clientId?: string }): Promise<OrderRo
               && (!opts?.clientId || l.client_id === opts.clientId),
           ),
         );
-        const enriched = await enrichOrdersWithPayments(combined);
+        const pendingOrderDeletes = new Set(
+          queue
+            .filter((q) => q.entity === "order" && q.action === "delete")
+            .map((q) => (q.payload?.["id"] as string) || q.tempId),
+        );
+        const enriched = await enrichOrdersWithPayments(
+          combined.filter((o) => !pendingOrderDeletes.has(o.id)),
+        );
         // Ne pas écraser tout le store quand on filtre par clientId
         if (!opts?.clientId) {
           setLocalItems("orders", enriched).catch(() => {});
@@ -454,7 +461,14 @@ export async function fetchClients(term?: string): Promise<ClientRow[]> {
           }
           return serverItem;
         });
-        const combined = deduplicateClients([...mergedServerRows, ...pendingLocals]);
+        const pendingClientDeletes = new Set(
+          queue
+            .filter((q) => q.entity === "client" && q.action === "delete")
+            .map((q) => (q.payload?.["id"] as string) || q.tempId),
+        );
+        const combined = deduplicateClients([...mergedServerRows, ...pendingLocals]).filter(
+          (c) => !pendingClientDeletes.has(c.id),
+        );
         setLocalItems("clients", combined).catch(() => {});
 
 
@@ -699,8 +713,14 @@ export async function fetchMeasurementSets(clientId: string): Promise<Measuremen
           ...localSets.filter((l) => l.client_id === clientId && !serverIds.has(l.id)),
         );
         // Ne pas écraser tout le store quand on filtre par clientId
-        combined.forEach((set) => setLocalItem("measurement_sets", set).catch(() => {}));
-        return combined;
+        const pendingSetDeletes = new Set(
+          queue
+            .filter((q) => q.entity === "measurement_set" && q.action === "delete")
+            .map((q) => (q.payload?.["id"] as string) || q.tempId),
+        );
+        const visibleSets = combined.filter((s) => !pendingSetDeletes.has(s.id));
+        visibleSets.forEach((set) => setLocalItem("measurement_sets", set).catch(() => {}));
+        return visibleSets;
       }
     } catch {
       // Fallback IndexedDB
@@ -2419,20 +2439,25 @@ export async function deleteClientCascade(clientId: string, businessId?: string)
 
     // 6. Suppression applicative
     if (orderIds.length > 0) {
-      await supabase.from("order_images").delete().in("order_id", orderIds);
-      await supabase.from("payments").delete().in("order_id", orderIds);
+      const { error: imgErr } = await supabase.from("order_images").delete().in("order_id", orderIds);
+      if (imgErr) throw imgErr;
+      const { error: payErr } = await supabase.from("payments").delete().in("order_id", orderIds);
+      if (payErr) throw payErr;
     }
     let ordDel = supabase.from("orders").delete().eq("client_id", clientId);
     if (businessId) ordDel = ordDel.eq("business_id", businessId);
-    await ordDel;
+    const { error: ordErr } = await ordDel;
+    if (ordErr) throw ordErr;
 
     let setsDel = supabase.from("measurement_sets").delete().eq("client_id", clientId);
     if (businessId) setsDel = setsDel.eq("business_id", businessId);
-    await setsDel;
+    const { error: setsErr } = await setsDel;
+    if (setsErr) throw setsErr;
 
     let clientDel = supabase.from("clients").delete().eq("id", clientId);
     if (businessId) clientDel = clientDel.eq("business_id", businessId);
-    await clientDel;
+    const { error: clientErr } = await clientDel;
+    if (clientErr) throw clientErr;
   } catch {
     // Si la suppression échoue côté réseau, planifier la suppression dans la file
     await addToSyncQueue({
@@ -2473,12 +2498,15 @@ export async function deleteOrderCascade(orderId: string, businessId?: string) {
       await deleteStorageFiles(photoPaths);
     }
 
-    await supabase.from("order_images").delete().eq("order_id", orderId);
-    await supabase.from("payments").delete().eq("order_id", orderId);
+    const { error: orderImgErr } = await supabase.from("order_images").delete().eq("order_id", orderId);
+    if (orderImgErr) throw orderImgErr;
+    const { error: orderPayErr } = await supabase.from("payments").delete().eq("order_id", orderId);
+    if (orderPayErr) throw orderPayErr;
 
     let orderDel = supabase.from("orders").delete().eq("id", orderId);
     if (businessId) orderDel = orderDel.eq("business_id", businessId);
-    await orderDel;
+    const { error: orderDelErr } = await orderDel;
+    if (orderDelErr) throw orderDelErr;
   } catch {
     await addToSyncQueue({
       entity: "order",
@@ -2507,7 +2535,8 @@ export async function deleteMeasurementSetCascade(setId: string, businessId?: st
   try {
     let query = supabase.from("measurement_sets").delete().eq("id", setId);
     if (businessId) query = query.eq("business_id", businessId);
-    await query;
+    const { error: setErr } = await query;
+    if (setErr) throw setErr;
   } catch {
     await addToSyncQueue({
       entity: "measurement_set",
