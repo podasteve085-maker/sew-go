@@ -91,7 +91,6 @@ export async function syncPendingMutations(): Promise<number> {
         ) {
           console.warn(`[Sync Engine] Action conservée pour reprise : ${item.id} (${item.entity}) :`, errMsg);
         }
-        break;
       }
     }
 

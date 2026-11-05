@@ -1,4 +1,4 @@
-﻿import { supabase } from "@/integrations/supabase/client";
+import { supabase } from "@/integrations/supabase/client";
 import type { Json } from "@/integrations/supabase/types";
 import type { OrderStatus } from "@/lib/domain";
 import { deleteStorageFiles, materializeStoragePaths, uuid, getSignedUrl, uploadDataUrl } from "@/hooks/use-signed-url";
@@ -1859,9 +1859,10 @@ export async function saveOrderOffline(
           const currentIdx = STATUS_ORDER.indexOf(currentStatus);
           if (currentIdx >= 0 && targetIdx > currentIdx + 1) {
             for (let step = currentIdx + 1; step <= targetIdx; step++) {
-              await withSupabaseTimeout(
+              const { error: stepError } = await withSupabaseTimeout(
                 supabase.from("orders").update({ status: STATUS_ORDER[step] }).eq("id", existingId)
               );
+              if (stepError) throw stepError;
             }
           }
         }
