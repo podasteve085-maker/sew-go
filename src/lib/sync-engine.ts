@@ -48,12 +48,24 @@ export function registerQueryInvalidator(fn: () => void) {
  * Exécution séquentielle FIFO pour respecter l'ordre des créations (Client -> Commande -> Paiement).
  */
 export async function syncPendingMutations(): Promise<number> {
-  if (typeof window === "undefined" || isSyncing) return 0;
+  if (typeof window === "undefined") return 0;
   if (!navigator.onLine) return 0;
 
-  const queue = await getPendingSyncQueue();
-  if (queue.length === 0) return 0;
+  // Web Locks also prevents a second open tab from replaying the same queue.
+  // The local flag below remains the fallback for browsers without this API.
+  if (navigator.locks) {
+    return navigator.locks.request(
+      "couturpro-offline-sync",
+      { mode: "exclusive", ifAvailable: true },
+      (lock) => (lock ? runPendingSync() : Promise.resolve(0)),
+    );
+  }
 
+  return runPendingSync();
+}
+
+async function runPendingSync(): Promise<number> {
+  if (typeof window === "undefined" || isSyncing || !navigator.onLine) return 0;
   isSyncing = true;
   notifyListeners();
 
@@ -61,6 +73,11 @@ export async function syncPendingMutations(): Promise<number> {
   let syncedCount = 0;
 
   try {
+    // Acquire the in-tab guard before the first await so two callers cannot
+    // both read and replay the same queue at once.
+    const queue = await getPendingSyncQueue();
+    if (queue.length === 0) return 0;
+
     for (const item of queue) {
       try {
         await processSyncItem(item, idMapping);
@@ -524,7 +541,9 @@ async function processSyncItem(
           const saved = parseCatalogRpcPayload(rpc.data);
           const savedId = typeof saved?.["id"] === "string" ? saved["id"] : targetId;
           if (id && savedId && id !== savedId) idMapping.set(id, savedId);
-          if (saved) await setLocalItem("catalog_models", saved);
+          if (saved && savedId) {
+            await setLocalItem("catalog_models", { ...saved, id: savedId });
+          }
           if (id && id.startsWith("temp_")) {
             await deleteLocalItem("catalog_models", id);
           }

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link } from "@tanstack/react-router";
 import { useQueryClient } from "@tanstack/react-query";
 import {
@@ -25,7 +25,12 @@ import {
   dismissAllNotificationIds,
   getStableNotificationId,
 } from "@/lib/notifications";
-import { waLink, cleanPhone, addDays, dateFr, today } from "@/lib/format";
+import {
+  enableBackgroundPush,
+  hasSavedBackgroundPush,
+  isBackgroundPushAvailable,
+} from "@/lib/push-notifications";
+import { waLink, cleanPhone, dateFr, today } from "@/lib/format";
 import { saveOrderOffline, saveAppointmentOffline } from "@/lib/queries";
 import {
   Popover,
@@ -36,13 +41,43 @@ import { Button } from "@/components/ui/button";
 
 interface NotificationCenterProps {
   notifications: AppNotification[];
+  businessId?: string | undefined;
   onRefresh?: () => void;
 }
 
-export function NotificationCenter({ notifications, onRefresh }: NotificationCenterProps) {
+function addCalendarDays(dateString: string, amount: number): string {
+  const date = new Date(`${dateString}T12:00:00.000Z`);
+  if (!Number.isFinite(date.getTime())) throw new Error("Date de rappel invalide.");
+  date.setUTCDate(date.getUTCDate() + amount);
+  return date.toISOString().slice(0, 10);
+}
+
+export function NotificationCenter({
+  notifications,
+  businessId,
+  onRefresh,
+}: NotificationCenterProps) {
   const [open, setOpen] = useState(false);
   const [permission, setPermission] = useState(getNotificationPermission());
+  const [pushEnabled, setPushEnabled] = useState(false);
   const queryClient = useQueryClient();
+  const canUseBackgroundPush = isBackgroundPushAvailable();
+
+  useEffect(() => {
+    let active = true;
+    if (!businessId || !canUseBackgroundPush) {
+      setPushEnabled(false);
+      return;
+    }
+
+    hasSavedBackgroundPush(businessId).then((saved) => {
+      if (active) setPushEnabled(saved);
+    });
+
+    return () => {
+      active = false;
+    };
+  }, [businessId, canUseBackgroundPush]);
 
   const todayItems = notifications.filter((n) => n.timing === "today");
   const tomorrowItems = notifications.filter((n) => n.timing === "tomorrow");
@@ -50,12 +85,29 @@ export function NotificationCenter({ notifications, onRefresh }: NotificationCen
   const totalCount = notifications.length;
 
   const handleRequestPermission = async () => {
-    const granted = await requestNotificationPermission();
+    const granted =
+      permission === "granted" || (await requestNotificationPermission());
     setPermission(granted ? "granted" : "denied");
-    if (granted) {
-      toast.success("Notifications du téléphone activées ! Vous recevrez les rappels le Jour J et la veille.");
-    } else {
+    if (!granted) {
       toast.error("Autorisation refusée par le navigateur. Activez les notifications dans les paramètres de votre téléphone.");
+      return;
+    }
+
+    if (canUseBackgroundPush) {
+      try {
+        if (!businessId) throw new Error("Atelier introuvable. Reconnectez-vous puis réessayez.");
+        await enableBackgroundPush(businessId);
+        setPushEnabled(true);
+        toast.success("Rappels activés sur cet appareil, même lorsque l’application est fermée.");
+      } catch (error) {
+        const message =
+          error instanceof Error ? error.message : "Impossible d’activer les rappels en arrière-plan.";
+        toast.error(message);
+      }
+    } else {
+      toast.success(
+        "Notifications locales activées. Les rappels quand l’application est fermée nécessitent aussi la configuration push du serveur.",
+      );
     }
   };
 
@@ -96,7 +148,7 @@ export function NotificationCenter({ notifications, onRefresh }: NotificationCen
     try {
       // Si la date est déjà passée, on prolonge à partir d'aujourd'hui
       const baseDate = item.targetDate < today() ? today() : item.targetDate;
-      const nextDate = addDays(daysToAdd, new Date(baseDate));
+      const nextDate = addCalendarDays(baseDate, daysToAdd);
 
       if (item.category === "order_delivery") {
         await saveOrderOffline({ due_date: nextDate }, false, item.referenceId);
@@ -166,7 +218,8 @@ export function NotificationCenter({ notifications, onRefresh }: NotificationCen
               </Button>
             )}
 
-            {permission !== "granted" && permission !== "unsupported" && (
+            {permission !== "unsupported" &&
+              (permission !== "granted" || (canUseBackgroundPush && !pushEnabled)) && (
               <Button
                 size="sm"
                 variant="outline"
@@ -174,11 +227,28 @@ export function NotificationCenter({ notifications, onRefresh }: NotificationCen
                 className="h-7 text-[11px] font-bold border-primary/40 text-primary hover:bg-primary/10 gap-1 rounded-lg px-2"
               >
                 <Volume2 className="size-3" />
-                <span>Activer sonnerie</span>
+                <span>
+                  {permission === "granted"
+                    ? "Synchroniser cet appareil"
+                    : canUseBackgroundPush
+                      ? "Activer rappels hors application"
+                      : "Activer sonnerie"}
+                </span>
               </Button>
             )}
           </div>
         </div>
+
+        {canUseBackgroundPush && pushEnabled && (
+          <p className="border-b border-border/60 px-4 py-2 text-[11px] text-emerald-700 dark:text-emerald-400">
+            Les rappels hors application sont activés sur cet appareil.
+          </p>
+        )}
+        {!canUseBackgroundPush && (
+          <p className="border-b border-border/60 px-4 py-2 text-[11px] text-muted-foreground">
+            Les rappels quand l’application est fermée nécessitent la configuration du service push.
+          </p>
+        )}
 
         {/* Corps des alertes */}
         <div className="max-h-[68vh] overflow-y-auto p-3 space-y-4 divide-y divide-border/60">

@@ -14,6 +14,7 @@ import {
   getPendingSyncQueue,
   removeSyncQueueItem,
 } from "./offline-storage";
+import { reconcileAppointmentRows } from "./appointment-reconciliation";
 
 // ─── Helper : timeout strict pour les appels Supabase en écriture ──────────────
 // Garantit que les mutations ne pendent jamais plus de 3 secondes.
@@ -22,9 +23,9 @@ const SUPABASE_WRITE_TIMEOUT_MS = 3000;
 
 const SUPABASE_READ_TIMEOUT_MS = 2500;
 
-async function withSupabaseReadTimeout<T>(promise: Promise<T>): Promise<T> {
+async function withSupabaseReadTimeout<T>(promise: PromiseLike<T>): Promise<T> {
   return Promise.race([
-    promise,
+    Promise.resolve(promise),
     new Promise<T>((_, reject) =>
       setTimeout(
         () => reject(new Error("supabase_read_timeout")),
@@ -34,9 +35,9 @@ async function withSupabaseReadTimeout<T>(promise: Promise<T>): Promise<T> {
   ]);
 }
 
-async function withSupabaseTimeout<T>(promise: Promise<T>): Promise<T> {
+async function withSupabaseTimeout<T>(promise: PromiseLike<T>): Promise<T> {
   return Promise.race([
-    promise,
+    Promise.resolve(promise),
     new Promise<T>((_, reject) =>
       setTimeout(
         () => reject(new Error("supabase_timeout")),
@@ -171,12 +172,15 @@ export type OrderRow = {
 
 export type AppointmentRow = {
   id: string;
+  business_id?: string;
   client_id: string | null;
   scheduled_date: string;
   scheduled_time: string | null;
   type: string;
   status: string;
   notes: string | null;
+  created_at?: string;
+  updated_at?: string;
   clients?: Pick<ClientRow, "first_name" | "last_name" | "phone" | "whatsapp"> | null;
 };
 
@@ -753,35 +757,24 @@ export async function fetchAppointments(opts?: { clientId?: string }): Promise<A
         const rows = data as unknown as AppointmentRow[];
         const localAppts = await getAllLocalItems<AppointmentRow>("appointments");
         const queue = await getPendingSyncQueue();
-        const pendingQueueMap = new Map<string, Record<string, unknown>>();
-        for (const q of queue) {
-          if (q.entity === "appointment" && q.action !== "delete") {
-            const qId = (q.payload?.["id"] as string) || q.tempId;
-            if (qId) pendingQueueMap.set(qId, q.payload);
-          }
-        }
-        const localById = new Map(localAppts.map((appointment) => [appointment.id, appointment]));
-        const combined = rows.map((row) => {
-          if (pendingQueueMap.has(row.id)) {
-            const local = localById.get(row.id) ?? row;
-            return { ...row, ...local, ...pendingQueueMap.get(row.id) };
-          }
-          return row;
-        });
-        const serverIds = new Set(rows.map((r) => r.id));
-        combined.push(
-          ...localAppts.filter(
-            (l) => !serverIds.has(l.id)
-              && (!businessId || l.business_id === businessId || !l.business_id)
-              && (!opts?.clientId || l.client_id === opts.clientId),
-          ),
+        const matchingLocalAppointments = localAppts.filter(
+          (appointment) =>
+            (!businessId ||
+              appointment.business_id === businessId ||
+              !appointment.business_id) &&
+            (!opts?.clientId || appointment.client_id === opts.clientId),
+        );
+        const combined = reconcileAppointmentRows(
+          rows,
+          matchingLocalAppointments,
+          queue,
         );
         const enriched = await enrichAppointmentsWithClients(combined);
         // Ne pas écraser tout le store quand on filtre par clientId
         if (!opts?.clientId) {
-          setLocalItems("appointments", enriched).catch(() => {});
+          await setLocalItems("appointments", enriched).catch(() => {});
         } else {
-          enriched.forEach((appt) => setLocalItem("appointments", appt).catch(() => {}));
+          await Promise.all(enriched.map((appt) => setLocalItem("appointments", appt).catch(() => {})));
         }
         return enriched;
       }
@@ -1879,8 +1872,10 @@ export async function saveOrderOffline(
           const currentIdx = STATUS_ORDER.indexOf(currentStatus);
           if (currentIdx >= 0 && targetIdx > currentIdx + 1) {
             for (let step = currentIdx + 1; step <= targetIdx; step++) {
+                const nextStatus = STATUS_ORDER[step];
+                if (!nextStatus) throw new Error("Statut de commande invalide.");
               const { error: stepError } = await withSupabaseTimeout(
-                supabase.from("orders").update({ status: STATUS_ORDER[step] }).eq("id", existingId)
+                  supabase.from("orders").update({ status: nextStatus }).eq("id", existingId),
               );
               if (stepError) throw stepError;
             }
@@ -2242,6 +2237,7 @@ export async function saveAppointmentOffline(
     notes: (data["notes"] as string | null) ?? existingAppt?.notes ?? null,
     status: (data["status"] as string) || existingAppt?.status || "prevu",
     created_at: existingAppt?.created_at || new Date().toISOString(),
+    updated_at: new Date().toISOString(),
     clients: clientInfo,
   };
 
@@ -2283,31 +2279,35 @@ export async function saveAppointmentOffline(
   }
 
   // Ne jamais throw ici : la sauvegarde locale a déjà réussi
-  try {
-    await addToSyncQueue({
-      entity: "appointment",
-      action: isNew ? "create" : "update",
-      payload: {
-        id: apptId,
-        business_id: businessId,
-        client_id: clientId,
-        scheduled_date: localAppt.scheduled_date,
-        scheduled_time: localAppt.scheduled_time,
-        type: localAppt.type,
-        notes: localAppt.notes,
-        status: localAppt.status,
-      },
-      tempId: apptId,
-    });
-  } catch { /* ignore */ }
+  await addToSyncQueue({
+    entity: "appointment",
+    action: isNew ? "create" : "update",
+    payload: {
+      id: apptId,
+      business_id: businessId,
+      client_id: clientId,
+      scheduled_date: localAppt.scheduled_date,
+      scheduled_time: localAppt.scheduled_time,
+      type: localAppt.type,
+      notes: localAppt.notes,
+      status: localAppt.status,
+    },
+    tempId: apptId,
+  });
 
   return localAppt;
 }
 
-export async function updateAppointmentStatusOffline(id: string, status: string): Promise<void> {
+export async function updateAppointmentStatusOffline(
+  id: string,
+  status: string,
+  fallback?: AppointmentRow,
+): Promise<void> {
   const isOnline = typeof navigator !== "undefined" ? navigator.onLine : true;
-  const existing = await getLocalItem<AppointmentRow>("appointments", id);
-  const updated = existing ? { ...existing, status } : null;
+  const existing = (await getLocalItem<AppointmentRow>("appointments", id)) ?? fallback ?? null;
+  const updated = existing
+    ? { ...existing, status, updated_at: new Date().toISOString() }
+    : null;
   if (updated) {
     await setLocalItem("appointments", updated);
   }
@@ -2316,27 +2316,33 @@ export async function updateAppointmentStatusOffline(id: string, status: string)
 
   if (isOnline && businessId) {
     try {
-      const { error } = await withSupabaseTimeout(
+      const { data, error } = await withSupabaseTimeout(
         supabase
           .from("appointments")
           .update({ status })
           .eq("id", id)
           .eq("business_id", businessId)
+          .select("*, clients(first_name, last_name, phone, whatsapp)")
+          .single()
       );
-      if (!error) return;
+      if (!error && data) {
+        await setLocalItem("appointments", {
+          ...(data as unknown as AppointmentRow),
+          clients: (data as unknown as AppointmentRow).clients ?? updated?.clients ?? null,
+        });
+        return;
+      }
     } catch {
       // Fallback
     }
   }
 
-  try {
-    await addToSyncQueue({
-      entity: "appointment",
-      action: "update",
-      payload: updated || { id, business_id: businessId, status },
-      tempId: id,
-    });
-  } catch { /* ignore */ }
+  await addToSyncQueue({
+    entity: "appointment",
+    action: "update",
+    payload: updated || { id, business_id: businessId, status },
+    tempId: id,
+  });
 }
 
 export async function deleteAppointmentOffline(id: string): Promise<void> {
@@ -2361,14 +2367,12 @@ export async function deleteAppointmentOffline(id: string): Promise<void> {
     }
   }
 
-  try {
-    await addToSyncQueue({
-      entity: "appointment",
-      action: "delete",
-      payload: { id, business_id: businessId },
-      tempId: id,
-    });
-  } catch { /* ignore */ }
+  await addToSyncQueue({
+    entity: "appointment",
+    action: "delete",
+    payload: { id, business_id: businessId },
+    tempId: id,
+  });
 }
 
 // ============================================================

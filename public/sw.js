@@ -389,10 +389,58 @@ self.addEventListener("fetch", (event) => {
   );
 });
 
-/* ─── D. GESTION DES NOTIFICATIONS SYSTÈME (Rappels RDV & Livraisons) ── */
+/* ─── D. Réception des notifications push en arrière-plan ─────────── */
+self.addEventListener("push", (event) => {
+  event.waitUntil(
+    (async () => {
+      let payload = {};
+      try {
+        const parsed = event.data ? event.data.json() : {};
+        payload = parsed && typeof parsed === "object" ? parsed : {};
+      } catch {
+        payload = { body: event.data?.text() || "" };
+      }
+
+      const requestedUrl =
+        typeof payload.url === "string" && payload.url.startsWith("/")
+          ? payload.url
+          : "/dashboard";
+      const target = new URL(requestedUrl, self.location.origin);
+      const safeUrl = target.origin === self.location.origin
+        ? `${target.pathname}${target.search}${target.hash}`
+        : "/dashboard";
+
+      await self.registration.showNotification(
+        typeof payload.title === "string" ? payload.title : "Rappel — Sew & Go",
+        {
+          body: typeof payload.body === "string" ? payload.body : "Vous avez un rappel pour votre atelier.",
+          icon: "/icon-192.png",
+          badge: "/icon-192.png",
+          tag: typeof payload.tag === "string" ? payload.tag : undefined,
+          renotify: false,
+          data: { url: safeUrl },
+        },
+      );
+    })(),
+  );
+});
+
+/* ─── E. Ouverture sécurisée des notifications système ────────────── */
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();
-  const targetUrl = event.notification.data?.url || "/dashboard";
+  let targetUrl = "/dashboard";
+  try {
+    const requestedUrl = event.notification.data?.url;
+    const target = new URL(
+      typeof requestedUrl === "string" ? requestedUrl : "/dashboard",
+      self.location.origin,
+    );
+    if (target.origin === self.location.origin) {
+      targetUrl = `${target.pathname}${target.search}${target.hash}`;
+    }
+  } catch {
+    // Keep the dashboard as a safe fallback for malformed notification data.
+  }
 
   event.waitUntil(
     self.clients

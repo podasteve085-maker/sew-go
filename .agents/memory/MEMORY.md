@@ -1,0 +1,1 @@
+- [TanStack runtime compatibility](tanstack-runtime-compatibility.md) — keep Start, router, and plugin versions aligned; this project’s verified build requires Node 22.

@@ -77,6 +77,17 @@ export function getStableNotificationId(notification: Pick<AppNotification, "cat
   return `${notification.category}-${notification.referenceId}`;
 }
 
+/**
+ * The same reminder gets the same system-notification tag in the app and in
+ * server push. Browsers replace an existing notification with that tag rather
+ * than showing duplicate banners.
+ */
+export function getNotificationTag(
+  notification: Pick<AppNotification, "category" | "referenceId" | "targetDate" | "timing">,
+): string {
+  return `sewgo-${notification.category}-${notification.referenceId}-${notification.targetDate}-${notification.timing}`;
+}
+
 export interface WhatsAppReminderParams {
   id?: string;
   type: "appointment" | "delivery";
@@ -129,12 +140,12 @@ export function getTodayStr(): string {
   return `${year}-${month}-${day}`;
 }
 
-export function getTomorrowStr(): string {
-  const d = new Date();
-  d.setDate(d.getDate() + 1);
-  const year = d.getFullYear();
-  const month = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
+export function getTomorrowStr(baseDate: string = getTodayStr()): string {
+  const d = new Date(`${baseDate}T12:00:00.000Z`);
+  d.setUTCDate(d.getUTCDate() + 1);
+  const year = d.getUTCFullYear();
+  const month = String(d.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(d.getUTCDate()).padStart(2, "0");
   return `${year}-${month}-${day}`;
 }
 
@@ -144,9 +155,10 @@ export function generateReminders(
   appointments: AppointmentRow[] = [],
   orders: OrderRow[] = [],
   atelierName: string = "Notre atelier",
+  currentDate: string = getTodayStr(),
 ): AppNotification[] {
-  const todayStr = getTodayStr();
-  const tomorrowStr = getTomorrowStr();
+  const todayStr = currentDate;
+  const tomorrowStr = getTomorrowStr(currentDate);
   const dismissed = getDismissedNotifIds();
   const isDismissed = (notification: Pick<AppNotification, "id" | "category" | "referenceId">) =>
     dismissed.has(notification.id) || dismissed.has(getStableNotificationId(notification));
@@ -216,7 +228,7 @@ export function generateReminders(
     const cName = o.clients ? fullName(o.clients) : "Client";
     const cPhone = o.clients?.phone || null;
     const cWa = o.clients?.whatsapp || cPhone;
-    const refOrder = o.code || o.order_number ? `#${o.code || o.order_number}` : "";
+    const refOrder = o.reference ? `#${o.reference}` : "";
     const garmentDesc = o.description || "Confection sur mesure";
 
     // A. Livraison AUJOURD'HUI (Jour J)
@@ -333,7 +345,8 @@ function markNotifAsSent(notifId: string): void {
     // Nettoyer les clés de plus de 7 jours
     const now = Date.now();
     for (const k of Object.keys(sent)) {
-      if (now - sent[k] > 7 * 24 * 3600 * 1000) {
+      const sentAt = sent[k];
+      if (sentAt !== undefined && now - sentAt > 7 * 24 * 3600 * 1000) {
         delete sent[k];
       }
     }
@@ -368,7 +381,7 @@ export async function sendNativeNotification(notif: AppNotification): Promise<bo
           icon: "/icon-192.png",
           badge: "/icon-192.png",
           data: { url: notif.linkUrl },
-          tag: notif.id,
+          tag: getNotificationTag(notif),
         });
         markNotifAsSent(notif.id);
         return true;
@@ -379,7 +392,7 @@ export async function sendNativeNotification(notif: AppNotification): Promise<bo
     new Notification(notif.title, {
       body: notif.body,
       icon: "/icon-192.png",
-      tag: notif.id,
+      tag: getNotificationTag(notif),
     });
     markNotifAsSent(notif.id);
     return true;
@@ -428,7 +441,7 @@ export async function scheduleBackgroundReminders(reminders: AppNotification[]):
         icon: "/icon-192.png",
         badge: "/icon-192.png",
         data: { url: reminder.linkUrl },
-        tag: `scheduled-${getStableNotificationId(reminder)}`,
+        tag: getNotificationTag(reminder),
         showTrigger: new Trigger(timestamp),
       } as NotificationOptions & { showTrigger: { timestamp: number } });
     }

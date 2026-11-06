@@ -101,8 +101,16 @@ function AppointmentsPage() {
   }, [appointments.data, filter]);
 
   const update = useMutation({
-    mutationFn: async ({ id, status }: { id: string; status: string }) => {
-      await updateAppointmentStatusOffline(id, status);
+    mutationFn: async ({
+      id,
+      status,
+      appointment,
+    }: {
+      id: string;
+      status: string;
+      appointment: AppointmentRow;
+    }) => {
+      await updateAppointmentStatusOffline(id, status, appointment);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["appointments"] });
@@ -285,7 +293,7 @@ function AppointmentsPage() {
                               setUpgradeOpen(true);
                               return;
                             }
-                            update.mutate({ id: a.id, status: "honore" });
+                            update.mutate({ id: a.id, status: "honore", appointment: a });
                           }}
                         >
                           <Check className="mr-1 size-3.5" /> Honoré
@@ -300,7 +308,7 @@ function AppointmentsPage() {
                               setUpgradeOpen(true);
                               return;
                             }
-                            update.mutate({ id: a.id, status: "prevu" });
+                            update.mutate({ id: a.id, status: "prevu", appointment: a });
                           }}
                         >
                           Repasser en prévu
@@ -317,7 +325,7 @@ function AppointmentsPage() {
                               setUpgradeOpen(true);
                               return;
                             }
-                            update.mutate({ id: a.id, status: "annule" });
+                            update.mutate({ id: a.id, status: "annule", appointment: a });
                           }}
                           aria-label="Annuler le rendez-vous"
                           title="Marquer comme annulé"

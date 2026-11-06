@@ -400,7 +400,11 @@ export function AppShell({ children }: { children: ReactNode }) {
 
             {/* Centre de Notifications & Rappels Jour J & Veille */}
             <div className="shrink-0 flex items-center">
-              <NotificationCenter notifications={notifications} onRefresh={refetchNotifs} />
+              <NotificationCenter
+                notifications={notifications}
+                businessId={business?.id}
+                onRefresh={refetchNotifs}
+              />
             </div>
 
             {/* Bascule Thème Clair / Sombre / Auto TOUJOURS VISIBLE */}

@@ -2,10 +2,10 @@ import { useMemo, useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { fetchAppointments, fetchOrders } from "@/lib/queries";
 import { useBusiness } from "@/hooks/use-business";
+import { getTodayStr } from "@/lib/notifications";
 import {
   generateReminders,
   dispatchScheduledReminders,
-  scheduleBackgroundReminders,
   type AppNotification,
 } from "@/lib/notifications";
 
@@ -29,19 +29,43 @@ export function useNotifications() {
   const atelierName = business?.name ?? "Notre atelier";
 
   const [refreshKey, setRefreshKey] = useState(0);
+  const [calendarDate, setCalendarDate] = useState(getTodayStr);
 
-  // Calcul instantané des rappels (Jour J, Veille, Retards)
+  // Recompute date-sensitive reminders when the local calendar day changes.
   const notifications: AppNotification[] = useMemo(() => {
-    return generateReminders(appointments, orders, atelierName);
-  }, [appointments, orders, atelierName, refreshKey]);
+    return generateReminders(appointments, orders, atelierName, calendarDate);
+    // localStorage dismissals are outside query data; refreshKey invalidates that derived list.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [appointments, orders, atelierName, calendarDate, refreshKey]);
 
   // Déclenchement automatique des notifications système (bannière push téléphone)
   useEffect(() => {
     if (notifications.length > 0) {
       dispatchScheduledReminders(notifications).catch(() => {});
-      scheduleBackgroundReminders(notifications).catch(() => {});
     }
   }, [notifications]);
+
+  // Recalculates day-before/day-of reminders at midnight and when the app returns
+  // from the background. The server push job remains responsible while it is closed.
+  useEffect(() => {
+    const checkCalendarDate = () => {
+      const currentDate = getTodayStr();
+      setCalendarDate((previousDate) =>
+        previousDate === currentDate ? previousDate : currentDate,
+      );
+    };
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") checkCalendarDate();
+    };
+    const timer = window.setInterval(checkCalendarDate, 60_000);
+    window.addEventListener("focus", checkCalendarDate);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener("focus", checkCalendarDate);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
+  }, []);
 
   const todayCount = notifications.filter((n) => n.timing === "today").length;
   const tomorrowCount = notifications.filter((n) => n.timing === "tomorrow").length;

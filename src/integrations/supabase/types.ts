@@ -556,6 +556,95 @@ export type Database = {
           },
         ]
       }
+      push_notification_deliveries: {
+        Row: {
+          attempts: number
+          business_id: string
+          created_at: string
+          due_date: string
+          event_key: string
+          last_error: string | null
+          resource_id: string
+          resource_type: string
+          sent_at: string | null
+          status: string
+          subscription_id: string
+          timing: string
+          updated_at: string
+        }
+        Insert: {
+          attempts?: number
+          business_id: string
+          created_at?: string
+          due_date: string
+          event_key: string
+          last_error?: string | null
+          resource_id: string
+          resource_type: string
+          sent_at?: string | null
+          status?: string
+          subscription_id: string
+          timing: string
+          updated_at?: string
+        }
+        Update: {
+          attempts?: number
+          business_id?: string
+          created_at?: string
+          due_date?: string
+          event_key?: string
+          last_error?: string | null
+          resource_id?: string
+          resource_type?: string
+          sent_at?: string | null
+          status?: string
+          subscription_id?: string
+          timing?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      push_subscriptions: {
+        Row: {
+          auth: string
+          business_id: string
+          created_at: string
+          endpoint: string
+          expiration_time: string | null
+          id: string
+          p256dh: string
+          updated_at: string
+        }
+        Insert: {
+          auth: string
+          business_id: string
+          created_at?: string
+          endpoint: string
+          expiration_time?: string | null
+          id?: string
+          p256dh: string
+          updated_at?: string
+        }
+        Update: {
+          auth?: string
+          business_id?: string
+          created_at?: string
+          endpoint?: string
+          expiration_time?: string | null
+          id?: string
+          p256dh?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "push_subscriptions_business_id_fkey"
+            columns: ["business_id"]
+            isOneToOne: false
+            referencedRelation: "businesses"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       profiles: {
         Row: {
           created_at: string
@@ -606,6 +695,18 @@ export type Database = {
       save_catalog_model: {
         Args: { p_model: Json }
         Returns: Json
+      }
+      claim_push_notification: {
+        Args: {
+          p_business_id: string
+          p_due_date: string
+          p_event_key: string
+          p_resource_id: string
+          p_resource_type: string
+          p_subscription_id: string
+          p_timing: string
+        }
+        Returns: boolean
       }
     }
     Enums: {
