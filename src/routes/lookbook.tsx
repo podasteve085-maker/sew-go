@@ -41,8 +41,8 @@ export const Route = createFileRoute("/lookbook")({
     price: typeof search["price"] === "string" ? search["price"] : undefined,
     fabric: typeof search["fabric"] === "string" ? search["fabric"] : undefined,
     desc: typeof search["desc"] === "string" ? search["desc"] : undefined,
-    atelier: typeof search["atelier"] === "string" ? search["atelier"] : undefined,
-    phone: typeof search["phone"] === "string" ? search["phone"] : undefined,
+    // ⚠️ P0-2 : "atelier" et "phone" retirés — hameçonnage visuel via URL.
+    // Le nom et le contact de l'atelier viennent exclusivement du serveur (RPC/vue).
   }),
   component: PublicLookbookPage,
 });
@@ -64,8 +64,8 @@ function PublicLookbookPage() {
     queryKey: ["public-atelier", atelierId],
     queryFn: async () => {
       if (!atelierId) return null;
-      const columns = "id, name, phone, whatsapp, address, city, currency, logo_url";
-      // 1. Appel via la fonction RPC sécurisée et scopée par identifiant strict
+      // P0-1 : colonnes vitrine uniquement — pas de phone/whatsapp/address
+      // 1. RPC sécurisée (SECURITY DEFINER, retourne id/name/city/currency/logo_url)
       try {
         const { data, error } = await supabase.rpc("get_public_lookbook_atelier", {
           p_atelier_id: atelierId,
@@ -74,10 +74,10 @@ function PublicLookbookPage() {
           return data[0];
         }
       } catch {
-        // Repli si la fonction n'est pas encore migrée
+        // Repli si la migration n'est pas encore déployée
       }
 
-      // 2. Repli sur la vue publique restreinte
+      // 2. Repli sur la vue publique restreinte (mêmes colonnes)
       try {
         const viewRes = await supabase
           .from("atelier_lookbook_public")
@@ -93,8 +93,12 @@ function PublicLookbookPage() {
     enabled: Boolean(atelierId),
   });
 
-  const atelierName = atelierQuery.data?.name || search.atelier || "Atelier CouturPro";
-  const atelierPhone = atelierQuery.data?.whatsapp || atelierQuery.data?.phone || search.phone || "";
+  // P0-2 : nom et contact viennent UNIQUEMENT du serveur — search.atelier et search.phone ignorés
+  const atelierName = atelierQuery.data?.name || "Atelier CouturPro";
+  // P0-1 : phone/whatsapp ne sont plus renvoyés par la RPC — bouton WhatsApp masqué si absent
+  const atelierPhone = (atelierQuery.data as Record<string, unknown> | null)?.["whatsapp"] as string | undefined
+    || (atelierQuery.data as Record<string, unknown> | null)?.["phone"] as string | undefined
+    || "";
 
   // Charger les modèles du catalogue
   const modelsQuery = useQuery({

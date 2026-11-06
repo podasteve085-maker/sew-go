@@ -126,6 +126,8 @@ export type Database = {
           fabric_needed: string | null
           id: string
           is_active: boolean
+          /** P1-1 : flag opt-in lookbook public (default false) */
+          is_public: boolean
           name: string
           photo_paths: string[]
           tags: string[]
@@ -140,6 +142,7 @@ export type Database = {
           fabric_needed?: string | null
           id?: string
           is_active?: boolean
+          is_public?: boolean
           name: string
           photo_paths?: string[]
           tags?: string[]
@@ -154,6 +157,7 @@ export type Database = {
           fabric_needed?: string | null
           id?: string
           is_active?: boolean
+          is_public?: boolean
           name?: string
           photo_paths?: string[]
           tags?: string[]
@@ -671,16 +675,14 @@ export type Database = {
       }
     }
     Views: {
+      // P3-4 : Vue alignée sur la migration 20261107 — sans phone/whatsapp/address
       atelier_lookbook_public: {
         Row: {
-          address: string | null
           city: string | null
           currency: string | null
           id: string | null
           logo_url: string | null
           name: string | null
-          phone: string | null
-          whatsapp: string | null
         }
         Relationships: []
       }

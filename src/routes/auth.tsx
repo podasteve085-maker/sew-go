@@ -392,9 +392,9 @@ function AuthPage() {
       return;
     }
 
-    if (passwordVal.length < 6) {
+    if (passwordVal.length < 8) {
       toast.error("Mot de passe trop court", {
-        description: "Le mot de passe doit comporter au moins 6 caractères.",
+        description: "Le mot de passe doit comporter au moins 8 caractères.",
       });
       return;
     }
@@ -424,7 +424,7 @@ function AuthPage() {
       toast.error("Inscription impossible", {
         description: isAlready
           ? "Ce numéro ou email a déjà un compte. Connectez-vous avec votre mot de passe."
-          : error.message || "Vérifiez vos informations (mot de passe de 6 caractères minimum).",
+          : error.message || "Vérifiez vos informations (mot de passe de 8 caractères minimum).",
       });
       return;
     }
@@ -1264,14 +1264,14 @@ function AuthPage() {
                         </div>
 
                         <div className="space-y-1.5">
-                          <Label htmlFor="up-password">Mot de passe (6 car. minimum)</Label>
+                          <Label htmlFor="up-password">Mot de passe (8 car. minimum)</Label>
                           <div className="relative">
                             <Input
                               id="up-password"
                               name="password"
                               type={showSignUpPassword ? "text" : "password"}
                               required
-                              minLength={6}
+                              minLength={8}
                               autoComplete="new-password"
                               placeholder="••••••••"
                               className="pl-9 pr-10"

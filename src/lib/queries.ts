@@ -1,4 +1,4 @@
-﻿import { supabase } from "@/integrations/supabase/client";
+﻿﻿﻿import { supabase } from "@/integrations/supabase/client";
 import type { Json } from "@/integrations/supabase/types";
 import type { OrderStatus } from "@/lib/domain";
 import { deleteStorageFiles, materializeStoragePaths, uuid, getSignedUrl, uploadDataUrl } from "@/hooks/use-signed-url";
@@ -16,9 +16,9 @@ import {
 } from "./offline-storage";
 import { reconcileAppointmentRows } from "./appointment-reconciliation";
 
-// ─── Helper : timeout strict pour les appels Supabase en écriture ──────────────
+// --- Helper : timeout strict pour les appels Supabase en �criture --------------
 // Garantit que les mutations ne pendent jamais plus de 3 secondes.
-// Les données sont déjà écrites en local (IndexedDB) avant l'appel réseau.
+// Les donn�es sont d�j� �crites en local (IndexedDB) avant l'appel r�seau.
 const SUPABASE_WRITE_TIMEOUT_MS = 3000;
 
 const SUPABASE_READ_TIMEOUT_MS = 2500;
@@ -50,13 +50,13 @@ async function withSupabaseTimeout<T>(promise: PromiseLike<T>): Promise<T> {
 
 
 export async function currentBusinessId(): Promise<string> {
-  // 1. Accès instantané au cache local (0ms de latence, fonctionne toujours en ligne et hors-ligne)
+  // 1. Acc�s instantan� au cache local (0ms de latence, fonctionne toujours en ligne et hors-ligne)
   if (typeof window !== "undefined") {
     const cachedBizId = localStorage.getItem("couturpro_current_business_id");
     if (cachedBizId) return cachedBizId;
   }
 
-  // 2. Vérification dans IndexedDB workshop_data
+  // 2. V�rification dans IndexedDB workshop_data
   try {
     const workshops = await getAllLocalItems<{ id: string }>("workshop_data");
     const firstW = workshops[0];
@@ -102,7 +102,7 @@ export async function currentBusinessId(): Promise<string> {
     }
   }
 
-  // 4. Déduction locale depuis les commandes ou clients déjà présents
+  // 4. D�duction locale depuis les commandes ou clients d�j� pr�sents
   try {
     const orders = await getAllLocalItems<OrderRow>("orders");
     const firstO = orders[0];
@@ -196,7 +196,7 @@ export type OrderImageRow = {
 
 export type MeasurementSetRow = {
   id: string;
-  /** Identifiant atelier — requis en offline pour filtrage strict */
+  /** Identifiant atelier � requis en offline pour filtrage strict */
   business_id?: string;
   client_id: string;
   label: string | null;
@@ -320,7 +320,7 @@ export async function fetchOrders(opts?: { clientId?: string }): Promise<OrderRo
         const enriched = await enrichOrdersWithPayments(
           combined.filter((o) => !pendingOrderDeletes.has(o.id)),
         );
-        // Ne pas écraser tout le store quand on filtre par clientId
+        // Ne pas �craser tout le store quand on filtre par clientId
         if (!opts?.clientId) {
           setLocalItems("orders", enriched).catch(() => {});
         } else {
@@ -356,7 +356,7 @@ export async function fetchOrder(id: string): Promise<OrderRow | null> {
       const { data, error } = await withSupabaseReadTimeout(query.maybeSingle());
       if (!error && data) {
         const order = data as unknown as OrderRow;
-        // Overlay pending local changes safely — never block on failure
+        // Overlay pending local changes safely � never block on failure
         let merged: OrderRow = order;
         try {
           const local = await getLocalItem<OrderRow>("orders", id);
@@ -371,18 +371,18 @@ export async function fetchOrder(id: string): Promise<OrderRow | null> {
             merged = { ...order, ...local, ...(pending.payload as Partial<OrderRow>) };
           }
         } catch {
-          // overlay is optional — IndexedDB failure must never block online path
+          // overlay is optional � IndexedDB failure must never block online path
         }
         const [enriched] = await enrichOrdersWithPayments([merged]);
         setLocalItem("orders", enriched || merged).catch(() => {});
         return enriched || merged;
       }
     } catch {
-      // Supabase failed — fall through to IndexedDB offline fallback
+      // Supabase failed � fall through to IndexedDB offline fallback
     }
   }
 
-  // Offline fallback: read from IndexedDB — wrap in try/catch so any IDB error
+  // Offline fallback: read from IndexedDB � wrap in try/catch so any IDB error
   // returns null instead of crashing the route component
   try {
     const local = await getLocalItem<OrderRow>("orders", id);
@@ -404,7 +404,7 @@ export function deduplicateClients(clients: ClientRow[]): ClientRow[] {
     if (seenIds.has(client.id)) continue;
     seenIds.add(client.id);
 
-    // Empreinte unique : prénom + nom + téléphone normalisé (8 derniers chiffres)
+    // Empreinte unique : pr�nom + nom + t�l�phone normalis� (8 derniers chiffres)
     const normFirst = (client.first_name || "").trim().toLowerCase();
     const normLast = (client.last_name || "").trim().toLowerCase();
     const rawDigits = (client.phone || client.whatsapp || "").replace(/\D/g, "");
@@ -412,7 +412,7 @@ export function deduplicateClients(clients: ClientRow[]): ClientRow[] {
 
     const fingerprint = `${normFirst}|${normLast}|${phoneKey}`;
     if (normFirst && (normLast || phoneKey) && seenFingerprints.has(fingerprint)) {
-      // Doublon strict détecté : ignorer la copie superflue
+      // Doublon strict d�tect� : ignorer la copie superflue
       continue;
     }
     if (normFirst && (normLast || phoneKey)) {
@@ -476,7 +476,7 @@ export async function fetchClients(term?: string): Promise<ClientRow[]> {
         setLocalItems("clients", combined).catch(() => {});
 
 
-        // Pré-cache en arrière-plan les photos clients pour disponibilité hors-ligne
+        // Pr�-cache en arri�re-plan les photos clients pour disponibilit� hors-ligne
         Promise.allSettled(
           combined
             .filter((c) => c.photo_url && !c.photo_url.startsWith("data:"))
@@ -716,7 +716,7 @@ export async function fetchMeasurementSets(clientId: string): Promise<Measuremen
         combined.push(
           ...localSets.filter((l) => l.client_id === clientId && !serverIds.has(l.id)),
         );
-        // Ne pas écraser tout le store quand on filtre par clientId
+        // Ne pas �craser tout le store quand on filtre par clientId
         const pendingSetDeletes = new Set(
           queue
             .filter((q) => q.entity === "measurement_set" && q.action === "delete")
@@ -770,7 +770,7 @@ export async function fetchAppointments(opts?: { clientId?: string }): Promise<A
           queue,
         );
         const enriched = await enrichAppointmentsWithClients(combined);
-        // Ne pas écraser tout le store quand on filtre par clientId
+        // Ne pas �craser tout le store quand on filtre par clientId
         if (!opts?.clientId) {
           await setLocalItems("appointments", enriched).catch(() => {});
         } else {
@@ -799,16 +799,16 @@ export async function fetchPayments(orderId: string): Promise<PaymentRow[]> {
     // ignore
   }
 
-  // 1. Récupérer les paiements locaux enregistrés (IndexedDB) — protégé contre tout échec IDB
+  // 1. R�cup�rer les paiements locaux enregistr�s (IndexedDB) � prot�g� contre tout �chec IDB
   let localPayments: PaymentRow[] = [];
   try {
     localPayments = await getAllLocalItems<PaymentRow>("payments");
   } catch {
-    // IDB indisponible — on continue avec tableau vide
+    // IDB indisponible � on continue avec tableau vide
   }
   const localForOrder = localPayments.filter((p) => p.order_id === orderId);
 
-  // 2. Récupérer les paiements encore en file d'attente de synchronisation
+  // 2. R�cup�rer les paiements encore en file d'attente de synchronisation
   let pendingPayments: PaymentRow[] = [];
   try {
     const queue = await getPendingSyncQueue();
@@ -861,7 +861,7 @@ export async function fetchOrderImages(orderId: string): Promise<OrderImageRow[]
   try {
     businessId = await currentBusinessId();
   } catch {
-    // ignore — businessId facultatif pour le filtre
+    // ignore � businessId facultatif pour le filtre
   }
   const isOnline = typeof navigator === "undefined" || navigator.onLine;
 
@@ -880,7 +880,7 @@ export async function fetchOrderImages(orderId: string): Promise<OrderImageRow[]
         // Sauvegarder dans IndexedDB pour la consultation hors-ligne
         await setLocalItems("order_images", rows);
 
-        // Pré-mettre en cache les images de façon asynchrone non-bloquante
+        // Pr�-mettre en cache les images de fa�on asynchrone non-bloquante
         for (const row of rows) {
           if (row.path && !row.path.startsWith("data:")) {
             import("./image-cache")
@@ -893,7 +893,7 @@ export async function fetchOrderImages(orderId: string): Promise<OrderImageRow[]
           }
         }
 
-        // Fusionner avec d'éventuelles photos locales en attente de sync
+        // Fusionner avec d'�ventuelles photos locales en attente de sync
         const pendingQueue = await getPendingSyncQueue();
         const pendingImages = pendingQueue
           .filter(
@@ -985,7 +985,7 @@ export async function saveOrderImageOffline(
     created_at: new Date().toISOString(),
   };
 
-  // 1. Sauvegarder immédiatement dans IndexedDB
+  // 1. Sauvegarder imm�diatement dans IndexedDB
   await setLocalItem("order_images", localRow);
 
   // 2. Si en ligne et que ce n'est pas une DataURL temporaire, tenter l'insertion Supabase
@@ -1086,7 +1086,7 @@ export const DEFAULT_MEASUREMENT_TEMPLATES: { id: string; name: string; fields: 
       "Tour de taille",
       "Tour de hanches",
       "Carrure",
-      "Longueur épaule",
+      "Longueur �paule",
       "Longueur dos",
       "Longueur manche",
       "Tour de bras",
@@ -1106,7 +1106,7 @@ export const DEFAULT_MEASUREMENT_TEMPLATES: { id: string; name: string; fields: 
       "Tour de taille",
       "Tour de hanches",
       "Carrure",
-      "Longueur épaule",
+      "Longueur �paule",
       "Longueur dos",
       "Longueur devant",
       "Longueur manche",
@@ -1197,7 +1197,7 @@ export async function fetchTemplates(): Promise<{ id: string; name: string; fiel
       return rows;
     }
   } catch {
-    // Mode hors-ligne ou erreur réseau
+    // Mode hors-ligne ou erreur r�seau
   }
 
   return getFallbackTemplates();
@@ -1214,6 +1214,8 @@ export type CatalogModelRow = {
   photo_paths: string[];
   tags: string[];
   is_active: boolean;
+  /** P1-1 : flag opt-in lookbook public (default false). Visible par anon seulement si true + is_active. */
+  is_public: boolean;
   created_at: string;
   updated_at: string;
 };
@@ -1233,6 +1235,10 @@ export async function fetchCatalogModels(
       let query = supabase.from("catalog_models").select("*").eq("business_id", businessId);
       if (category && category !== "all") {
         query = query.eq("category", category);
+      }
+      // P1-1 : pour l'accès public (lookbook anon), filtrer is_public = true en plus de is_active
+      if (publicAccess) {
+        query = query.eq("is_public", true);
       }
       const { data, error } = await withSupabaseReadTimeout(
         query
@@ -1279,7 +1285,7 @@ export async function fetchCatalogModels(
         );
         setLocalItems("catalog_models", combined).catch(() => {});
 
-        // Pré-cache en arrière-plan des photos du catalogue pour consultation 100% hors-ligne
+        // Pr�-cache en arri�re-plan des photos du catalogue pour consultation 100% hors-ligne
         Promise.allSettled(
           combined
             .flatMap((m) => m.photo_paths || [])
@@ -1300,7 +1306,7 @@ export async function fetchCatalogModels(
       }
     } catch (err) {
       if (publicAccess) throw err;
-      // Fallback IndexedDB pour le propriétaire hors-ligne
+      // Fallback IndexedDB pour le propri�taire hors-ligne
     }
   }
 
@@ -1470,7 +1476,7 @@ export async function deleteCatalogModel(id: string): Promise<void> {
       if (!isMissingDbRoutine(rpc.error)) {
         const rpcMsg = (rpc.error.message ?? "").toLowerCase();
         if (rpcMsg.includes("autoris") || rpcMsg.includes("permission") || rpcMsg.includes("row-level")) {
-          throw new Error(rpc.error.message || "Impossible de supprimer ce modèle.");
+          throw new Error(rpc.error.message || "Impossible de supprimer ce mod�le.");
         }
       }
     } catch (err) {
@@ -1498,7 +1504,7 @@ export async function deleteCatalogModel(id: string): Promise<void> {
     }
 
     if (error) {
-      throw new Error(error.message || "Impossible de supprimer ce modèle.");
+      throw new Error(error.message || "Impossible de supprimer ce mod�le.");
     }
 
     let deleted = (data ?? []) as Array<{ id: string; photo_paths?: string[] | null }>;
@@ -1515,14 +1521,14 @@ export async function deleteCatalogModel(id: string): Promise<void> {
         return;
       }
       if (soft.error) {
-        throw new Error(soft.error.message || "Impossible de supprimer ce modèle.");
+        throw new Error(soft.error.message || "Impossible de supprimer ce mod�le.");
       }
       deleted = (soft.data ?? []) as Array<{ id: string; photo_paths?: string[] | null }>;
     }
 
     if (deleted.length === 0) {
       throw new Error(
-        "Le modèle n'a pas pu être supprimé. Vérifiez que vous êtes bien connecté avec le compte de l'atelier.",
+        "Le mod�le n'a pas pu �tre supprim�. V�rifiez que vous �tes bien connect� avec le compte de l'atelier.",
       );
     }
 
@@ -1556,7 +1562,7 @@ export async function saveCatalogModelOffline(
     (await currentBusinessId());
 
   if (!businessId) {
-    throw new Error("Atelier introuvable. Rechargez la page puis réessayez.");
+    throw new Error("Atelier introuvable. Rechargez la page puis r�essayez.");
   }
 
   const localModel: CatalogModelRow = {
@@ -1597,7 +1603,7 @@ export async function saveCatalogModelOffline(
       } else if (!isMissingDbRoutine(rpc.error) && !isNetworkError(rpc.error)) {
         const rpcMsg = (rpc.error.message ?? "").toLowerCase();
         if (rpcMsg.includes("autoris") || rpcMsg.includes("permission") || rpcMsg.includes("row-level")) {
-          throw new Error(rpc.error.message || "Impossible d'enregistrer le modèle.");
+          throw new Error(rpc.error.message || "Impossible d'enregistrer le mod�le.");
         }
       }
     } catch (err) {
@@ -1618,7 +1624,7 @@ export async function saveCatalogModelOffline(
     );
     if (error) {
       if (!isNetworkError(error)) {
-        throw new Error(error.message || "Impossible d'enregistrer le modèle.");
+        throw new Error(error.message || "Impossible d'enregistrer le mod�le.");
       }
     } else if (data) {
       const row = data as unknown as CatalogModelRow;
@@ -1640,7 +1646,7 @@ export async function saveCatalogModelOffline(
 }
 
 // ============================================================
-// OPÉRATIONS D'ÉCRITURE OFFLINE-FIRST (Clients, Commandes, etc.)
+// OP�RATIONS D'�CRITURE OFFLINE-FIRST (Clients, Commandes, etc.)
 // ============================================================
 
 export async function saveClientOffline(
@@ -1659,7 +1665,7 @@ export async function saveClientOffline(
     // 1. Chercher par l'ID fourni dans IndexedDB
     existingClient = await getLocalItem<ClientRow>("clients", existingId);
 
-    // 2. Si non trouvé localement et que c'est un ID temp_ déjà synchronisé,
+    // 2. Si non trouv� localement et que c'est un ID temp_ d�j� synchronis�,
     //    chercher via Supabase pour obtenir le vrai UUID
     if (!existingClient && existingId.startsWith("temp_") && isOnline) {
       try {
@@ -1677,11 +1683,11 @@ export async function saveClientOffline(
       } catch { /* ignore */ }
     }
 
-    // 3. Si toujours pas trouvé localement, essayer getAllLocalItems pour matcher par ID
+    // 3. Si toujours pas trouv� localement, essayer getAllLocalItems pour matcher par ID
     if (!existingClient) {
       try {
         const allLocal = await getAllLocalItems<ClientRow>("clients");
-        // Chercher un client dont l'ID correspond (peut-être stocké différemment)
+        // Chercher un client dont l'ID correspond (peut-�tre stock� diff�remment)
         const found = allLocal.find((c) => c.id === existingId);
         if (found) existingClient = found;
       } catch { /* ignore */ }
@@ -1693,7 +1699,7 @@ export async function saveClientOffline(
     existingClient?.business_id ||
     (await currentBusinessId());
 
-  // Toujours utiliser le resolvedId (peut être le vrai UUID si temp_ était mappé)
+  // Toujours utiliser le resolvedId (peut �tre le vrai UUID si temp_ �tait mapp�)
   const clientId = resolvedId || uuid();
 
   const localClient: ClientRow = {
@@ -1716,7 +1722,7 @@ export async function saveClientOffline(
 
   if (isOnline && businessId) {
     try {
-      // Si la photo est un DataURL local, la téléverser vers le bucket storage pour pérenniser l'URL
+      // Si la photo est un DataURL local, la t�l�verser vers le bucket storage pour p�renniser l'URL
       if (typeof localClient.photo_url === "string" && localClient.photo_url.startsWith("data:")) {
         const uploadedPath = await uploadDataUrl(businessId, localClient.photo_url, "clients");
         if (uploadedPath) {
@@ -1725,11 +1731,11 @@ export async function saveClientOffline(
         }
       }
 
-      // Utiliser UPDATE si c'est une modification existante, INSERT+UPSERT pour création
+      // Utiliser UPDATE si c'est une modification existante, INSERT+UPSERT pour cr�ation
       let data: unknown = null;
       let error: unknown = null;
       if (!isNew && resolvedId && !resolvedId.startsWith("temp_")) {
-        // Modification d'un client connu - UPDATE ciblé par ID
+        // Modification d'un client connu - UPDATE cibl� par ID
         const { data: d, error: e } = await withSupabaseTimeout(
           supabase
             .from("clients")
@@ -1767,14 +1773,14 @@ export async function saveClientOffline(
         await setLocalItem("clients", row);
         return row;
       }
-      // Si l'UPDATE n'a rien retourné (client non trouvé en base), continuer vers sync_queue
+      // Si l'UPDATE n'a rien retourn� (client non trouv� en base), continuer vers sync_queue
     } catch {
       // Fallback hors-ligne
     }
   }
 
 
-  // Ne jamais throw ici : la sauvegarde locale a déjà réussi
+  // Ne jamais throw ici : la sauvegarde locale a d�j� r�ussi
   try {
     await addToSyncQueue({
       entity: "client",
@@ -1782,7 +1788,7 @@ export async function saveClientOffline(
       payload: localClient,
       tempId: clientId,
     });
-  } catch { /* ignore - données déjà sauvegardées en local */ }
+  } catch { /* ignore - donn�es d�j� sauvegard�es en local */ }
 
   return localClient;
 }
@@ -1797,7 +1803,7 @@ export async function saveOrderOffline(
   const oData: Record<string, any> = orderData;
   const orderId = existingId || uuid();
 
-  // Si c'est une mise à jour d'une commande existante, récupérer l'état existant pour fusionner !
+  // Si c'est une mise � jour d'une commande existante, r�cup�rer l'�tat existant pour fusionner !
   let existingOrder: OrderRow | null = null;
   if (existingId) {
     existingOrder = await getLocalItem<OrderRow>("orders", existingId);
@@ -1960,7 +1966,7 @@ export async function savePaymentOffline(paymentData: Record<string, unknown>): 
 
   await setLocalItem("payments", localPayment);
 
-  // Mettre à jour immédiatement la commande locale pour que son solde soit à jour instantanément
+  // Mettre � jour imm�diatement la commande locale pour que son solde soit � jour instantan�ment
   if (localPayment.order_id) {
     try {
       const ord = await getLocalItem<OrderRow>("orders", localPayment.order_id);
@@ -2014,7 +2020,7 @@ export async function deletePaymentOffline(paymentId: string, orderId?: string):
   // 1. Supprimer du stockage local
   await deleteLocalItem("payments", paymentId);
 
-  // 2. Mettre à jour la commande locale si fournie
+  // 2. Mettre � jour la commande locale si fournie
   if (orderId) {
     try {
       const ord = await getLocalItem<OrderRow>("orders", orderId);
@@ -2169,7 +2175,7 @@ export async function saveMeasurementSetOffline(
     }
   }
 
-  // Ne jamais throw ici : la sauvegarde locale a déjà réussi
+  // Ne jamais throw ici : la sauvegarde locale a d�j� r�ussi
   try {
     await addToSyncQueue({
       entity: "measurement_set",
@@ -2189,7 +2195,7 @@ export async function saveMeasurementSetOffline(
       },
       tempId: setId,
     });
-  } catch { /* ignore - données déjà sauvegardées en local */ }
+  } catch { /* ignore - donn�es d�j� sauvegard�es en local */ }
 
   return localSet;
 }
@@ -2278,7 +2284,7 @@ export async function saveAppointmentOffline(
     }
   }
 
-  // Ne jamais throw ici : la sauvegarde locale a déjà réussi
+  // Ne jamais throw ici : la sauvegarde locale a d�j� r�ussi
   await addToSyncQueue({
     entity: "appointment",
     action: isNew ? "create" : "update",
@@ -2382,7 +2388,7 @@ export async function deleteAppointmentOffline(id: string): Promise<void> {
 export async function deleteClientCascade(clientId: string, businessId?: string) {
   const isOnline = typeof navigator !== "undefined" ? navigator.onLine : true;
 
-  // Suppression locale immédiate (Optimistic UI)
+  // Suppression locale imm�diate (Optimistic UI)
   await deleteLocalItem("clients", clientId);
 
   if (!isOnline) {
@@ -2392,19 +2398,19 @@ export async function deleteClientCascade(clientId: string, businessId?: string)
         action: "delete",
         payload: { id: clientId, business_id: businessId },
       });
-    } catch { /* ignore - suppression locale déjà effectuée */ }
+    } catch { /* ignore - suppression locale d�j� effectu�e */ }
     return;
   }
 
   try {
-    // 1. Récupère les avatars client
+    // 1. R�cup�re les avatars client
     const { data: clientData } = await supabase
       .from("clients")
       .select("photo_url")
       .eq("id", clientId)
       .maybeSingle();
 
-    // 2. Récupère les commandes du client
+    // 2. R�cup�re les commandes du client
     let ordersQuery = supabase
       .from("orders")
       .select("id")
@@ -2413,7 +2419,7 @@ export async function deleteClientCascade(clientId: string, businessId?: string)
     const { data: orders } = await ordersQuery;
     const orderIds = (orders ?? []).map((o) => o.id);
 
-    // 3. Récupère les paths de toutes les photos de commandes
+    // 3. R�cup�re les paths de toutes les photos de commandes
     let photoPaths: string[] = [];
     if (orderIds.length > 0) {
       const { data: images } = await supabase
@@ -2463,7 +2469,7 @@ export async function deleteClientCascade(clientId: string, businessId?: string)
     const { error: clientErr } = await clientDel;
     if (clientErr) throw clientErr;
   } catch {
-    // Si la suppression échoue côté réseau, planifier la suppression dans la file
+    // Si la suppression �choue c�t� r�seau, planifier la suppression dans la file
     await addToSyncQueue({
       entity: "client",
       action: "delete",
@@ -2475,7 +2481,7 @@ export async function deleteClientCascade(clientId: string, businessId?: string)
 export async function deleteOrderCascade(orderId: string, businessId?: string) {
   const isOnline = typeof navigator !== "undefined" ? navigator.onLine : true;
 
-  // Suppression locale immédiate
+  // Suppression locale imm�diate
   await deleteLocalItem("orders", orderId);
 
   if (!isOnline) {
@@ -2485,7 +2491,7 @@ export async function deleteOrderCascade(orderId: string, businessId?: string) {
         action: "delete",
         payload: { id: orderId, business_id: businessId },
       });
-    } catch { /* ignore - suppression locale déjà effectuée */ }
+    } catch { /* ignore - suppression locale d�j� effectu�e */ }
     return;
   }
 
@@ -2532,7 +2538,7 @@ export async function deleteMeasurementSetCascade(setId: string, businessId?: st
         action: "delete",
         payload: { id: setId, business_id: businessId },
       });
-    } catch { /* ignore - suppression locale déjà effectuée */ }
+    } catch { /* ignore - suppression locale d�j� effectu�e */ }
     return;
   }
 

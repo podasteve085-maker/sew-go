@@ -11,7 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { Loader2, Plus, X, UploadCloud, Tag, Trash2, Star, Sparkles, AlertTriangle, Zap } from "lucide-react";
+import { Loader2, Plus, X, UploadCloud, Tag, Trash2, Star, Sparkles, AlertTriangle, Zap, Globe, Lock } from "lucide-react";
 import { toast } from "sonner";
 import { useBusiness } from "@/hooks/use-business";
 import { uploadImage, deleteStorageFiles } from "@/hooks/use-signed-url";
@@ -62,6 +62,8 @@ export function CatalogModelDialog({ open, onOpenChange, model, onSaved }: Catal
   const [tagInput, setTagInput] = useState("");
   const [uploading, setUploading] = useState(false);
   const [upgradeOpen, setUpgradeOpen] = useState(false);
+  // P1-1 : toggle opt-in lookbook public (default false — le modèle n'est pas visible par anon)
+  const [isPublic, setIsPublic] = useState(model?.is_public ?? false);
 
   // Charger tous les modèles du catalogue pour calculer le nombre total de photos de l'atelier
   const { data: allModels = [] } = useQuery({
@@ -90,6 +92,7 @@ export function CatalogModelDialog({ open, onOpenChange, model, onSaved }: Catal
     setPhotoPaths(m?.photo_paths ?? []);
     setTags(m?.tags ?? []);
     setTagInput("");
+    setIsPublic(m?.is_public ?? false);
   }
 
   // Réinitialiser uniquement à l'ouverture ou au changement de modèle,
@@ -241,6 +244,8 @@ export function CatalogModelDialog({ open, onOpenChange, model, onSaved }: Catal
         photo_paths: photoPaths,
         tags,
         is_active: true,
+        // P1-1 : transmettre le choix opt-in lookbook public
+        is_public: isPublic,
         created_at: model?.created_at,
       };
 
@@ -589,6 +594,39 @@ export function CatalogModelDialog({ open, onOpenChange, model, onSaved }: Catal
                 ))}
               </div>
             )}
+          </div>
+
+          {/* P1-1 : Toggle visibilité lookbook public */}
+          <div className="flex items-center justify-between rounded-xl border border-border bg-muted/40 px-4 py-3">
+            <div className="space-y-0.5">
+              <Label className="text-xs sm:text-sm font-semibold flex items-center gap-1.5">
+                {isPublic ? (
+                  <span className="text-success">🌐 Visible dans le lookbook public</span>
+                ) : (
+                  <span className="text-muted-foreground">🔒 Privé (lookbook non visible)</span>
+                )}
+              </Label>
+              <p className="text-[0.68rem] text-muted-foreground">
+                {isPublic
+                  ? "Les visiteurs du lien lookbook voient ce modèle."
+                  : "Seul vous voyez ce modèle dans votre catalogue."}
+              </p>
+            </div>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={isPublic}
+              onClick={() => setIsPublic((v) => !v)}
+              className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer items-center rounded-full border-2 border-transparent transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+                isPublic ? "bg-success" : "bg-input"
+              }`}
+            >
+              <span
+                className={`pointer-events-none block h-5 w-5 rounded-full bg-background shadow-lg ring-0 transition-transform ${
+                  isPublic ? "translate-x-5" : "translate-x-0"
+                }`}
+              />
+            </button>
           </div>
 
           {/* Boutons d'action */}

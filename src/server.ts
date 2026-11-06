@@ -62,9 +62,19 @@ function applySecurityHeaders(res: Response): Response {
     headers.set("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
   }
   if (!headers.has("Content-Security-Policy")) {
+    // P1-6 : Retrait de 'unsafe-eval' (ouvre eval/Function() aux XSS)
+    // connect-src restreint à self + Supabase uniquement (retrait registry.npmjs.org)
     headers.set(
       "Content-Security-Policy",
-      "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: blob: https://*.supabase.co; connect-src 'self' https://*.supabase.co wss://*.supabase.co https://registry.npmjs.org; frame-ancestors 'self'; object-src 'none'; base-uri 'self';"
+      "default-src 'self'; " +
+      "script-src 'self' 'unsafe-inline'; " +
+      "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; " +
+      "font-src 'self' https://fonts.gstatic.com data:; " +
+      "img-src 'self' data: blob: https://*.supabase.co; " +
+      "connect-src 'self' https://*.supabase.co wss://*.supabase.co; " +
+      "frame-ancestors 'self'; " +
+      "object-src 'none'; " +
+      "base-uri 'self';"
     );
   }
   return new Response(res.body, {

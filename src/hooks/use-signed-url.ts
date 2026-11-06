@@ -36,13 +36,16 @@ export async function getSignedUrl(path: string | null | undefined): Promise<str
   const cached = await getCachedImageUrl(path);
   if (cached) return cached;
 
-  // 2. Si en ligne : tenter createSignedUrl, puis getPublicUrl pour TOUS les dossiers
+  // 2. Si en ligne : tenter createSignedUrl avec TTL court (P1-8)
   const isOnline = typeof navigator === "undefined" || navigator.onLine;
   if (isOnline) {
+    // P1-8 : TTL 10 minutes (600s) au lieu de 3600s
+    const SIGNED_URL_TTL = 600;
+
     try {
       const { data, error } = await supabase.storage
         .from(BUCKET)
-        .createSignedUrl(path, 60 * 60);
+        .createSignedUrl(path, SIGNED_URL_TTL);
       if (!error && data?.signedUrl) {
         cacheImage(path, data.signedUrl).catch(() => {});
         return data.signedUrl;
@@ -51,15 +54,20 @@ export async function getSignedUrl(path: string | null | undefined): Promise<str
       // Repli
     }
 
-    // Repli getPublicUrl pour tous les dossiers (clients, atelier, orders, catalog)
-    try {
-      const { data: publicData } = supabase.storage.from(BUCKET).getPublicUrl(path);
-      if (publicData?.publicUrl) {
-        cacheImage(path, publicData.publicUrl).catch(() => {});
-        return publicData.publicUrl;
+    // P1-8 : getPublicUrl uniquement pour les chemins catalog/ (lookbook public)
+    // Les dossiers clients/, orders/, atelier/ ne doivent jamais fuir via URL publique.
+    const isCatalogPath = path.includes("/catalog/") ||
+      path.split("/")[1] === "catalog";
+    if (isCatalogPath) {
+      try {
+        const { data: publicData } = supabase.storage.from(BUCKET).getPublicUrl(path);
+        if (publicData?.publicUrl) {
+          cacheImage(path, publicData.publicUrl).catch(() => {});
+          return publicData.publicUrl;
+        }
+      } catch {
+        // Repli
       }
-    } catch {
-      // Repli
     }
   }
 

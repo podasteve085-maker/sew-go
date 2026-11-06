@@ -103,12 +103,13 @@ export const FREE_LIMITS = {
 /**
  * RÈGLE D'OR : Les comptes Administrateurs sont EXONÉRÉS À 100% de toute limitation,
  * de tout paiement, et de toute expiration d'abonnement.
- * 
+ *
  * Pour les comptes non-administrateurs, vérifie si l'atelier a un Pass Pro valide et non expiré.
+ * P3-3 : un plan payant SANS plan_expires_at est considéré EXPIRÉ (pas illimité).
  */
 export function isProOrAdmin(business: Business | null | undefined): boolean {
   if (!business) return false;
-  
+
   // 1. Exemption totale pour les administrateurs
   if (business.is_admin === true) {
     return true;
@@ -120,16 +121,18 @@ export function isProOrAdmin(business: Business | null | undefined): boolean {
     return false;
   }
 
-  // Si le plan est payant, vérifier si la date d'expiration est encore valide
-  if (business.plan_expires_at) {
-    const expiresTime = new Date(business.plan_expires_at).getTime();
-    if (!isNaN(expiresTime)) {
-      return expiresTime > Date.now();
-    }
+  // P3-3 : plan payant sans date d'expiration = considéré expiré (sécurité par défaut)
+  // Exception : les plans activés manuellement par l'admin peuvent avoir expires_at NULL —
+  // dans ce cas ils doivent être marqués is_admin = true pour être exemptés.
+  if (!business.plan_expires_at) {
+    return false;
   }
 
-  // Si plan payant sans date d'expiration définie (cas exceptionnel), considérer actif
-  return true;
+  const expiresTime = new Date(business.plan_expires_at).getTime();
+  if (isNaN(expiresTime)) {
+    return false;
+  }
+  return expiresTime > Date.now();
 }
 
 /**
