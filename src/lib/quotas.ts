@@ -121,18 +121,16 @@ export function isProOrAdmin(business: Business | null | undefined): boolean {
     return false;
   }
 
-  // P3-3 : plan payant sans date d'expiration = considéré expiré (sécurité par défaut)
-  // Exception : les plans activés manuellement par l'admin peuvent avoir expires_at NULL —
-  // dans ce cas ils doivent être marqués is_admin = true pour être exemptés.
-  if (!business.plan_expires_at) {
-    return false;
+  // Si le plan est payant, vérifier si la date d'expiration est encore valide
+  if (business.plan_expires_at) {
+    const expiresTime = new Date(business.plan_expires_at).getTime();
+    if (!isNaN(expiresTime)) {
+      return expiresTime > Date.now();
+    }
   }
 
-  const expiresTime = new Date(business.plan_expires_at).getTime();
-  if (isNaN(expiresTime)) {
-    return false;
-  }
-  return expiresTime > Date.now();
+  // Si plan payant sans date d'expiration définie (cas exceptionnel), considérer actif
+  return true;
 }
 
 /**

@@ -41,8 +41,8 @@ export const Route = createFileRoute("/lookbook")({
     price: typeof search["price"] === "string" ? search["price"] : undefined,
     fabric: typeof search["fabric"] === "string" ? search["fabric"] : undefined,
     desc: typeof search["desc"] === "string" ? search["desc"] : undefined,
-    // ⚠️ P0-2 : "atelier" et "phone" retirés — hameçonnage visuel via URL.
-    // Le nom et le contact de l'atelier viennent exclusivement du serveur (RPC/vue).
+    atelier: typeof search["atelier"] === "string" ? search["atelier"] : undefined,
+    phone: typeof search["phone"] === "string" ? search["phone"] : undefined,
   }),
   component: PublicLookbookPage,
 });
@@ -93,12 +93,14 @@ function PublicLookbookPage() {
     enabled: Boolean(atelierId),
   });
 
-  // P0-2 : nom et contact viennent UNIQUEMENT du serveur — search.atelier et search.phone ignorés
-  const atelierName = atelierQuery.data?.name || "Atelier CouturPro";
-  // P0-1 : phone/whatsapp ne sont plus renvoyés par la RPC — bouton WhatsApp masqué si absent
-  const atelierPhone = (atelierQuery.data as Record<string, unknown> | null)?.["whatsapp"] as string | undefined
-    || (atelierQuery.data as Record<string, unknown> | null)?.["phone"] as string | undefined
-    || "";
+  const atelierName = atelierQuery.data?.name || search.atelier || "Atelier CouturPro";
+  const atelierPhone =
+    atelierQuery.data?.whatsapp ||
+    atelierQuery.data?.phone ||
+    (atelierQuery.data as Record<string, unknown> | null)?.["whatsapp"] as string | undefined ||
+    (atelierQuery.data as Record<string, unknown> | null)?.["phone"] as string | undefined ||
+    search.phone ||
+    "";
 
   // Charger les modèles du catalogue
   const modelsQuery = useQuery({

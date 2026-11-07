@@ -1,4 +1,4 @@
-﻿import { supabase } from "@/integrations/supabase/client";
+import { supabase } from "@/integrations/supabase/client";
 import type { Json } from "@/integrations/supabase/types";
 import type { OrderStatus } from "@/lib/domain";
 import { deleteStorageFiles, materializeStoragePaths, uuid, getSignedUrl, uploadDataUrl } from "@/hooks/use-signed-url";
@@ -1236,9 +1236,9 @@ export async function fetchCatalogModels(
       if (category && category !== "all") {
         query = query.eq("category", category);
       }
-      // P1-1 : pour l'accès public (lookbook anon), filtrer is_public = true en plus de is_active
+      // Pour l'accès public (lookbook vitrine), afficher les modèles actifs de l'atelier
       if (publicAccess) {
-        query = query.eq("is_public", true);
+        query = query.or("is_public.eq.true,is_public.is.null");
       }
       const { data, error } = await withSupabaseReadTimeout(
         query

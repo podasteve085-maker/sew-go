@@ -7,9 +7,11 @@ function isNewSupabaseApiKey(value: string): boolean {
 
 function createSupabaseFetch(supabaseKey: string): typeof fetch {
   return (input, init) => {
-    // Note : on ne rejette plus instantanément sur !navigator.onLine car cette API
-    // est peu fiable sur mobile PWA. Le timeout ci-dessous (8s API, 20s storage)
-    // assure qu'on bascule sur IndexedDB sans attendre indéfiniment.
+    // Si hors-ligne avéré côté navigateur, rejeter instantanément pour basculer sur IndexedDB sans latence
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      return Promise.reject(new TypeError('Failed to fetch (offline)'));
+    }
+
     const headers = new Headers(
       typeof Request !== 'undefined' && input instanceof Request ? input.headers : undefined,
     );
