@@ -10,7 +10,10 @@
 -- Nouvelle version : uniquement les données vitrine non personnelles.
 -- ==============================================================================
 
-CREATE OR REPLACE FUNCTION public.get_public_lookbook_atelier(p_atelier_id uuid)
+-- DROP obligatoire car CREATE OR REPLACE ne peut pas changer le type de retour
+DROP FUNCTION IF EXISTS public.get_public_lookbook_atelier(uuid);
+
+CREATE FUNCTION public.get_public_lookbook_atelier(p_atelier_id uuid)
 RETURNS TABLE (
   id         uuid,
   name       text,

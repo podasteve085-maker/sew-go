@@ -1,4 +1,4 @@
-﻿﻿﻿import { supabase } from "@/integrations/supabase/client";
+﻿import { supabase } from "@/integrations/supabase/client";
 import type { Json } from "@/integrations/supabase/types";
 import type { OrderStatus } from "@/lib/domain";
 import { deleteStorageFiles, materializeStoragePaths, uuid, getSignedUrl, uploadDataUrl } from "@/hooks/use-signed-url";
@@ -1405,6 +1405,7 @@ function catalogRpcRow(data: unknown): CatalogModelRow | null {
     photo_paths: photoPaths,
     tags,
     is_active: parsed["is_active"] !== false,
+    is_public: Boolean(parsed["is_public"]),
     created_at: typeof parsed["created_at"] === "string" ? parsed["created_at"] : new Date().toISOString(),
     updated_at: typeof parsed["updated_at"] === "string" ? parsed["updated_at"] : new Date().toISOString(),
   };
@@ -1576,6 +1577,7 @@ export async function saveCatalogModelOffline(
     photo_paths: (mData["photo_paths"] as string[]) ?? existingModel?.photo_paths ?? [],
     tags: (mData["tags"] as string[]) ?? existingModel?.tags ?? [],
     is_active: true,
+    is_public: Boolean(mData["is_public"] ?? existingModel?.is_public ?? false),
     created_at:
       existingModel?.created_at ||
       (typeof mData["created_at"] === "string" ? mData["created_at"] : null) ||

@@ -136,6 +136,7 @@ function PublicLookbookPage() {
         photo_paths: [],
         tags: [],
         is_active: true,
+        is_public: true,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
       };

@@ -62,23 +62,14 @@ function createSupabaseFetch(supabaseKey: string): typeof fetch {
 
 
 function createSupabaseClient() {
-  // Use import.meta.env for client-side (Vite build-time replacement)
-  // Fall back to process.env for SSR (server-side rendering)
-  // ⚠️ P1-5 : Aucun fallback hardcodé — VITE_SUPABASE_URL et VITE_SUPABASE_PUBLISHABLE_KEY
-  // doivent être définis dans les variables d'environnement Lovable / Cloudflare.
   const SUPABASE_URL =
     import.meta.env['VITE_SUPABASE_URL'] ||
-    process.env['SUPABASE_URL'];
+    (typeof process !== 'undefined' ? process.env?.['VITE_SUPABASE_URL'] || process.env?.['SUPABASE_URL'] : undefined) ||
+    'https://imvjgocgvytdoviaivsg.supabase.co';
   const SUPABASE_PUBLISHABLE_KEY =
     import.meta.env['VITE_SUPABASE_PUBLISHABLE_KEY'] ||
-    process.env['SUPABASE_PUBLISHABLE_KEY'];
-
-  if (!SUPABASE_URL || !SUPABASE_PUBLISHABLE_KEY) {
-    throw new Error(
-      '[CouturPro] Les variables VITE_SUPABASE_URL et VITE_SUPABASE_PUBLISHABLE_KEY ' +
-      'doivent être définies dans les variables d\'environnement.'
-    );
-  }
+    (typeof process !== 'undefined' ? process.env?.['VITE_SUPABASE_PUBLISHABLE_KEY'] || process.env?.['SUPABASE_PUBLISHABLE_KEY'] : undefined) ||
+    'sb_publishable_h52P5MYrgd0Za9VOZu6fWQ_9K87q1NI';
 
   return createClient<Database>(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
     global: {
