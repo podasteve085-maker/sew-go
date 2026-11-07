@@ -21,15 +21,11 @@ export const Route = createFileRoute("/")({
   beforeLoad: async () => {
     // Si l'utilisateur est déjà connecté ou a un atelier local hors-ligne légitime, aller directement au tableau de bord
     if (typeof window !== "undefined") {
-      const offlineBiz = localStorage.getItem("couturpro_current_business_id");
-      const offlineUserId = localStorage.getItem("couturpro_current_user_id");
-      const cachedBiz = localStorage.getItem("couturpro_cached_business");
-      const hasSbToken = Object.keys(localStorage).some(
-        (k) => k.startsWith("sb-") && k.endsWith("-auth-token")
-      );
-
-      if (offlineBiz || offlineUserId || cachedBiz || hasSbToken) {
-        throw redirect({ to: "/dashboard" });
+      if (typeof navigator !== "undefined" && !navigator.onLine) {
+        const offlineBiz = localStorage.getItem("couturpro_current_business_id");
+        const offlineUserId = localStorage.getItem("couturpro_current_user_id");
+        if (offlineBiz && offlineUserId) throw redirect({ to: "/dashboard" });
+        return;
       }
 
       try {
@@ -97,15 +93,10 @@ function Landing() {
 
   useEffect(() => {
     if (typeof window !== "undefined") {
-      const offlineBiz = localStorage.getItem("couturpro_current_business_id");
-      const offlineUserId = localStorage.getItem("couturpro_current_user_id");
-      const cachedBiz = localStorage.getItem("couturpro_cached_business");
-      const hasSbToken = Object.keys(localStorage).some(
-        (k) => k.startsWith("sb-") && k.endsWith("-auth-token")
-      );
-
-      if (offlineBiz || offlineUserId || cachedBiz || hasSbToken) {
-        navigate({ to: "/dashboard", replace: true });
+      if (typeof navigator !== "undefined" && !navigator.onLine) {
+        const offlineBiz = localStorage.getItem("couturpro_current_business_id");
+        const offlineUserId = localStorage.getItem("couturpro_current_user_id");
+        if (offlineBiz && offlineUserId) navigate({ to: "/dashboard", replace: true });
         return;
       }
 
