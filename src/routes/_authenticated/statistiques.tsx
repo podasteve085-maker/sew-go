@@ -35,7 +35,8 @@ export const Route = createFileRoute("/_authenticated/statistiques")({
   component: StatsPage,
 });
 
-function monthKey(d: string) {
+function monthKey(d: string | null | undefined) {
+  if (!d) return new Date().toISOString().slice(0, 7);
   return d.slice(0, 7);
 }
 
