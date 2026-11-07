@@ -103,13 +103,12 @@ export const FREE_LIMITS = {
 /**
  * RÈGLE D'OR : Les comptes Administrateurs sont EXONÉRÉS À 100% de toute limitation,
  * de tout paiement, et de toute expiration d'abonnement.
- *
+ * 
  * Pour les comptes non-administrateurs, vérifie si l'atelier a un Pass Pro valide et non expiré.
- * P3-3 : un plan payant SANS plan_expires_at est considéré EXPIRÉ (pas illimité).
  */
 export function isProOrAdmin(business: Business | null | undefined): boolean {
   if (!business) return false;
-
+  
   // 1. Exemption totale pour les administrateurs
   if (business.is_admin === true) {
     return true;

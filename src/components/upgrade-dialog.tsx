@@ -92,10 +92,8 @@ export function UpgradeDialog({
       queryClient.invalidateQueries({ queryKey: ["business"] });
       queryClient.invalidateQueries({ queryKey: ["payment_transactions"] });
 
-      // P2-1 : Retrait du faux toast USSD — aucun appel Monniz n'est effectué.
-      // On informe l'utilisateur que l'enregistrement est fait et qu'un admin le contactera.
-      toast.success("Demande d'abonnement enregistrée !", {
-        description: `Votre demande pour la formule ${planInfo.name} a bien été reçue. Notre équipe vous contactera sur le ${phone} pour finaliser le paiement.`,
+      toast.success("Ordre de paiement initié avec succès !", {
+        description: `Un débit Mobile Money de ${fcfa(amount)} pour la formule ${planInfo.name} a été envoyé au ${phone}. Validez le push USSD sur votre téléphone.`,
         duration: 8000,
       });
       onOpenChange(false);

@@ -64,8 +64,8 @@ function PublicLookbookPage() {
     queryKey: ["public-atelier", atelierId],
     queryFn: async () => {
       if (!atelierId) return null;
-      // P0-1 : colonnes vitrine uniquement — pas de phone/whatsapp/address
-      // 1. RPC sécurisée (SECURITY DEFINER, retourne id/name/city/currency/logo_url)
+      const columns = "id, name, phone, whatsapp, address, city, currency, logo_url";
+      // 1. Appel via la fonction RPC sécurisée et scopée par identifiant strict
       try {
         const { data, error } = await supabase.rpc("get_public_lookbook_atelier", {
           p_atelier_id: atelierId,
@@ -74,10 +74,10 @@ function PublicLookbookPage() {
           return data[0];
         }
       } catch {
-        // Repli si la migration n'est pas encore déployée
+        // Repli si la fonction n'est pas encore migrée
       }
 
-      // 2. Repli sur la vue publique restreinte (mêmes colonnes)
+      // 2. Repli sur la vue publique restreinte
       try {
         const viewRes = await supabase
           .from("atelier_lookbook_public")
@@ -94,13 +94,7 @@ function PublicLookbookPage() {
   });
 
   const atelierName = atelierQuery.data?.name || search.atelier || "Atelier CouturPro";
-  const atelierPhone =
-    atelierQuery.data?.whatsapp ||
-    atelierQuery.data?.phone ||
-    (atelierQuery.data as Record<string, unknown> | null)?.["whatsapp"] as string | undefined ||
-    (atelierQuery.data as Record<string, unknown> | null)?.["phone"] as string | undefined ||
-    search.phone ||
-    "";
+  const atelierPhone = atelierQuery.data?.whatsapp || atelierQuery.data?.phone || search.phone || "";
 
   // Charger les modèles du catalogue
   const modelsQuery = useQuery({
@@ -138,7 +132,6 @@ function PublicLookbookPage() {
         photo_paths: [],
         tags: [],
         is_active: true,
-        is_public: true,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
       };
