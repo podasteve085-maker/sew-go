@@ -162,13 +162,72 @@ export async function fetchFullWorkshopData(businessId: string): Promise<Complet
     (a) => !businessId || !a.business_id || a.business_id === businessId
   );
 
+  // Consolider la cohérence relationnelle : enrichir commandes, mesures et RDV avec les fiches clients réelles
+  const clientMap = new Map<string, ClientRow>();
+  for (const c of workshopClients) {
+    if (c && c.id) clientMap.set(c.id, c);
+  }
+
+  const enrichedOrders = workshopOrders.map((o) => {
+    let clientObj = o.clients;
+    if ((!clientObj || !clientObj.first_name) && o.client_id && clientMap.has(o.client_id)) {
+      const c = clientMap.get(o.client_id)!;
+      clientObj = {
+        first_name: c.first_name,
+        last_name: c.last_name,
+        phone: c.phone,
+        whatsapp: c.whatsapp,
+      };
+    }
+    return {
+      ...o,
+      clients: clientObj,
+    };
+  });
+
+  const enrichedSets = workshopSets.map((s) => {
+    let clientObj = s.clients;
+    if ((!clientObj || !clientObj.first_name) && s.client_id && clientMap.has(s.client_id)) {
+      const c = clientMap.get(s.client_id)!;
+      clientObj = {
+        id: c.id,
+        first_name: c.first_name,
+        last_name: c.last_name,
+        phone: c.phone,
+        whatsapp: c.whatsapp,
+        gender: c.gender,
+      };
+    }
+    return {
+      ...s,
+      clients: clientObj,
+    };
+  });
+
+  const enrichedAppts = workshopAppts.map((a) => {
+    let clientObj = a.clients;
+    if ((!clientObj || !clientObj.first_name) && a.client_id && clientMap.has(a.client_id)) {
+      const c = clientMap.get(a.client_id)!;
+      clientObj = {
+        first_name: c.first_name,
+        last_name: c.last_name,
+        phone: c.phone,
+        whatsapp: c.whatsapp,
+      };
+    }
+    return {
+      ...a,
+      clients: clientObj,
+    };
+  });
+
   return {
     business: businessData || null,
     clients: workshopClients,
-    orders: workshopOrders,
+    orders: enrichedOrders,
     payments: [],
-    measurementSets: workshopSets,
-    appointments: workshopAppts,
+    measurementSets: enrichedSets,
+    appointments: enrichedAppts,
     expenses: mergedExpenses,
     garmentTypes: [],
     catalogModels: [],
@@ -834,54 +893,333 @@ export function generateOrdersPdf(orders: OrderRow[], businessName: string, curr
 }
 
 // -----------------------------------------------------------------------------
-// 3. GÉNÉRATEURS DE DOCUMENTS MESURES (CSV, PDF, WEB .HTML, TEXTE)
+// 3. GÉNÉRATEURS DE DOCUMENTS MESURES PAR ESPACE CLIENT (CSV, PDF, WEB .HTML, TEXTE)
 // -----------------------------------------------------------------------------
 
-export function generateMeasurementsCsvContent(sets: FullMeasurementSetRow[]): string {
+export interface ExtractedMeasurementValue {
+  id: string;
+  name: string;
+  value: number | string | null;
+  unit: string;
+  position: number;
+}
+
+export function extractMeasurementValues(
+  set: FullMeasurementSetRow | Record<string, unknown> | null | undefined
+): ExtractedMeasurementValue[] {
+  if (!set) return [];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const s = set as any;
+  const raw = s.measurement_values ?? s.values ?? s.measurementValues ?? s.measures ?? [];
+  if (!Array.isArray(raw)) return [];
+
+  return raw
+    .map((item: any, idx: number) => {
+      const name = String(item?.name || item?.label || "").trim();
+      let val = item?.value;
+      if (val === undefined || val === null || val === "" || String(val).trim() === "-") {
+        val = null;
+      }
+      const unit = String(item?.unit || "cm").trim();
+      const pos = typeof item?.position === "number" ? item.position : idx;
+      return {
+        id: String(item?.id || `val_${idx}`),
+        name,
+        value: val,
+        unit,
+        position: pos,
+      };
+    })
+    .filter((m) => m.name.length > 0)
+    .sort((a, b) => a.position - b.position);
+}
+
+export interface ClientMeasurementSpace {
+  client: {
+    id: string;
+    first_name: string;
+    last_name: string;
+    fullName: string;
+    phone: string;
+    whatsapp: string;
+    city: string;
+    address: string;
+    gender: string;
+    notes: string;
+    created_at?: string;
+  };
+  sets: Array<{
+    id: string;
+    label: string | null;
+    template_name: string | null;
+    displayName: string;
+    recorded_at: string;
+    notes: string | null;
+    values: ExtractedMeasurementValue[];
+    totalValuesCount: number;
+    filledValuesCount: number;
+  }>;
+  totalSetsCount: number;
+  totalMeasurementsCount: number;
+}
+
+export function buildClientMeasurementSpaces(
+  sets: FullMeasurementSetRow[],
+  clients?: ClientRow[]
+): ClientMeasurementSpace[] {
+  // 1. Indexer tous les clients par ID
+  const clientMap = new Map<string, ClientRow>();
+  if (clients && Array.isArray(clients)) {
+    for (const c of clients) {
+      if (c && c.id) clientMap.set(c.id, c);
+    }
+  }
+
+  // 2. Grouper les fiches de mesures par client_id
+  const setsByClientId = new Map<string, FullMeasurementSetRow[]>();
+  for (const s of sets) {
+    const cId = s.client_id || s.id;
+    if (!setsByClientId.has(cId)) {
+      setsByClientId.set(cId, []);
+    }
+    setsByClientId.get(cId)!.push(s);
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const sClient = (s as any).clients;
+    if (sClient && !clientMap.has(cId)) {
+      clientMap.set(cId, {
+        id: cId,
+        first_name: sClient.first_name || "",
+        last_name: sClient.last_name || "",
+        phone: sClient.phone || null,
+        whatsapp: sClient.whatsapp || null,
+        city: null,
+        address: null,
+        gender: sClient.gender || null,
+        notes: null,
+        photo_url: null,
+        birth_date: null,
+        created_at: s.created_at || new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        business_id: s.business_id || "",
+      });
+    }
+  }
+
+  // 3. Construire les espaces clients
+  const spaces: ClientMeasurementSpace[] = [];
+  const processedClientIds = new Set<string>();
+
+  for (const [clientId, client] of clientMap.entries()) {
+    processedClientIds.add(clientId);
+    const clientSets = setsByClientId.get(clientId) || [];
+
+    const mappedSets = clientSets.map((s) => {
+      const vals = extractMeasurementValues(s);
+      const displayName = s.template_name || s.label || "Mesures standards";
+      return {
+        id: s.id,
+        label: s.label,
+        template_name: s.template_name,
+        displayName,
+        recorded_at: s.recorded_at,
+        notes: s.notes,
+        values: vals,
+        totalValuesCount: vals.length,
+        filledValuesCount: vals.filter((v) => v.value !== null).length,
+      };
+    });
+
+    const totalFilled = mappedSets.reduce((sum, s) => sum + s.filledValuesCount, 0);
+    const fullName = `${client.first_name || ""} ${client.last_name || ""}`.trim() || "Client sans nom";
+
+    spaces.push({
+      client: {
+        id: client.id,
+        first_name: client.first_name || "",
+        last_name: client.last_name || "",
+        fullName,
+        phone: client.phone || "",
+        whatsapp: client.whatsapp || "",
+        city: client.city || "",
+        address: client.address || "",
+        gender: client.gender || "",
+        notes: client.notes || "",
+        created_at: client.created_at,
+      },
+      sets: mappedSets,
+      totalSetsCount: mappedSets.length,
+      totalMeasurementsCount: totalFilled,
+    });
+  }
+
+  // Gabarits sans fiche client préalable
+  for (const [clientId, clientSets] of setsByClientId.entries()) {
+    if (processedClientIds.has(clientId)) continue;
+    processedClientIds.add(clientId);
+
+    const firstSet = clientSets[0];
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const sClient = (firstSet as any)?.clients;
+    const fullName = sClient
+      ? `${sClient.first_name || ""} ${sClient.last_name || ""}`.trim()
+      : `Client #${clientId.slice(0, 6)}`;
+
+    const mappedSets = clientSets.map((s) => {
+      const vals = extractMeasurementValues(s);
+      const displayName = s.template_name || s.label || "Mesures standards";
+      return {
+        id: s.id,
+        label: s.label,
+        template_name: s.template_name,
+        displayName,
+        recorded_at: s.recorded_at,
+        notes: s.notes,
+        values: vals,
+        totalValuesCount: vals.length,
+        filledValuesCount: vals.filter((v) => v.value !== null).length,
+      };
+    });
+
+    const totalFilled = mappedSets.reduce((sum, s) => sum + s.filledValuesCount, 0);
+
+    spaces.push({
+      client: {
+        id: clientId,
+        first_name: sClient?.first_name || "",
+        last_name: sClient?.last_name || "",
+        fullName,
+        phone: sClient?.phone || "",
+        whatsapp: sClient?.whatsapp || "",
+        city: "",
+        address: "",
+        gender: sClient?.gender || "",
+        notes: "",
+      },
+      sets: mappedSets,
+      totalSetsCount: mappedSets.length,
+      totalMeasurementsCount: totalFilled,
+    });
+  }
+
+  return spaces.sort((a, b) => {
+    if (a.sets.length > 0 && b.sets.length === 0) return -1;
+    if (a.sets.length === 0 && b.sets.length > 0) return 1;
+    return a.client.fullName.localeCompare(b.client.fullName, "fr", { sensitivity: "base" });
+  });
+}
+
+export function generateMeasurementsCsvContent(
+  sets: FullMeasurementSetRow[],
+  clients?: ClientRow[]
+): string {
+  const spaces = buildClientMeasurementSpaces(sets, clients);
+
   const headers = [
+    "Client_Nom_Complet",
     "Client_Nom",
     "Client_Prenom",
     "Client_Telephone",
-    "Libelle_Modele",
-    "Gabarit_Type",
-    "Date_Enregistrement",
-    "Toutes_Les_Mesures",
-    "Notes",
+    "Client_WhatsApp",
+    "Client_Ville",
+    "Gabarit_Modele",
+    "Date_Releve",
+    "Toutes_Les_Mesures_Resume",
+    "Nom_Mesure",
+    "Valeur_Mesure",
+    "Unite",
+    "Notes_Gabarit",
   ];
 
-  const rows = sets.map((s) => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const c = (s as any).clients;
-    const measuresStr = (s.values || []).map((v) => `${v.name}: ${v.value ?? "-"}`).join(" | ");
+  const rows: string[][] = [];
 
-    return [
-      escapeCsvField(c?.last_name || ""),
-      escapeCsvField(c?.first_name || ""),
-      escapeCsvField(c?.phone || ""),
-      escapeCsvField(s.label || ""),
-      escapeCsvField(s.template_name || ""),
-      escapeCsvField(s.recorded_at ? s.recorded_at.slice(0, 10) : ""),
-      escapeCsvField(measuresStr),
-      escapeCsvField(s.notes || ""),
-    ];
-  });
+  for (const space of spaces) {
+    const c = space.client;
+    if (space.sets.length === 0) {
+      rows.push([
+        escapeCsvField(c.fullName),
+        escapeCsvField(c.last_name),
+        escapeCsvField(c.first_name),
+        escapeCsvField(c.phone),
+        escapeCsvField(c.whatsapp),
+        escapeCsvField(c.city),
+        escapeCsvField("Aucun gabarit"),
+        escapeCsvField(""),
+        escapeCsvField("Aucune mesure enregistrée"),
+        escapeCsvField(""),
+        escapeCsvField(""),
+        escapeCsvField(""),
+        escapeCsvField(c.notes || ""),
+      ]);
+    } else {
+      for (const set of space.sets) {
+        const resume = set.values
+          .filter((v) => v.value !== null)
+          .map((v) => `${v.name}: ${v.value} ${v.unit}`)
+          .join(" | ") || "Aucune valeur renseignée";
+
+        if (set.values.length === 0) {
+          rows.push([
+            escapeCsvField(c.fullName),
+            escapeCsvField(c.last_name),
+            escapeCsvField(c.first_name),
+            escapeCsvField(c.phone),
+            escapeCsvField(c.whatsapp),
+            escapeCsvField(c.city),
+            escapeCsvField(set.displayName),
+            escapeCsvField(set.recorded_at ? set.recorded_at.slice(0, 10) : ""),
+            escapeCsvField(resume),
+            escapeCsvField(""),
+            escapeCsvField(""),
+            escapeCsvField(""),
+            escapeCsvField(set.notes || ""),
+          ]);
+        } else {
+          for (const v of set.values) {
+            rows.push([
+              escapeCsvField(c.fullName),
+              escapeCsvField(c.last_name),
+              escapeCsvField(c.first_name),
+              escapeCsvField(c.phone),
+              escapeCsvField(c.whatsapp),
+              escapeCsvField(c.city),
+              escapeCsvField(set.displayName),
+              escapeCsvField(set.recorded_at ? set.recorded_at.slice(0, 10) : ""),
+              escapeCsvField(resume),
+              escapeCsvField(v.name),
+              escapeCsvField(v.value !== null ? v.value : ""),
+              escapeCsvField(v.unit),
+              escapeCsvField(set.notes || ""),
+            ]);
+          }
+        }
+      }
+    }
+  }
 
   return "\uFEFF" + [headers.join(";"), ...rows.map((r) => r.join(";"))].join("\r\n");
 }
 
-export function generateMeasurementsHtmlContent(sets: FullMeasurementSetRow[], businessName: string): string {
+export function generateMeasurementsHtmlContent(
+  sets: FullMeasurementSetRow[],
+  businessName: string,
+  clients?: ClientRow[]
+): string {
   const dateStr = new Date().toLocaleDateString("fr-FR", { dateStyle: "long" });
+  const spaces = buildClientMeasurementSpaces(sets, clients);
+  const measuredCount = spaces.filter((sp) => sp.sets.length > 0).length;
+  const totalMeasures = spaces.reduce((sum, sp) => sum + sp.totalMeasurementsCount, 0);
 
   return `<!DOCTYPE html>
 <html lang="fr">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Carnet de Mesures — ${businessName}</title>
+  <title>Carnet de Mesures par Client — ${businessName}</title>
   <style>${getCommonCss()}</style>
 </head>
 <body>
-  <!-- BARRE DE RETOUR FIXE -->
+  <!-- BARRE DE RETOUR FIXE (EMPECHE TOUT BLOCAGE SUR SMARTPHONE) -->
   <div class="no-print top-navigation-bar">
     <a href="/atelier" onclick="if(window.history.length > 1) { window.history.back(); return false; }" class="btn-nav-return">
       ⬅️ Retour à l'Atelier CouturPro
@@ -895,64 +1233,127 @@ export function generateMeasurementsHtmlContent(sets: FullMeasurementSetRow[], b
     <div class="header-box">
       <div>
         <h1 class="atelier-title">${businessName}</h1>
-        <p class="atelier-subtitle">Carnet de Mesures & Gabarits (${sets.length} relevé${sets.length > 1 ? "s" : ""}) — Édité le ${dateStr}</p>
+        <p class="atelier-subtitle">Carnet de Mesures par Client (${spaces.length} client${spaces.length > 1 ? "s" : ""} référencé${spaces.length > 1 ? "s" : ""}) — Édité le ${dateStr}</p>
+      </div>
+    </div>
+
+    <!-- SYNTHESE ATELIER REELLE & CONFORME -->
+    <div class="kpi-grid">
+      <div class="kpi-card">
+        <div class="lbl">Total Clients</div>
+        <div class="val">${spaces.length}</div>
+      </div>
+      <div class="kpi-card">
+        <div class="lbl">Clients Mesurés</div>
+        <div class="val" style="color:#166534;">${measuredCount}</div>
+      </div>
+      <div class="kpi-card">
+        <div class="lbl">Fiches de Mesures</div>
+        <div class="val" style="color:#8B4513;">${sets.length}</div>
+      </div>
+      <div class="kpi-card">
+        <div class="lbl">Mensurations Saisies</div>
+        <div class="val" style="color:#2563eb;">${totalMeasures}</div>
       </div>
     </div>
 
     <div class="no-print">
-      <input type="text" id="searchInput" class="search-box" placeholder="🔍 Rechercher un relevé (client, modèle, libellé)..." oninput="filterSets()" />
+      <input type="text" id="searchInput" class="search-box" placeholder="🔍 Rechercher un client, téléphone, modèle ou mesure (ex: poitrine, taille, 0708, Kouamé)..." oninput="filterClientCards()" />
     </div>
 
-    <div id="setsContainer">
-      ${sets.length === 0 ? '<div class="item-card" style="text-align:center; color:#64748b;">Aucun relevé de mesure enregistré.</div>' : sets.map((s) => {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const c = (s as any).clients;
-        const clientName = c ? `${c.first_name || ""} ${c.last_name || ""}`.trim() : "Client non spécifié";
-        const phone = c?.phone || c?.whatsapp || "";
-        const label = s.label || s.template_name || "Mesures standards";
-        const dateRecorded = s.recorded_at ? s.recorded_at.slice(0, 10) : "";
-        const values = s.values || [];
+    <div id="clientSpacesContainer">
+      ${spaces.length === 0 ? '<div class="item-card" style="text-align:center; color:#64748b;">Aucun client ni relevé de mesure dans cet atelier.</div>' : spaces.map((space) => {
+        const c = space.client;
+        const phone = c.phone || c.whatsapp || "";
+        const cleanPhone = phone.replace(/[^0-9+]/g, "");
+        const searchTokens = [
+          c.fullName,
+          c.phone,
+          c.whatsapp,
+          c.city,
+          ...space.sets.map(s => `${s.displayName} ${s.notes || ""} ${s.values.map(v => `${v.name} ${v.value ?? ""}`).join(" ")}`)
+        ].join(" ").toLowerCase();
 
         return `
-          <div class="item-card set-item" data-search="${clientName.toLowerCase()} ${label.toLowerCase()} ${phone}">
-            <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:8px;">
+          <div class="item-card client-space-card" data-search="${searchTokens}">
+            <!-- EN-TETE DE L'ESPACE CLIENT -->
+            <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:8px; border-bottom:1px solid #e2e8f0; padding-bottom:8px;">
               <div>
-                <span style="font-size:10px; font-weight:700; color:#8B4513; text-transform:uppercase;">Gabarit / Modèle</span>
-                <h3 style="margin:2px 0 2px 0; font-size:15px; font-weight:700; color:#0f172a;">${clientName}</h3>
-                <div style="color:#64748b; font-size:12px;">${label} ${dateRecorded ? `• Relevé le ${dateRecorded}` : ""}</div>
+                <span style="font-size:10px; font-weight:700; color:#8B4513; text-transform:uppercase; letter-spacing:0.5px;">Espace Client</span>
+                <h3 style="margin:2px 0 2px 0; font-size:16px; font-weight:700; color:#0f172a;">${c.fullName}</h3>
+                <div style="color:#64748b; font-size:12px; margin-top:2px;">
+                  ${c.phone ? `<span>📞 ${c.phone}</span>` : ""}
+                  ${c.whatsapp && c.whatsapp !== c.phone ? ` • <span>💬 WhatsApp : ${c.whatsapp}</span>` : ""}
+                  ${c.city ? ` • <span>📍 ${c.city}</span>` : ""}
+                  ${c.gender ? ` • <span>👤 ${c.gender}</span>` : ""}
+                </div>
               </div>
-              ${phone ? `<div class="no-print"><a href="tel:${phone}" class="btn-contact btn-call">📞 ${phone}</a></div>` : ""}
+              <div style="display:flex; align-items:center; gap:8px;">
+                <span class="badge ${space.sets.length > 0 ? 'badge-paid' : 'badge-neutral'}">
+                  ${space.sets.length} gabarit${space.sets.length > 1 ? "s" : ""}
+                </span>
+                ${cleanPhone ? `
+                  <div class="no-print">
+                    <a href="tel:${cleanPhone}" class="btn-contact btn-call">📞 Appeler</a>
+                    <a href="https://wa.me/${cleanPhone.replace('+', '')}" target="_blank" class="btn-contact btn-wa">💬 WhatsApp</a>
+                  </div>
+                ` : ""}
+              </div>
             </div>
 
-            <!-- VALEURS DES MESURES -->
-            <div style="margin-top:10px; padding:10px; background:#f8fafc; border-radius:8px; border:1px solid #e2e8f0;">
-              ${values.length === 0 ? '<span style="color:#94a3b8; font-size:11px;">Aucune mesure renseignée.</span>' : `
-                <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(130px, 1fr)); gap:6px;">
-                  ${values.map((v) => `
-                    <div style="background:#ffffff; border:1px solid #e2e8f0; border-radius:6px; padding:4px 8px; font-size:11px;">
-                      <span style="color:#64748b; font-size:10px; display:block;">${v.name}</span>
-                      <strong style="color:#8B4513; font-size:12px;">${v.value ?? "-"}</strong>
-                    </div>
-                  `).join("")}
+            <!-- FICHES ET MENSURATIONS DE CE CLIENT -->
+            ${space.sets.length === 0 ? `
+              <div style="margin-top:10px; padding:10px; text-align:center; color:#94a3b8; font-size:12px; font-style:italic;">
+                Aucune fiche de mesure enregistrée pour ce client.
+              </div>
+            ` : space.sets.map((s, idx) => `
+              <div style="margin-top:10px; background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; padding:10px;">
+                <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:6px; margin-bottom:8px;">
+                  <div>
+                    <span style="font-size:10px; font-weight:700; color:#475569; text-transform:uppercase;">Gabarit #${idx + 1}</span>
+                    <div style="font-size:14px; font-weight:700; color:#0f172a;">${s.displayName}</div>
+                  </div>
+                  <div style="font-size:11px; color:#64748b;">
+                    Relevé le : <strong>${s.recorded_at ? s.recorded_at.slice(0, 10) : "Non précisé"}</strong>
+                  </div>
                 </div>
-              `}
-            </div>
-            ${s.notes ? `<div style="margin-top:8px; font-size:11px; color:#475569;"><strong>Notes :</strong> ${s.notes}</div>` : ""}
+
+                <!-- GRILLE COMPLETE DES MESURES REELLES -->
+                ${s.values.length === 0 ? `
+                  <div style="font-size:11px; color:#94a3b8; font-style:italic;">Aucune mesure renseignée pour ce gabarit.</div>
+                ` : `
+                  <div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(130px, 1fr)); gap:6px;">
+                    ${s.values.map(v => `
+                      <div style="background:#ffffff; border:1px solid #cbd5e1; border-radius:6px; padding:6px 8px;">
+                        <span style="display:block; font-size:10px; color:#64748b; font-weight:600; text-transform:uppercase;">${v.name}</span>
+                        <strong style="display:block; font-size:13px; color:#8B4513; margin-top:2px;">${v.value !== null ? `${v.value} ${v.unit}` : '—'}</strong>
+                      </div>
+                    `).join("")}
+                  </div>
+                `}
+
+                ${s.notes ? `
+                  <div style="margin-top:8px; font-size:11px; color:#475569; background:#ffffff; border-left:3px solid #8B4513; padding:6px 10px; border-radius:0 4px 4px 0;">
+                    <strong>Note de confection :</strong> ${s.notes}
+                  </div>
+                ` : ""}
+              </div>
+            `).join("")}
           </div>
         `;
       }).join("")}
     </div>
 
     <div class="footer">
-      Document officiel généré par CouturPro — Carnet de Mesures de l'Atelier.<br />
+      Document officiel généré par CouturPro — Carnet des Mesures par Client.<br />
       Tous droits réservés à l'atelier ${businessName}.
     </div>
   </div>
 
   <script>
-    function filterSets() {
+    function filterClientCards() {
       const q = document.getElementById('searchInput').value.toLowerCase().trim();
-      const items = document.querySelectorAll('.set-item');
+      const items = document.querySelectorAll('.client-space-card');
       items.forEach(el => {
         const text = el.getAttribute('data-search') || '';
         el.style.display = text.includes(q) ? 'block' : 'none';
@@ -963,77 +1364,175 @@ export function generateMeasurementsHtmlContent(sets: FullMeasurementSetRow[], b
 </html>`;
 }
 
-export function generateMeasurementsTxtContent(sets: FullMeasurementSetRow[], businessName: string): string {
+export function generateMeasurementsTxtContent(
+  sets: FullMeasurementSetRow[],
+  businessName: string,
+  clients?: ClientRow[]
+): string {
+  const spaces = buildClientMeasurementSpaces(sets, clients);
+  const totalMeasures = spaces.reduce((sum, sp) => sum + sp.totalMeasurementsCount, 0);
+
   const lines = [
     "==============================================================================",
-    `COUTURPRO — CARNET DE MESURES : ${businessName}`,
+    `COUTURPRO — CARNET OFFICIEL DES MESURES PAR CLIENT : ${businessName}`,
     `Date d'édition : ${new Date().toLocaleDateString("fr-FR", { dateStyle: "long" })}`,
-    `Total gabarits : ${sets.length}`,
+    `Total clients : ${spaces.length} | Fiches : ${sets.length} | Mensurations enregistrées : ${totalMeasures}`,
     "==============================================================================",
     "",
   ];
 
-  sets.forEach((s) => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const c = (s as any).clients;
-    const clientName = c ? `${c.first_name || ""} ${c.last_name || ""}`.trim() : "Client non spécifié";
-    const label = s.label || s.template_name || "Mesures";
+  spaces.forEach((space, sIdx) => {
+    const c = space.client;
+    lines.push(`==============================================================================`);
+    lines.push(`ESPACE CLIENT #${sIdx + 1} : ${c.fullName.toUpperCase()}`);
+    if (c.phone || c.whatsapp) {
+      lines.push(`  Téléphone : ${c.phone || "—"} | WhatsApp : ${c.whatsapp || "—"}`);
+    }
+    if (c.city || c.address) {
+      lines.push(`  Localisation : ${[c.city, c.address].filter(Boolean).join(" - ")}`);
+    }
+    if (c.gender) {
+      lines.push(`  Genre : ${c.gender}`);
+    }
+    lines.push(`  Fiches de mesures associées : ${space.sets.length}`);
+    lines.push(`------------------------------------------------------------------------------`);
 
-    lines.push(`CLIENT : ${clientName} | Modèle: ${label} | Date: ${s.recorded_at ? s.recorded_at.slice(0, 10) : "—"}`);
-    if (s.values && s.values.length > 0) {
-      lines.push("    Valeurs :");
-      s.values.forEach((v) => {
-        lines.push(`      - ${v.name.padEnd(25, " ")}: ${v.value ?? "-"}`);
+    if (space.sets.length === 0) {
+      lines.push("  (Aucune fiche de mesure enregistrée pour ce client)");
+    } else {
+      space.sets.forEach((set, setIdx) => {
+        lines.push(`  FICHE N°${setIdx + 1} : ${set.displayName} (Relevé le ${set.recorded_at ? set.recorded_at.slice(0, 10) : "—"})`);
+        if (set.notes) lines.push(`  Note atelier : ${set.notes}`);
+        lines.push("  Mensurations relevées :");
+        if (set.values.length === 0) {
+          lines.push("    - Aucune mesure renseignée");
+        } else {
+          set.values.forEach((v) => {
+            const valStr = v.value !== null ? `${v.value} ${v.unit}` : "—";
+            lines.push(`    • ${v.name.padEnd(28, " ")}: ${valStr}`);
+          });
+        }
+        lines.push("");
       });
     }
-    if (s.notes) lines.push(`    Notes : ${s.notes}`);
-    lines.push("------------------------------------------------------------------------------");
+    lines.push("");
   });
 
   return lines.join("\r\n");
 }
 
-export function generateMeasurementsPdf(sets: FullMeasurementSetRow[], businessName: string): PdfDocument {
+export function generateMeasurementsPdf(
+  sets: FullMeasurementSetRow[],
+  businessName: string,
+  clients?: ClientRow[]
+): PdfDocument {
   const doc = new PdfDocument({
-    title: "CARNET OFFICIEL DES MESURES",
+    title: "CARNET OFFICIEL DES MESURES DE L'ATELIER",
     businessName,
   });
 
-  const uniqueClients = new Set(sets.map((s) => s.client_id).filter(Boolean)).size;
+  const spaces = buildClientMeasurementSpaces(sets, clients);
+  const measuredClients = spaces.filter((sp) => sp.sets.length > 0);
+  const totalMeasures = spaces.reduce((sum, sp) => sum + sp.totalMeasurementsCount, 0);
 
   doc.addSummaryCards([
-    { label: "Total Relevés", value: String(sets.length), color: [0.85, 0.55, 0.1] },
-    { label: "Clients Mesurés", value: String(uniqueClients), color: [0.2, 0.4, 0.8] },
-    { label: "Date de Référence", value: new Date().toLocaleDateString("fr-FR"), color: [0.3, 0.6, 0.4] },
+    { label: "Clients Référencés", value: String(spaces.length), color: [0.2, 0.4, 0.8] },
+    { label: "Clients Mesurés", value: String(measuredClients.length), color: [0.1, 0.6, 0.3] },
+    { label: "Total Gabarits", value: String(sets.length), color: [0.85, 0.55, 0.1] },
+    { label: "Mensurations Relevées", value: String(totalMeasures), color: [0.55, 0.25, 0.75] },
   ]);
 
-  doc.addSectionTitle(`Relevés de Mensurations de l'Atelier (${sets.length} fiches)`);
+  doc.addSectionTitle(`Espaces Mesures par Client (${measuredClients.length} clients avec mensurations)`);
 
-  const columns = [
-    { header: "Client", width: 110, bold: true },
-    { header: "Modèle / Gabarit", width: 100 },
-    { header: "Date", width: 60, align: "center" as const },
-    { header: "Relevé des Mensurations (cm)", width: 245 },
+  const measureColumns: PdfTableColumn[] = [
+    { header: "Point de Mesure", width: 145, bold: true },
+    { header: "Valeur (cm)", width: 100, align: "center" as const, color: [0.55, 0.25, 0.05] as [number, number, number], bold: true },
+    { header: "Point de Mesure", width: 145, bold: true },
+    { header: "Valeur (cm)", width: 100, align: "center" as const, color: [0.55, 0.25, 0.05] as [number, number, number], bold: true },
   ];
 
-  const rows = sets.map((s) => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const c = (s as any).clients;
-    const clientName = c ? `${c.first_name || ""} ${c.last_name || ""}`.trim() : "Client";
-    const measuresStr = (s.values || [])
-      .filter((v) => v.value !== null && v.value !== undefined && v.value !== "")
-      .map((v) => `${v.name}: ${v.value}`)
-      .join(" • ") || "Aucune mesure saisie";
+  for (const space of measuredClients) {
+    const c = space.client;
+    const contactParts = [
+      c.phone ? `Tél: ${c.phone}` : null,
+      c.whatsapp && c.whatsapp !== c.phone ? `WhatsApp: ${c.whatsapp}` : null,
+      c.city ? `Ville: ${c.city}` : null,
+      c.gender ? `Genre: ${c.gender}` : null,
+      `${space.sets.length} gabarit${space.sets.length > 1 ? "s" : ""}`,
+    ].filter(Boolean).join("  •  ");
 
-    return [
-      clientName,
-      s.label || s.template_name || "Modèle",
-      s.recorded_at ? s.recorded_at.slice(0, 10) : "-",
-      measuresStr,
+    doc.addClientHeader(c.fullName, contactParts);
+
+    for (const set of space.sets) {
+      doc.ensureSpace(30);
+      const setDate = set.recorded_at ? set.recorded_at.slice(0, 10) : "-";
+      doc.drawText(
+        `Gabarit : ${set.displayName.toUpperCase()} (Relevé le ${setDate})`,
+        doc.margin + 8,
+        doc.cursorY - 8,
+        9,
+        "bold",
+        [0.2, 0.25, 0.35]
+      );
+      doc.cursorY -= 16;
+
+      if (set.notes) {
+        doc.ensureSpace(18);
+        doc.drawText(
+          `Note atelier : ${set.notes}`,
+          doc.margin + 12,
+          doc.cursorY - 6,
+          8,
+          "italic",
+          [0.45, 0.5, 0.55]
+        );
+        doc.cursorY -= 14;
+      }
+
+      const values = set.values;
+      if (values.length === 0) {
+        doc.addTable(
+          [
+            { header: "Mensurations", width: 245 },
+            { header: "État", width: 245, align: "center" as const },
+          ],
+          [["Relevé anatomique", "Aucune mesure renseignée"]]
+        );
+      } else {
+        const tableRows: string[][] = [];
+        for (let i = 0; i < values.length; i += 2) {
+          const v1 = values[i];
+          const v2 = values[i + 1];
+          const val1Str = v1.value !== null ? `${v1.value} ${v1.unit}` : "—";
+          const val2Str = v2 ? (v2.value !== null ? `${v2.value} ${v2.unit}` : "—") : "";
+          tableRows.push([v1.name, val1Str, v2 ? v2.name : "", val2Str]);
+        }
+        doc.addTable(measureColumns, tableRows);
+      }
+      doc.cursorY -= 10;
+    }
+  }
+
+  // Section des clients sans fiches de mesures
+  const unmeasuredClients = spaces.filter((sp) => sp.sets.length === 0);
+  if (unmeasuredClients.length > 0) {
+    doc.ensureSpace(80);
+    doc.addSectionTitle(`Clients en attente de prise de mesures (${unmeasuredClients.length})`);
+    const unCols = [
+      { header: "Client", width: 160, bold: true },
+      { header: "Téléphone", width: 110 },
+      { header: "WhatsApp", width: 110 },
+      { header: "Ville / Quartier", width: 110 },
     ];
-  });
+    const unRows = unmeasuredClients.map((sp) => [
+      sp.client.fullName,
+      sp.client.phone || "—",
+      sp.client.whatsapp || "—",
+      [sp.client.city, sp.client.address].filter(Boolean).join(" • ") || "—",
+    ]);
+    doc.addTable(unCols, unRows);
+  }
 
-  doc.addTable(columns, rows);
   return doc;
 }
 
@@ -1402,27 +1901,62 @@ export function generateFullWorkshopHtmlContent(data: CompleteWorkshopData, busi
       </div>
     </div>
 
-    <!-- SECTION MESURES -->
+    <!-- SECTION MESURES PAR ESPACE CLIENT -->
     <div id="tab-measures" class="tab-content" style="display:none;">
       <div class="no-print">
-        <input type="text" class="search-box" placeholder="🔍 Rechercher une fiche de mesure..." oninput="filterList(this, '#list-measures .item-card')" />
+        <input type="text" class="search-box" placeholder="🔍 Rechercher un client, modèle ou mesure (ex: poitrine, tour de taille, Kouamé, 07...)..." oninput="filterList(this, '#list-measures .item-card')" />
       </div>
       <div id="list-measures">
-        ${data.measurementSets.map((s) => {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const c = (s as any).clients;
-          const clientName = c ? `${c.first_name || ""} ${c.last_name || ""}`.trim() : "Client non spécifié";
+        ${buildClientMeasurementSpaces(data.measurementSets, data.clients).map((sp) => {
+          const c = sp.client;
+          const searchKey = [
+            c.fullName,
+            c.phone,
+            c.whatsapp,
+            c.city,
+            ...sp.sets.map(s => `${s.displayName} ${s.values.map(v => `${v.name} ${v.value ?? ""}`).join(" ")}`)
+          ].join(" ").toLowerCase();
+
           return `
-            <div class="item-card" data-search="${clientName.toLowerCase()} ${(s.label||'').toLowerCase()}">
-              <strong style="font-size:14px; color:#0f172a;">${clientName}</strong> — <span style="color:#64748b; font-size:12px;">${s.label || s.template_name || "Mesures"}</span>
-              <div style="margin-top:8px; display:grid; grid-template-columns:repeat(auto-fit, minmax(120px, 1fr)); gap:6px;">
-                ${(s.values || []).map(v => `
-                  <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:6px; padding:4px 8px; font-size:11px;">
-                    <span style="color:#64748b; font-size:10px; display:block;">${v.name}</span>
-                    <strong style="color:#8B4513;">${v.value ?? "-"}</strong>
+            <div class="item-card" data-search="${searchKey}">
+              <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:8px; border-bottom:1px solid #e2e8f0; padding-bottom:6px;">
+                <div>
+                  <span style="font-size:10px; font-weight:700; color:#8B4513; text-transform:uppercase;">Espace Client</span>
+                  <div style="font-size:15px; font-weight:700; color:#0f172a;">${c.fullName}</div>
+                  <div style="color:#64748b; font-size:11px;">
+                    ${c.phone ? `<span>📞 ${c.phone}</span>` : ""}
+                    ${c.whatsapp && c.whatsapp !== c.phone ? ` • <span>💬 ${c.whatsapp}</span>` : ""}
+                    ${c.city ? ` • <span>📍 ${c.city}</span>` : ""}
                   </div>
-                `).join("")}
+                </div>
+                <span class="badge ${sp.sets.length > 0 ? 'badge-paid' : 'badge-neutral'}">
+                  ${sp.sets.length} gabarit${sp.sets.length > 1 ? "s" : ""}
+                </span>
               </div>
+
+              ${sp.sets.length === 0 ? `
+                <div style="margin-top:8px; color:#94a3b8; font-size:11px; font-style:italic;">Aucune fiche de mesure enregistrée.</div>
+              ` : sp.sets.map((s, idx) => `
+                <div style="margin-top:8px; background:#f8fafc; border:1px solid #e2e8f0; border-radius:6px; padding:8px;">
+                  <div style="display:flex; justify-content:space-between; font-size:12px; font-weight:700; color:#0f172a;">
+                    <span>📐 ${s.displayName}</span>
+                    <span style="font-size:11px; font-weight:400; color:#64748b;">${s.recorded_at ? s.recorded_at.slice(0, 10) : ""}</span>
+                  </div>
+                  ${s.values.length === 0 ? `
+                    <div style="font-size:11px; color:#94a3b8; font-style:italic; margin-top:4px;">Aucune mesure renseignée.</div>
+                  ` : `
+                    <div style="margin-top:6px; display:grid; grid-template-columns:repeat(auto-fit, minmax(120px, 1fr)); gap:6px;">
+                      ${s.values.map(v => `
+                        <div style="background:#ffffff; border:1px solid #cbd5e1; border-radius:4px; padding:4px 8px; font-size:11px;">
+                          <span style="color:#64748b; font-size:10px; display:block;">${v.name}</span>
+                          <strong style="color:#8B4513;">${v.value !== null ? `${v.value} ${v.unit}` : '—'}</strong>
+                        </div>
+                      `).join("")}
+                    </div>
+                  `}
+                  ${s.notes ? `<div style="margin-top:6px; font-size:11px; color:#475569;"><em>Note : ${s.notes}</em></div>` : ""}
+                </div>
+              `).join("")}
             </div>
           `;
         }).join("")}
@@ -1578,17 +2112,18 @@ export function generateFullWorkshopPdf(data: CompleteWorkshopData, businessName
     doc.addSectionTitle(`4. Carnet de Mesures (${data.measurementSets.length} au total)`);
     const measColumns = [
       { header: "Client", width: 110, bold: true },
-      { header: "Modèle", width: 100 },
+      { header: "Modèle", width: 95 },
       { header: "Date", width: 60, align: "center" as const },
-      { header: "Mensurations Clés", width: 245 },
+      { header: "Mensurations Relevées", width: 250 },
     ];
-    const measRows = data.measurementSets.slice(0, 30).map((s) => {
+    const measRows = data.measurementSets.map((s) => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const c = (s as any).clients;
       const clientName = c ? `${c.first_name || ""} ${c.last_name || ""}`.trim() : "Client";
-      const measuresStr = (s.values || [])
-        .filter((v) => v.value !== null && v.value !== undefined && v.value !== "")
-        .map((v) => `${v.name}: ${v.value}`)
+      const values = extractMeasurementValues(s);
+      const measuresStr = values
+        .filter((v) => v.value !== null)
+        .map((v) => `${v.name}: ${v.value} ${v.unit}`)
         .join(" • ") || "Aucune mesure saisie";
       return [
         clientName,
@@ -1674,21 +2209,21 @@ export async function exportCategoryData(
     case "measurements": {
       filename = `couturpro_mesures_${cleanName}_${dateStr}`;
       if (format === "csv") {
-        content = generateMeasurementsCsvContent(data.measurementSets);
+        content = generateMeasurementsCsvContent(data.measurementSets, data.clients);
         mimeType = "text/csv;charset=utf-8";
         filename += ".csv";
       } else if (format === "pdf") {
-        const doc = generateMeasurementsPdf(data.measurementSets, businessName);
+        const doc = generateMeasurementsPdf(data.measurementSets, businessName, data.clients);
         const pdfBlob = doc.generateBlob();
         downloadBlob(pdfBlob, `${filename}.pdf`);
         await logAudit(businessId, "DATA_EXPORT_MEASURES_PDF", { count: data.measurementSets.length });
         return;
       } else if (format === "html") {
-        content = generateMeasurementsHtmlContent(data.measurementSets, businessName);
+        content = generateMeasurementsHtmlContent(data.measurementSets, businessName, data.clients);
         mimeType = "text/html;charset=utf-8";
         filename += ".html";
       } else if (format === "txt") {
-        content = generateMeasurementsTxtContent(data.measurementSets, businessName);
+        content = generateMeasurementsTxtContent(data.measurementSets, businessName, data.clients);
         mimeType = "text/plain;charset=utf-8";
         filename += ".txt";
       }
@@ -1744,20 +2279,20 @@ export async function exportWorkshopFullZip(businessId: string, businessName: st
   // 2. VÉRITABLES DOCUMENTS PDF STANDARDS (OUVRABLES SUR SMARTPHONE OU IMPRIMABLES DIRECTEMENT)
   zip.addFile("00_Grand_Livre_Complet.pdf", generateFullWorkshopPdf(data, businessName).generateBytes());
   zip.addFile("01_Clients_Document.pdf", generateClientsPdf(data.clients, businessName).generateBytes());
-  zip.addFile("02_Mesures_Document.pdf", generateMeasurementsPdf(data.measurementSets, businessName).generateBytes());
+  zip.addFile("02_Mesures_Document.pdf", generateMeasurementsPdf(data.measurementSets, businessName, data.clients).generateBytes());
   zip.addFile("03_Commandes_Document.pdf", generateOrdersPdf(data.orders, businessName, currency).generateBytes());
   zip.addFile("04_Charges_Depenses_Document.pdf", generateExpensesPdf(data.expenses, businessName, currency).generateBytes());
 
   // 3. FICHIERS TABLEURS CSV (POUR EXCEL, SHEETS, LIBREOFFICE)
   zip.addFile("01_Clients_Excel.csv", generateClientsCsvContent(data.clients));
-  zip.addFile("02_Mesures_Excel.csv", generateMeasurementsCsvContent(data.measurementSets));
+  zip.addFile("02_Mesures_Excel.csv", generateMeasurementsCsvContent(data.measurementSets, data.clients));
   zip.addFile("03_Commandes_Excel.csv", generateOrdersCsvContent(data.orders));
   zip.addFile("04_Charges_Depenses_Excel.csv", generateExpensesCsvContent(data.expenses));
   zip.addFile("05_Rendez_Vous_Excel.csv", generateAppointmentsCsvContent(data.appointments));
 
   // 4. FICHES TEXTES CLAIRES (LISIBLES SUR TOUT BLOC-NOTES)
   zip.addFile("01_Clients_Texte.txt", generateClientsTxtContent(data.clients, businessName));
-  zip.addFile("02_Mesures_Texte.txt", generateMeasurementsTxtContent(data.measurementSets, businessName));
+  zip.addFile("02_Mesures_Texte.txt", generateMeasurementsTxtContent(data.measurementSets, businessName, data.clients));
   zip.addFile("03_Commandes_Texte.txt", generateOrdersTxtContent(data.orders, businessName, currency));
   zip.addFile("04_Charges_Depenses_Texte.txt", generateExpensesTxtContent(data.expenses, businessName, currency));
 

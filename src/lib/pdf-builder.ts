@@ -339,6 +339,26 @@ export class PdfDocument {
     this.cursorY -= 26;
   }
 
+  public ensureSpace(neededHeight: number): void {
+    if (this.cursorY - neededHeight < this.margin + 35) {
+      this.startNewPage();
+    }
+  }
+
+  public addClientHeader(name: string, contactInfo: string): void {
+    this.ensureSpace(42);
+    // Fond bandeau client sobre et distingué
+    this.drawRect(this.margin, this.cursorY - 32, this.contentWidth, 32, [0.93, 0.95, 0.98], true);
+    this.drawRect(this.margin, this.cursorY - 32, 4, 32, [0.55, 0.27, 0.07], true); // Accent brun atelier
+    this.drawRect(this.margin, this.cursorY - 32, this.contentWidth, 32, [0.82, 0.86, 0.92], false, 0.5);
+
+    this.drawText(name.toUpperCase(), this.margin + 12, this.cursorY - 14, 10, "bold", [0.1, 0.15, 0.25]);
+    if (contactInfo) {
+      this.drawText(contactInfo, this.margin + 12, this.cursorY - 26, 7.5, "regular", [0.35, 0.4, 0.48]);
+    }
+    this.cursorY -= 40;
+  }
+
   public addParagraph(text: string): void {
     if (this.cursorY < this.margin + 40) {
       this.startNewPage();
