@@ -1,9 +1,9 @@
 /**
  * CouturPro — Moteur d'Exportation Multi-Formats, Portabilité & Sauvegarde Intégrale
  * Formats universels adaptés à TOUT type d'appareil (Smartphones Android, iPhone, Tablettes, PC) :
- * 1. Document Universel (PDF / Impression native) — S'ouvre sur 100% des smartphones sans aucune application
- * 2. Fiche Web Autonome (.html) — Consultable dans n'importe quel navigateur hors-ligne, interactif
- * 3. Tableur (.csv) — Compatible Microsoft Excel, Google Sheets, LibreOffice avec UTF-8 BOM
+ * 1. Tableur (.csv) — Compatible Microsoft Excel, Google Sheets, LibreOffice avec UTF-8 BOM
+ * 2. Document Imprimable (PDF / A4) — Mise en page officielle avec en-tête, bilans et bouton d'impression
+ * 3. Fiche Web Autonome (.html) — Consultable hors-ligne dans n'importe quel navigateur mobile, interactif
  * 4. Fiche Texte Lisible (.txt) — Compatible bloc-notes, SMS, WhatsApp
  * 5. Dossier ZIP Complet Multi-Formats — Contient l'application web hors-ligne, les CSV, TXT, JSON et notices
  * 6. Sauvegarde Brute JSON conforme RGPD Art. 20
@@ -12,6 +12,10 @@
 import { supabase } from "@/integrations/supabase/client";
 import { getAllLocalItems, getLocalItem } from "@/lib/offline-storage";
 import {
+  fetchOrders,
+  fetchClients,
+  fetchAllMeasurementSets,
+  fetchAppointments,
   type ClientRow,
   type OrderRow,
   type AppointmentRow,
@@ -24,7 +28,7 @@ import { EXPENSE_CATEGORIES } from "@/lib/expenses-types";
 import { SimpleZip } from "@/lib/zip-builder";
 import { fcfa } from "@/lib/format";
 
-export type ExportFormat = "pdf" | "html" | "csv" | "txt";
+export type ExportFormat = "csv" | "pdf" | "html" | "txt";
 
 function sanitizeFilename(name: string): string {
   return name.replace(/[^a-z0-9_-]/gi, "_").toLowerCase();
@@ -35,10 +39,12 @@ function downloadBlob(blob: Blob, filename: string): void {
   const a = document.createElement("a");
   a.href = url;
   a.download = filename;
+  a.target = "_blank";
+  a.rel = "noopener noreferrer";
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
 }
 
 function escapeCsvField(val: unknown): string {
@@ -63,7 +69,7 @@ async function logAudit(businessId: string, action: string, details: Record<stri
 }
 
 // -----------------------------------------------------------------------------
-// COLLECTE UNIFIÉE DES DONNÉES ATELIER (OFFLINE-FIRST)
+// COLLECTE UNIFIÉE DES DONNÉES ATELIER (OFFLINE-FIRST AVEC ENRICHISSEMENT EXACT)
 // -----------------------------------------------------------------------------
 
 export interface CompleteWorkshopData {
@@ -79,94 +85,69 @@ export interface CompleteWorkshopData {
 }
 
 export async function fetchFullWorkshopData(businessId: string): Promise<CompleteWorkshopData> {
-  const isOnline = typeof navigator !== "undefined" ? navigator.onLine : true;
+  // On utilise les requêtes officielles de l'application (fetchOrders, fetchClients, fetchAllMeasurementSets)
+  // pour garantir que les paiements, acomptes, soldes, clients et valeurs sont 100% exacts, enrichis et vérifiés.
+  const [biz, clientsList, ordersList, setsList, apptsList, localExpenses] = await Promise.all([
+    getLocalItem<Record<string, unknown>>("business", businessId),
+    fetchClients().catch(() => [] as ClientRow[]),
+    fetchOrders().catch(() => [] as OrderRow[]),
+    fetchAllMeasurementSets().catch(() => [] as FullMeasurementSetRow[]),
+    fetchAppointments().catch(() => [] as AppointmentRow[]),
+    getAllLocalItems<ExpenseRow>("expenses").catch(() => [] as ExpenseRow[]),
+  ]);
 
-  if (isOnline) {
+  let serverExpenses: ExpenseRow[] = [];
+  let businessData = biz;
+
+  if (typeof navigator === "undefined" || navigator.onLine) {
     try {
-      const [
-        bizRes,
-        clientsRes,
-        ordersRes,
-        paymentsRes,
-        setsRes,
-        apptsRes,
-        expensesRes,
-        garmentsRes,
-        modelsRes,
-      ] = await Promise.all([
+      const [bizRes, expRes] = await Promise.all([
         supabase.from("businesses").select("*").eq("id", businessId).maybeSingle(),
-        supabase.from("clients").select("*").eq("business_id", businessId).order("first_name", { ascending: true }),
-        supabase.from("orders").select("*, clients(first_name, last_name, phone)").eq("business_id", businessId).order("ordered_at", { ascending: false }),
-        supabase.from("payments").select("*"),
-        supabase.from("measurement_sets").select("*, clients(first_name, last_name, phone), measurement_values(*)").eq("business_id", businessId),
-        supabase.from("appointments").select("*, clients(first_name, last_name, phone)").eq("business_id", businessId),
         supabase.from("expenses").select("*").eq("business_id", businessId).order("expense_date", { ascending: false }),
-        supabase.from("garment_types").select("*").eq("business_id", businessId),
-        supabase.from("catalog_models").select("*").eq("business_id", businessId),
       ]);
-
-      if (!bizRes.error && !clientsRes.error && !ordersRes.error) {
-        return {
-          business: (bizRes.data as Record<string, unknown>) || null,
-          clients: (clientsRes.data as ClientRow[]) || [],
-          orders: (ordersRes.data as OrderRow[]) || [],
-          payments: (paymentsRes.data as Array<Record<string, unknown>>) || [],
-          measurementSets: (setsRes.data as FullMeasurementSetRow[]) || [],
-          appointments: (apptsRes.data as AppointmentRow[]) || [],
-          expenses: (expensesRes.data as ExpenseRow[]) || [],
-          garmentTypes: (garmentsRes.data as Array<Record<string, unknown>>) || [],
-          catalogModels: (modelsRes.data as Array<Record<string, unknown>>) || [],
-        };
-      }
+      if (bizRes.data) businessData = bizRes.data as Record<string, unknown>;
+      if (expRes.data) serverExpenses = (expRes.data as ExpenseRow[]) || [];
     } catch {
-      // Bascule silencieuse vers stockage local
+      // Ignorer si échec réseau
     }
   }
 
-  // Fallback 100% local (IndexedDB)
-  const [biz, clients, orders, sets, appts, expenses] = await Promise.all([
-    getLocalItem<Record<string, unknown>>("business", businessId),
-    getAllLocalItems<ClientRow>("clients"),
-    getAllLocalItems<OrderRow>("orders"),
-    getAllLocalItems<FullMeasurementSetRow>("measurement_sets"),
-    getAllLocalItems<AppointmentRow>("appointments"),
-    getAllLocalItems<ExpenseRow>("expenses"),
-  ]);
+  // Fusionner les dépenses (locales + serveur sans doublons)
+  const expenseMap = new Map<string, ExpenseRow>();
+  for (const e of [...serverExpenses, ...localExpenses]) {
+    if (e && e.id && (!businessId || !e.business_id || e.business_id === businessId)) {
+      expenseMap.set(e.id, e);
+    }
+  }
+  const mergedExpenses = Array.from(expenseMap.values()).sort(
+    (a, b) => (b.expense_date || "").localeCompare(a.expense_date || "")
+  );
 
-  const workshopClients = clients.filter((c) => c.business_id === businessId);
-  const clientMap = new Map(workshopClients.map((c) => [c.id, c]));
+  // Filtrer pour l'atelier courant
+  const workshopOrders = ordersList.filter(
+    (o) => !businessId || !o.business_id || o.business_id === businessId
+  );
 
-  const workshopOrders = orders
-    .filter((o) => o.business_id === businessId)
-    .map((o) => ({
-      ...o,
-      clients: o.client_id ? clientMap.get(o.client_id) || null : null,
-    }));
+  const workshopClients = clientsList.filter(
+    (c) => !businessId || !c.business_id || c.business_id === businessId
+  );
 
-  const workshopSets = sets
-    .filter((s) => s.business_id === businessId)
-    .map((s) => ({
-      ...s,
-      clients: s.client_id ? clientMap.get(s.client_id) || null : null,
-    }));
+  const workshopSets = setsList.filter(
+    (s) => !businessId || !s.business_id || s.business_id === businessId
+  );
 
-  const workshopAppts = appts
-    .filter((a) => a.business_id === businessId)
-    .map((a) => ({
-      ...a,
-      clients: a.client_id ? clientMap.get(a.client_id) || null : null,
-    }));
-
-  const workshopExpenses = expenses.filter((e) => !e.business_id || e.business_id === businessId);
+  const workshopAppts = apptsList.filter(
+    (a) => !businessId || !a.business_id || a.business_id === businessId
+  );
 
   return {
-    business: biz || null,
+    business: businessData || null,
     clients: workshopClients,
     orders: workshopOrders,
     payments: [],
     measurementSets: workshopSets,
     appointments: workshopAppts,
-    expenses: workshopExpenses,
+    expenses: mergedExpenses,
     garmentTypes: [],
     catalogModels: [],
   };
@@ -188,6 +169,48 @@ function getCommonCss(): string {
       margin: 0;
       padding: 16px;
     }
+    .top-navigation-bar {
+      position: sticky;
+      top: 0;
+      left: 0;
+      right: 0;
+      background: #8B4513;
+      color: #ffffff;
+      padding: 12px 16px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      z-index: 999999;
+      margin: -16px -16px 20px -16px;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+    }
+    .btn-nav-return {
+      background: #ffffff;
+      color: #8B4513;
+      text-decoration: none;
+      padding: 8px 16px;
+      border-radius: 8px;
+      font-weight: 800;
+      font-size: 13px;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      cursor: pointer;
+      border: none;
+    }
+    .btn-nav-print {
+      background: #10b981;
+      color: #ffffff;
+      border: none;
+      padding: 8px 16px;
+      border-radius: 8px;
+      font-weight: 800;
+      font-size: 13px;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
     .container { max-width: 960px; margin: 0 auto; }
     .header-box {
       background: #8B4513;
@@ -204,22 +227,6 @@ function getCommonCss(): string {
     }
     .atelier-title { font-size: 22px; font-weight: 800; margin: 0 0 4px 0; letter-spacing: -0.5px; }
     .atelier-subtitle { font-size: 12px; opacity: 0.9; margin: 0; }
-    .btn-action {
-      background: #ffffff;
-      color: #8B4513;
-      font-weight: 700;
-      padding: 9px 16px;
-      border-radius: 8px;
-      border: none;
-      cursor: pointer;
-      font-size: 12px;
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      text-decoration: none;
-      box-shadow: 0 2px 6px rgba(0,0,0,0.1);
-    }
-    .btn-action:hover { background: #fdfaf6; }
     .search-box {
       width: 100%;
       padding: 12px 16px;
@@ -350,29 +357,49 @@ function getCommonCss(): string {
 }
 
 function openPrintDocument(htmlContent: string, fallbackFilename: string): void {
-  const printWindow = window.open("", "_blank");
-  if (printWindow) {
-    printWindow.document.open();
-    printWindow.document.write(htmlContent);
-    printWindow.document.close();
-    setTimeout(() => {
-      try {
-        printWindow.focus();
-        printWindow.print();
-      } catch {
-        // Ignorer si bloqué
-      }
-    }, 400);
-  } else {
-    // Si popup bloqué sur mobile, télécharger directement le document HTML autonome
-    const blob = new Blob([htmlContent], { type: "text/html;charset=utf-8" });
+  const blob = new Blob([htmlContent], { type: "text/html;charset=utf-8" });
+  const blobUrl = URL.createObjectURL(blob);
+
+  // Ouvre dans un nouvel onglet avec URL Blob réelle (évite about:blank et la perte d'historique)
+  const printWindow = window.open(blobUrl, "_blank");
+
+  if (!printWindow || printWindow.closed || typeof printWindow.closed === "undefined") {
+    // Si popup bloqué par le navigateur mobile, télécharger directement le document
     downloadBlob(blob, fallbackFilename);
   }
 }
 
 // -----------------------------------------------------------------------------
-// 1. GÉNÉRATEURS DE DOCUMENTS CLIENTS (PDF, WEB .HTML, TEXTE, CSV)
+// 1. GÉNÉRATEURS DE DOCUMENTS CLIENTS (CSV, PDF, WEB .HTML, TEXTE)
 // -----------------------------------------------------------------------------
+
+export function generateClientsCsvContent(clients: ClientRow[]): string {
+  const headers = [
+    "Nom",
+    "Prenom",
+    "Telephone",
+    "WhatsApp",
+    "Ville",
+    "Adresse",
+    "Genre",
+    "Date_Ajout",
+    "Notes",
+  ];
+
+  const rows = clients.map((c) => [
+    escapeCsvField(c.last_name || ""),
+    escapeCsvField(c.first_name || ""),
+    escapeCsvField(c.phone || ""),
+    escapeCsvField(c.whatsapp || ""),
+    escapeCsvField(c.city || ""),
+    escapeCsvField(c.address || ""),
+    escapeCsvField(c.gender || ""),
+    escapeCsvField(c.created_at ? c.created_at.slice(0, 10) : ""),
+    escapeCsvField(c.notes || ""),
+  ]);
+
+  return "\uFEFF" + [headers.join(";"), ...rows.map((r) => r.join(";"))].join("\r\n");
+}
 
 export function generateClientsHtmlContent(clients: ClientRow[], businessName: string): string {
   const dateStr = new Date().toLocaleDateString("fr-FR", { dateStyle: "long" });
@@ -386,14 +413,21 @@ export function generateClientsHtmlContent(clients: ClientRow[], businessName: s
   <style>${getCommonCss()}</style>
 </head>
 <body>
+  <!-- BARRE DE RETOUR FIXE -->
+  <div class="no-print top-navigation-bar">
+    <a href="/atelier" onclick="if(window.history.length > 1) { window.history.back(); return false; }" class="btn-nav-return">
+      ⬅️ Retour à l'Atelier CouturPro
+    </a>
+    <button onclick="window.print()" class="btn-nav-print">
+      🖨️ Enregistrer PDF / Imprimer
+    </button>
+  </div>
+
   <div class="container">
     <div class="header-box">
       <div>
         <h1 class="atelier-title">${businessName}</h1>
         <p class="atelier-subtitle">Répertoire Complet des Clients (${clients.length} contact${clients.length > 1 ? "s" : ""}) — Édité le ${dateStr}</p>
-      </div>
-      <div class="no-print">
-        <button class="btn-action" onclick="window.print()">🖨️ Enregistrer en PDF / Imprimer</button>
       </div>
     </div>
 
@@ -472,37 +506,50 @@ export function generateClientsTxtContent(clients: ClientRow[], businessName: st
   return lines.join("\r\n");
 }
 
-export function generateClientsCsvContent(clients: ClientRow[]): string {
+// -----------------------------------------------------------------------------
+// 2. GÉNÉRATEURS DE DOCUMENTS COMMANDES (CSV, PDF, WEB .HTML, TEXTE)
+// -----------------------------------------------------------------------------
+
+export function generateOrdersCsvContent(orders: OrderRow[]): string {
   const headers = [
-    "Nom",
-    "Prenom",
-    "Telephone",
-    "WhatsApp",
-    "Ville",
-    "Adresse",
-    "Genre",
-    "Date_Ajout",
+    "Reference",
+    "Client",
+    "Telephone_Client",
+    "Habit_Modele",
+    "Prix_Total",
+    "Montant_Paye",
+    "Reste_A_Payer",
+    "Statut",
+    "Date_Commande",
+    "Date_Livraison_Prevue",
     "Notes",
   ];
 
-  const rows = clients.map((c) => [
-    escapeCsvField(c.last_name || ""),
-    escapeCsvField(c.first_name || ""),
-    escapeCsvField(c.phone || ""),
-    escapeCsvField(c.whatsapp || ""),
-    escapeCsvField(c.city || ""),
-    escapeCsvField(c.address || ""),
-    escapeCsvField(c.gender || ""),
-    escapeCsvField(c.created_at ? c.created_at.slice(0, 10) : ""),
-    escapeCsvField(c.notes || ""),
-  ]);
+  const rows = orders.map((o) => {
+    const c = o.clients;
+    const clientName = c ? `${c.first_name || ""} ${c.last_name || ""}`.trim() : "Client anonyme";
+    const phone = c?.phone || c?.whatsapp || "";
+    const total = Number(o.price) || 0;
+    const paid = paidTotal(o);
+    const rest = Math.max(0, balance(o));
+
+    return [
+      escapeCsvField(o.order_number || o.id.slice(0, 8)),
+      escapeCsvField(clientName),
+      escapeCsvField(phone),
+      escapeCsvField(o.garment_type || "Sur-mesure"),
+      escapeCsvField(total),
+      escapeCsvField(paid),
+      escapeCsvField(rest),
+      escapeCsvField(o.status || "En cours"),
+      escapeCsvField(o.ordered_at ? o.ordered_at.slice(0, 10) : ""),
+      escapeCsvField(o.due_date ? o.due_date.slice(0, 10) : ""),
+      escapeCsvField(o.notes || ""),
+    ];
+  });
 
   return "\uFEFF" + [headers.join(";"), ...rows.map((r) => r.join(";"))].join("\r\n");
 }
-
-// -----------------------------------------------------------------------------
-// 2. GÉNÉRATEURS DE DOCUMENTS COMMANDES (PDF, WEB .HTML, TEXTE, CSV)
-// -----------------------------------------------------------------------------
 
 export function generateOrdersHtmlContent(orders: OrderRow[], businessName: string, currency = "FCFA"): string {
   const dateStr = new Date().toLocaleDateString("fr-FR", { dateStyle: "long" });
@@ -519,21 +566,28 @@ export function generateOrdersHtmlContent(orders: OrderRow[], businessName: stri
   <style>${getCommonCss()}</style>
 </head>
 <body>
+  <!-- BARRE DE RETOUR FIXE (EMPECHE TOUT BLOCAGE SUR SMARTPHONE) -->
+  <div class="no-print top-navigation-bar">
+    <a href="/atelier" onclick="if(window.history.length > 1) { window.history.back(); return false; }" class="btn-nav-return">
+      ⬅️ Retour à l'Atelier CouturPro
+    </a>
+    <button onclick="window.print()" class="btn-nav-print">
+      🖨️ Enregistrer PDF / Imprimer
+    </button>
+  </div>
+
   <div class="container">
     <div class="header-box">
       <div>
         <h1 class="atelier-title">${businessName}</h1>
         <p class="atelier-subtitle">Registre des Commandes (${orders.length} commande${orders.length > 1 ? "s" : ""}) — Édité le ${dateStr}</p>
       </div>
-      <div class="no-print">
-        <button class="btn-action" onclick="window.print()">🖨️ Enregistrer en PDF / Imprimer</button>
-      </div>
     </div>
 
-    <!-- RECAPITULATIF FINANCIER -->
+    <!-- RECAPITULATIF FINANCIER REEL & EXACT -->
     <div class="kpi-grid">
       <div class="kpi-card">
-        <div class="lbl">Commandes</div>
+        <div class="lbl">Total Commandes</div>
         <div class="val">${orders.length}</div>
       </div>
       <div class="kpi-card">
@@ -557,7 +611,9 @@ export function generateOrdersHtmlContent(orders: OrderRow[], businessName: stri
     <div id="ordersContainer">
       ${orders.length === 0 ? '<div class="item-card" style="text-align:center; color:#64748b;">Aucune commande enregistrée.</div>' : orders.map((o) => {
         const c = o.clients;
-        const clientName = c ? `${c.first_name || ""} ${c.last_name || ""}`.trim() : "Client non spécifié";
+        const clientName = c ? `${c.first_name || ""} ${c.last_name || ""}`.trim() : (o.client_id ? "Client #" + o.client_id.slice(0, 6) : "Client non spécifié");
+        const phone = c?.phone || c?.whatsapp || "";
+        const cleanPhone = phone.replace(/[^0-9+]/g, "");
         const price = Number(o.price) || 0;
         const paid = paidTotal(o);
         const rest = Math.max(0, balance(o));
@@ -569,33 +625,44 @@ export function generateOrdersHtmlContent(orders: OrderRow[], businessName: stri
             <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:8px;">
               <div>
                 <span style="font-size:10px; font-weight:700; color:#8B4513; text-transform:uppercase;">Réf: ${ref}</span>
-                <h3 style="margin:2px 0 4px 0; font-size:15px; font-weight:700; color:#0f172a;">${clientName}</h3>
+                <h3 style="margin:2px 0 2px 0; font-size:15px; font-weight:700; color:#0f172a;">${clientName}</h3>
                 <div style="color:#64748b; font-size:12px;">Modèle : <strong>${o.garment_type || "Sur-mesure"}</strong></div>
               </div>
               <div style="text-align:right;">
                 <span class="badge ${isFullyPaid ? 'badge-paid' : 'badge-unpaid'}">
-                  ${isFullyPaid ? 'Soldé' : `Reste : ${fcfa(rest, currency)}`}
+                  ${isFullyPaid ? 'Soldé (100% payé)' : `Reste : ${fcfa(rest, currency)}`}
                 </span>
                 <div style="font-size:11px; color:#64748b; margin-top:4px;">Statut : <strong>${o.status || 'En cours'}</strong></div>
               </div>
             </div>
 
-            <div style="display:flex; justify-content:space-between; align-items:center; margin-top:10px; padding-top:8px; border-top:1px dashed #e2e8f0; font-size:12px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-top:10px; padding-top:8px; border-top:1px dashed #e2e8f0; font-size:12px; flex-wrap:wrap; gap:6px;">
               <div>
-                Prix : <strong>${fcfa(price, currency)}</strong> • Encaissé : <strong style="color:#166534;">${fcfa(paid, currency)}</strong>
+                Prix : <strong>${fcfa(price, currency)}</strong> • Acompte payé : <strong style="color:#166534;">${fcfa(paid, currency)}</strong>
               </div>
               <div style="color:#64748b; font-size:11px;">
-                Livraison : ${o.due_date ? o.due_date.slice(0, 10) : "Non définie"}
+                Livraison : <strong>${o.due_date ? o.due_date.slice(0, 10) : "Non définie"}</strong>
               </div>
             </div>
-            ${o.notes ? `<div style="margin-top:6px; font-size:11px; color:#475569; font-style:italic;">Notes : ${o.notes}</div>` : ""}
+
+            ${(cleanPhone || o.notes) ? `
+              <div style="margin-top:8px; padding-top:6px; border-top:1px solid #f1f5f9; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:6px;">
+                <div style="font-size:11px; color:#64748b;">${o.notes ? `<em>Notes : ${o.notes}</em>` : ""}</div>
+                ${cleanPhone ? `
+                  <div class="no-print">
+                    <a href="tel:${cleanPhone}" class="btn-contact btn-call">📞 Appeler</a>
+                    <a href="https://wa.me/${cleanPhone.replace('+', '')}" target="_blank" class="btn-contact btn-wa">💬 WhatsApp</a>
+                  </div>
+                ` : ""}
+              </div>
+            ` : ""}
           </div>
         `;
       }).join("")}
     </div>
 
     <div class="footer">
-      Document généré par CouturPro — Registre des Commandes d'Atelier.<br />
+      Document officiel généré par CouturPro — Registre des Commandes d'Atelier.<br />
       Tous droits réservés à l'atelier ${businessName}.
     </div>
   </div>
@@ -626,16 +693,17 @@ export function generateOrdersTxtContent(orders: OrderRow[], businessName: strin
 
   orders.forEach((o) => {
     const c = o.clients;
-    const clientName = c ? `${c.first_name || ""} ${c.last_name || ""}`.trim() : "Client non spécifié";
+    const clientName = c ? `${c.first_name || ""} ${c.last_name || ""}`.trim() : "Client anonyme";
+    const phone = c?.phone || c?.whatsapp || "";
     const price = Number(o.price) || 0;
     const paid = paidTotal(o);
     const rest = Math.max(0, balance(o));
     const ref = o.order_number || o.id.slice(0, 8);
 
-    lines.push(`COMMANDE Réf: ${ref} | Client: ${clientName}`);
+    lines.push(`COMMANDE Réf: ${ref} | Client: ${clientName} ${phone ? '(' + phone + ')' : ''}`);
     lines.push(`    Modèle     : ${o.garment_type || "Sur-mesure"}`);
-    lines.push(`    Prix total : ${fcfa(price, currency)} | Encaissé: ${fcfa(paid, currency)} | Reste: ${fcfa(rest, currency)}`);
-    lines.push(`    Statut     : ${o.status || "En cours"} | Échéance: ${o.due_date ? o.due_date.slice(0, 10) : "Non définie"}`);
+    lines.push(`    Prix total : ${fcfa(price, currency)} | Payé: ${fcfa(paid, currency)} | Solde restant: ${fcfa(rest, currency)}`);
+    lines.push(`    Statut     : ${o.status || "En cours"} | Livraison: ${o.due_date ? o.due_date.slice(0, 10) : "Non définie"}`);
     if (o.notes) lines.push(`    Notes      : ${o.notes}`);
     lines.push("------------------------------------------------------------------------------");
   });
@@ -643,47 +711,41 @@ export function generateOrdersTxtContent(orders: OrderRow[], businessName: strin
   return lines.join("\r\n");
 }
 
-export function generateOrdersCsvContent(orders: OrderRow[]): string {
+// -----------------------------------------------------------------------------
+// 3. GÉNÉRATEURS DE DOCUMENTS MESURES (CSV, PDF, WEB .HTML, TEXTE)
+// -----------------------------------------------------------------------------
+
+export function generateMeasurementsCsvContent(sets: FullMeasurementSetRow[]): string {
   const headers = [
-    "Reference",
-    "Client",
-    "Habit_Modele",
-    "Prix_Total",
-    "Montant_Paye",
-    "Reste_A_Payer",
-    "Statut",
-    "Date_Commande",
-    "Date_Livraison_Prevue",
+    "Client_Nom",
+    "Client_Prenom",
+    "Client_Telephone",
+    "Libelle_Modele",
+    "Gabarit_Type",
+    "Date_Enregistrement",
+    "Toutes_Les_Mesures",
     "Notes",
   ];
 
-  const rows = orders.map((o) => {
-    const c = o.clients;
-    const clientName = c ? `${c.first_name || ""} ${c.last_name || ""}`.trim() : "—";
-    const total = Number(o.price) || 0;
-    const paid = paidTotal(o);
-    const rest = Math.max(0, balance(o));
+  const rows = sets.map((s) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const c = (s as any).clients;
+    const measuresStr = (s.values || []).map((v) => `${v.name}: ${v.value ?? "-"}`).join(" | ");
 
     return [
-      escapeCsvField(o.order_number || o.id),
-      escapeCsvField(clientName),
-      escapeCsvField(o.garment_type || ""),
-      escapeCsvField(total),
-      escapeCsvField(paid),
-      escapeCsvField(rest),
-      escapeCsvField(o.status || ""),
-      escapeCsvField(o.ordered_at ? o.ordered_at.slice(0, 10) : ""),
-      escapeCsvField(o.due_date ? o.due_date.slice(0, 10) : ""),
-      escapeCsvField(o.notes || ""),
+      escapeCsvField(c?.last_name || ""),
+      escapeCsvField(c?.first_name || ""),
+      escapeCsvField(c?.phone || ""),
+      escapeCsvField(s.label || ""),
+      escapeCsvField(s.template_name || ""),
+      escapeCsvField(s.recorded_at ? s.recorded_at.slice(0, 10) : ""),
+      escapeCsvField(measuresStr),
+      escapeCsvField(s.notes || ""),
     ];
   });
 
   return "\uFEFF" + [headers.join(";"), ...rows.map((r) => r.join(";"))].join("\r\n");
 }
-
-// -----------------------------------------------------------------------------
-// 3. GÉNÉRATEURS DE DOCUMENTS MESURES (PDF, WEB .HTML, TEXTE, CSV)
-// -----------------------------------------------------------------------------
 
 export function generateMeasurementsHtmlContent(sets: FullMeasurementSetRow[], businessName: string): string {
   const dateStr = new Date().toLocaleDateString("fr-FR", { dateStyle: "long" });
@@ -697,14 +759,21 @@ export function generateMeasurementsHtmlContent(sets: FullMeasurementSetRow[], b
   <style>${getCommonCss()}</style>
 </head>
 <body>
+  <!-- BARRE DE RETOUR FIXE -->
+  <div class="no-print top-navigation-bar">
+    <a href="/atelier" onclick="if(window.history.length > 1) { window.history.back(); return false; }" class="btn-nav-return">
+      ⬅️ Retour à l'Atelier CouturPro
+    </a>
+    <button onclick="window.print()" class="btn-nav-print">
+      🖨️ Enregistrer PDF / Imprimer
+    </button>
+  </div>
+
   <div class="container">
     <div class="header-box">
       <div>
         <h1 class="atelier-title">${businessName}</h1>
         <p class="atelier-subtitle">Carnet de Mesures & Gabarits (${sets.length} relevé${sets.length > 1 ? "s" : ""}) — Édité le ${dateStr}</p>
-      </div>
-      <div class="no-print">
-        <button class="btn-action" onclick="window.print()">🖨️ Enregistrer en PDF / Imprimer</button>
       </div>
     </div>
 
@@ -717,7 +786,7 @@ export function generateMeasurementsHtmlContent(sets: FullMeasurementSetRow[], b
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const c = (s as any).clients;
         const clientName = c ? `${c.first_name || ""} ${c.last_name || ""}`.trim() : "Client non spécifié";
-        const phone = c?.phone || "";
+        const phone = c?.phone || c?.whatsapp || "";
         const label = s.label || s.template_name || "Mesures standards";
         const dateRecorded = s.recorded_at ? s.recorded_at.slice(0, 10) : "";
         const values = s.values || [];
@@ -802,41 +871,36 @@ export function generateMeasurementsTxtContent(sets: FullMeasurementSetRow[], bu
   return lines.join("\r\n");
 }
 
-export function generateMeasurementsCsvContent(sets: FullMeasurementSetRow[]): string {
+// -----------------------------------------------------------------------------
+// 4. GÉNÉRATEURS DE DOCUMENTS CHARGES & DÉPENSES (CSV, PDF, WEB .HTML, TEXTE)
+// -----------------------------------------------------------------------------
+
+export function generateExpensesCsvContent(expenses: ExpenseRow[]): string {
   const headers = [
-    "Client_Nom",
-    "Client_Prenom",
-    "Client_Telephone",
-    "Libelle_Modele",
-    "Gabarit_Type",
-    "Date_Enregistrement",
-    "Toutes_Les_Mesures",
+    "Date",
+    "Categorie",
+    "Motif_Depense",
+    "Montant",
+    "Beneficiaire",
+    "Moyen_Reglement",
     "Notes",
   ];
 
-  const rows = sets.map((s) => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const c = (s as any).clients;
-    const measuresStr = (s.values || []).map((v) => `${v.name}: ${v.value ?? "-"}`).join(" | ");
-
+  const rows = expenses.map((e) => {
+    const catLabel = EXPENSE_CATEGORIES[e.category]?.label || e.category;
     return [
-      escapeCsvField(c?.last_name || ""),
-      escapeCsvField(c?.first_name || ""),
-      escapeCsvField(c?.phone || ""),
-      escapeCsvField(s.label || ""),
-      escapeCsvField(s.template_name || ""),
-      escapeCsvField(s.recorded_at ? s.recorded_at.slice(0, 10) : ""),
-      escapeCsvField(measuresStr),
-      escapeCsvField(s.notes || ""),
+      escapeCsvField(e.expense_date || ""),
+      escapeCsvField(catLabel),
+      escapeCsvField(e.title || ""),
+      escapeCsvField(Number(e.amount) || 0),
+      escapeCsvField(e.beneficiary_name || ""),
+      escapeCsvField(e.payment_method || ""),
+      escapeCsvField(e.notes || ""),
     ];
   });
 
   return "\uFEFF" + [headers.join(";"), ...rows.map((r) => r.join(";"))].join("\r\n");
 }
-
-// -----------------------------------------------------------------------------
-// 4. GÉNÉRATEURS DE DOCUMENTS CHARGES & DÉPENSES (PDF, WEB .HTML, TEXTE, CSV)
-// -----------------------------------------------------------------------------
 
 export function generateExpensesHtmlContent(expenses: ExpenseRow[], businessName: string, currency = "FCFA"): string {
   const dateStr = new Date().toLocaleDateString("fr-FR", { dateStyle: "long" });
@@ -851,14 +915,21 @@ export function generateExpensesHtmlContent(expenses: ExpenseRow[], businessName
   <style>${getCommonCss()}</style>
 </head>
 <body>
+  <!-- BARRE DE RETOUR FIXE -->
+  <div class="no-print top-navigation-bar">
+    <a href="/atelier" onclick="if(window.history.length > 1) { window.history.back(); return false; }" class="btn-nav-return">
+      ⬅️ Retour à l'Atelier CouturPro
+    </a>
+    <button onclick="window.print()" class="btn-nav-print">
+      🖨️ Enregistrer PDF / Imprimer
+    </button>
+  </div>
+
   <div class="container">
     <div class="header-box">
       <div>
         <h1 class="atelier-title">${businessName}</h1>
         <p class="atelier-subtitle">Registre des Charges & Dépenses (${expenses.length} dépense${expenses.length > 1 ? "s" : ""}) — Édité le ${dateStr}</p>
-      </div>
-      <div class="no-print">
-        <button class="btn-action" onclick="window.print()">🖨️ Enregistrer en PDF / Imprimer</button>
       </div>
     </div>
 
@@ -948,33 +1019,6 @@ export function generateExpensesTxtContent(expenses: ExpenseRow[], businessName:
   return lines.join("\r\n");
 }
 
-export function generateExpensesCsvContent(expenses: ExpenseRow[]): string {
-  const headers = [
-    "Date",
-    "Categorie",
-    "Motif_Depense",
-    "Montant",
-    "Beneficiaire",
-    "Moyen_Reglement",
-    "Notes",
-  ];
-
-  const rows = expenses.map((e) => {
-    const catLabel = EXPENSE_CATEGORIES[e.category]?.label || e.category;
-    return [
-      escapeCsvField(e.expense_date || ""),
-      escapeCsvField(catLabel),
-      escapeCsvField(e.title || ""),
-      escapeCsvField(Number(e.amount) || 0),
-      escapeCsvField(e.beneficiary_name || ""),
-      escapeCsvField(e.payment_method || ""),
-      escapeCsvField(e.notes || ""),
-    ];
-  });
-
-  return "\uFEFF" + [headers.join(";"), ...rows.map((r) => r.join(";"))].join("\r\n");
-}
-
 export function generateAppointmentsCsvContent(appts: AppointmentRow[]): string {
   const headers = [
     "Client",
@@ -1003,7 +1047,7 @@ export function generateAppointmentsCsvContent(appts: AppointmentRow[]): string 
 }
 
 // -----------------------------------------------------------------------------
-// 5. APPLICATION WEB HORS-LIGNE AUTONOME (PORTAIL MULTI-FORMATS D'ATELIER)
+// 5. APPLICATION WEB HORS-LIGNE AUTONOME (GRAND LIVRE & DOSSIER COMPLET)
 // -----------------------------------------------------------------------------
 
 export function generateFullWorkshopHtmlContent(data: CompleteWorkshopData, businessName: string): string {
@@ -1024,6 +1068,16 @@ export function generateFullWorkshopHtmlContent(data: CompleteWorkshopData, busi
   <style>${getCommonCss()}</style>
 </head>
 <body>
+  <!-- BARRE DE RETOUR FIXE -->
+  <div class="no-print top-navigation-bar">
+    <a href="/atelier" onclick="if(window.history.length > 1) { window.history.back(); return false; }" class="btn-nav-return">
+      ⬅️ Retour à l'Atelier CouturPro
+    </a>
+    <button onclick="window.print()" class="btn-nav-print">
+      🖨️ Enregistrer PDF / Imprimer
+    </button>
+  </div>
+
   <div class="container">
     <div class="header-box">
       <div>
@@ -1033,12 +1087,9 @@ export function generateFullWorkshopHtmlContent(data: CompleteWorkshopData, busi
           ${data.business?.address ? data.business.address + " • " : ""}${data.business?.city || ""} • Tél: ${data.business?.phone || "—"}
         </p>
       </div>
-      <div class="no-print">
-        <button class="btn-action" onclick="window.print()">🖨️ Enregistrer en PDF / Imprimer</button>
-      </div>
     </div>
 
-    <!-- BILAN FINANCIER GLOBAL -->
+    <!-- BILAN FINANCIER GLOBAL 100% EXACT -->
     <div class="kpi-grid">
       <div class="kpi-card">
         <div class="lbl">Clients</div>
@@ -1070,14 +1121,50 @@ export function generateFullWorkshopHtmlContent(data: CompleteWorkshopData, busi
 
     <!-- ONGLETS DE CONSULTATION (POUR SMARTPHONE & ORDINATEUR) -->
     <div class="tab-nav no-print">
-      <button class="tab-btn active" onclick="switchTab('clients', this)">👥 Clients (${data.clients.length})</button>
-      <button class="tab-btn" onclick="switchTab('orders', this)">🧵 Commandes (${data.orders.length})</button>
+      <button class="tab-btn active" onclick="switchTab('orders', this)">🧵 Commandes (${data.orders.length})</button>
+      <button class="tab-btn" onclick="switchTab('clients', this)">👥 Clients (${data.clients.length})</button>
       <button class="tab-btn" onclick="switchTab('measures', this)">📐 Carnet de Mesures (${data.measurementSets.length})</button>
       <button class="tab-btn" onclick="switchTab('expenses', this)">💰 Charges (${data.expenses.length})</button>
     </div>
 
+    <!-- SECTION COMMANDES -->
+    <div id="tab-orders" class="tab-content">
+      <div class="no-print">
+        <input type="text" class="search-box" placeholder="🔍 Rechercher une commande..." oninput="filterList(this, '#list-orders .item-card')" />
+      </div>
+      <div id="list-orders">
+        ${data.orders.map((o) => {
+          const c = o.clients;
+          const clientName = c ? `${c.first_name || ""} ${c.last_name || ""}`.trim() : (o.client_id ? "Client #" + o.client_id.slice(0,6) : "Client non spécifié");
+          const paid = paidTotal(o);
+          const rest = Math.max(0, balance(o));
+          return `
+            <div class="item-card" data-search="${clientName.toLowerCase()} ${(o.garment_type||'').toLowerCase()} ${(o.order_number||'').toLowerCase()}">
+              <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:8px;">
+                <div>
+                  <span style="font-size:10px; font-weight:700; color:#8B4513;">RÉF: ${o.order_number || o.id.slice(0,8)}</span>
+                  <div style="font-size:14px; font-weight:700; color:#0f172a;">${clientName}</div>
+                  <div style="font-size:12px; color:#64748b;">${o.garment_type || "Sur-mesure"}</div>
+                </div>
+                <div style="text-align:right;">
+                  <span class="badge ${rest <= 0 ? 'badge-paid' : 'badge-unpaid'}">
+                    ${rest <= 0 ? 'Soldé' : `Reste : ${fcfa(rest, currency)}`}
+                  </span>
+                  <div style="font-size:11px; color:#64748b; margin-top:4px;">Statut : ${o.status || 'En cours'}</div>
+                </div>
+              </div>
+              <div style="margin-top:8px; padding-top:6px; border-top:1px dashed #e2e8f0; font-size:11px; display:flex; justify-content:space-between;">
+                <span>Prix: ${fcfa(Number(o.price)||0, currency)} • Acompte: ${fcfa(paid, currency)}</span>
+                <span>Livraison: ${o.due_date ? o.due_date.slice(0,10) : "Non définie"}</span>
+              </div>
+            </div>
+          `;
+        }).join("")}
+      </div>
+    </div>
+
     <!-- SECTION CLIENTS -->
-    <div id="tab-clients" class="tab-content">
+    <div id="tab-clients" class="tab-content" style="display:none;">
       <div class="no-print">
         <input type="text" class="search-box" placeholder="🔍 Rechercher un client..." oninput="filterList(this, '#list-clients .item-card')" />
       </div>
@@ -1101,42 +1188,6 @@ export function generateFullWorkshopHtmlContent(data: CompleteWorkshopData, busi
                 </div>
               </div>
               ${c.notes ? `<div style="margin-top:6px; font-size:11px; color:#475569;"><strong>Notes :</strong> ${c.notes}</div>` : ""}
-            </div>
-          `;
-        }).join("")}
-      </div>
-    </div>
-
-    <!-- SECTION COMMANDES -->
-    <div id="tab-orders" class="tab-content" style="display:none;">
-      <div class="no-print">
-        <input type="text" class="search-box" placeholder="🔍 Rechercher une commande..." oninput="filterList(this, '#list-orders .item-card')" />
-      </div>
-      <div id="list-orders">
-        ${data.orders.map((o) => {
-          const c = o.clients;
-          const clientName = c ? `${c.first_name || ""} ${c.last_name || ""}`.trim() : "Client non spécifié";
-          const paid = paidTotal(o);
-          const rest = Math.max(0, balance(o));
-          return `
-            <div class="item-card" data-search="${clientName.toLowerCase()} ${(o.garment_type||'').toLowerCase()} ${(o.order_number||'').toLowerCase()}">
-              <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:8px;">
-                <div>
-                  <span style="font-size:10px; font-weight:700; color:#8B4513;">RÉF: ${o.order_number || o.id.slice(0,8)}</span>
-                  <div style="font-size:14px; font-weight:700; color:#0f172a;">${clientName}</div>
-                  <div style="font-size:12px; color:#64748b;">${o.garment_type || "Sur-mesure"}</div>
-                </div>
-                <div style="text-align:right;">
-                  <span class="badge ${rest <= 0 ? 'badge-paid' : 'badge-unpaid'}">
-                    ${rest <= 0 ? 'Soldé' : `Reste : ${fcfa(rest, currency)}`}
-                  </span>
-                  <div style="font-size:11px; color:#64748b; margin-top:4px;">Statut : ${o.status || 'En cours'}</div>
-                </div>
-              </div>
-              <div style="margin-top:8px; padding-top:6px; border-top:1px dashed #e2e8f0; font-size:11px; display:flex; justify-content:space-between;">
-                <span>Prix: ${fcfa(Number(o.price)||0, currency)} • Acompte: ${fcfa(paid, currency)}</span>
-                <span>Livraison: ${o.due_date ? o.due_date.slice(0,10) : "Non définie"}</span>
-              </div>
             </div>
           `;
         }).join("")}
@@ -1241,20 +1292,19 @@ export async function exportCategoryData(
   switch (category) {
     case "clients": {
       filename = `couturpro_clients_${cleanName}_${dateStr}`;
-      if (format === "pdf") {
+      if (format === "csv") {
+        content = generateClientsCsvContent(data.clients);
+        mimeType = "text/csv;charset=utf-8";
+        filename += ".csv";
+      } else if (format === "pdf") {
         const html = generateClientsHtmlContent(data.clients, businessName);
         openPrintDocument(html, `${filename}.html`);
         await logAudit(businessId, "DATA_EXPORT_CLIENTS_PDF", { count: data.clients.length });
         return;
-      }
-      if (format === "html") {
+      } else if (format === "html") {
         content = generateClientsHtmlContent(data.clients, businessName);
         mimeType = "text/html;charset=utf-8";
         filename += ".html";
-      } else if (format === "csv") {
-        content = generateClientsCsvContent(data.clients);
-        mimeType = "text/csv;charset=utf-8";
-        filename += ".csv";
       } else if (format === "txt") {
         content = generateClientsTxtContent(data.clients, businessName);
         mimeType = "text/plain;charset=utf-8";
@@ -1265,20 +1315,19 @@ export async function exportCategoryData(
 
     case "orders": {
       filename = `couturpro_commandes_${cleanName}_${dateStr}`;
-      if (format === "pdf") {
+      if (format === "csv") {
+        content = generateOrdersCsvContent(data.orders);
+        mimeType = "text/csv;charset=utf-8";
+        filename += ".csv";
+      } else if (format === "pdf") {
         const html = generateOrdersHtmlContent(data.orders, businessName, currency);
         openPrintDocument(html, `${filename}.html`);
         await logAudit(businessId, "DATA_EXPORT_ORDERS_PDF", { count: data.orders.length });
         return;
-      }
-      if (format === "html") {
+      } else if (format === "html") {
         content = generateOrdersHtmlContent(data.orders, businessName, currency);
         mimeType = "text/html;charset=utf-8";
         filename += ".html";
-      } else if (format === "csv") {
-        content = generateOrdersCsvContent(data.orders);
-        mimeType = "text/csv;charset=utf-8";
-        filename += ".csv";
       } else if (format === "txt") {
         content = generateOrdersTxtContent(data.orders, businessName, currency);
         mimeType = "text/plain;charset=utf-8";
@@ -1289,20 +1338,19 @@ export async function exportCategoryData(
 
     case "measurements": {
       filename = `couturpro_mesures_${cleanName}_${dateStr}`;
-      if (format === "pdf") {
+      if (format === "csv") {
+        content = generateMeasurementsCsvContent(data.measurementSets);
+        mimeType = "text/csv;charset=utf-8";
+        filename += ".csv";
+      } else if (format === "pdf") {
         const html = generateMeasurementsHtmlContent(data.measurementSets, businessName);
         openPrintDocument(html, `${filename}.html`);
         await logAudit(businessId, "DATA_EXPORT_MEASURES_PDF", { count: data.measurementSets.length });
         return;
-      }
-      if (format === "html") {
+      } else if (format === "html") {
         content = generateMeasurementsHtmlContent(data.measurementSets, businessName);
         mimeType = "text/html;charset=utf-8";
         filename += ".html";
-      } else if (format === "csv") {
-        content = generateMeasurementsCsvContent(data.measurementSets);
-        mimeType = "text/csv;charset=utf-8";
-        filename += ".csv";
       } else if (format === "txt") {
         content = generateMeasurementsTxtContent(data.measurementSets, businessName);
         mimeType = "text/plain;charset=utf-8";
@@ -1313,20 +1361,19 @@ export async function exportCategoryData(
 
     case "expenses": {
       filename = `couturpro_charges_depenses_${cleanName}_${dateStr}`;
-      if (format === "pdf") {
+      if (format === "csv") {
+        content = generateExpensesCsvContent(data.expenses);
+        mimeType = "text/csv;charset=utf-8";
+        filename += ".csv";
+      } else if (format === "pdf") {
         const html = generateExpensesHtmlContent(data.expenses, businessName, currency);
         openPrintDocument(html, `${filename}.html`);
         await logAudit(businessId, "DATA_EXPORT_EXPENSES_PDF", { count: data.expenses.length });
         return;
-      }
-      if (format === "html") {
+      } else if (format === "html") {
         content = generateExpensesHtmlContent(data.expenses, businessName, currency);
         mimeType = "text/html;charset=utf-8";
         filename += ".html";
-      } else if (format === "csv") {
-        content = generateExpensesCsvContent(data.expenses);
-        mimeType = "text/csv;charset=utf-8";
-        filename += ".csv";
       } else if (format === "txt") {
         content = generateExpensesTxtContent(data.expenses, businessName, currency);
         mimeType = "text/plain;charset=utf-8";
@@ -1405,7 +1452,7 @@ export async function exportWorkshopFullZip(businessId: string, businessName: st
     "",
     "COMMENT CONSULTER VOS DONNÉES SELON VOTRE APPAREIL :",
     "1. SUR N'IMPORTE QUEL SMARTPHONE OU ORDINATEUR (SANS EXCEL) :",
-    "   -> Double-cliquez sur '00_CONSULTER_MON_ATELIER.html'.",
+    "   -> Ouvrez '00_CONSULTER_MON_ATELIER.html'.",
     "   -> Ce fichier s'ouvre directement dans votre navigateur (Chrome, Safari, etc.)",
     "      100% hors-ligne avec recherche, filtres et bouton d'impression PDF !",
     "",

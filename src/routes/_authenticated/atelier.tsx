@@ -791,8 +791,8 @@ function SessionSignOutSection() {
 }
 
 function PrivacyDataProtectionSection({ business }: { business: { id: string; name: string } }) {
-  // Par défaut : format universel "pdf" lisible sur 100% des smartphones sans installer Excel
-  const [selectedFormat, setSelectedFormat] = useState<ExportFormat>("pdf");
+  // Format par défaut : Tableur Excel / Sheets (le plus stable et éprouvé)
+  const [selectedFormat, setSelectedFormat] = useState<ExportFormat>("csv");
   const [exportingZip, setExportingZip] = useState(false);
   const [exportingPdf, setExportingPdf] = useState(false);
   const [exportingPortal, setExportingPortal] = useState(false);
@@ -846,9 +846,9 @@ function PrivacyDataProtectionSection({ business }: { business: { id: string; na
         expenses: "Charges & dépenses",
       };
       const formatLabels = {
+        csv: "Fichier Tableur Excel / Sheets téléchargé",
         pdf: "Document PDF ouvert",
         html: "Fiche Web téléchargée",
-        csv: "Fichier Tableur téléchargé",
         txt: "Fiche Texte téléchargée",
       };
       toast.success(`${labels[category]} : ${formatLabels[selectedFormat]} avec succès !`);
@@ -872,9 +872,9 @@ function PrivacyDataProtectionSection({ business }: { business: { id: string; na
   }
 
   const formatBadgeLabels = {
+    csv: "Excel / Tableur",
     pdf: "Document PDF",
     html: "Fiche Web .html",
-    csv: "Excel / Tableur",
     txt: "Fiche Texte",
   };
 
@@ -885,10 +885,10 @@ function PrivacyDataProtectionSection({ business }: { business: { id: string; na
         <h2 className="font-display text-sm font-bold">Sauvegarde & Portabilité Multi-Appareils</h2>
       </div>
       <p className="text-xs text-muted-foreground leading-relaxed">
-        Exportez l'intégralité des données de votre atelier en toute liberté. Vos données vous appartiennent définitivement : même sans connexion internet ou sans Excel installé, vous pouvez consulter vos clients, mesures, commandes et finances sur n'importe quel smartphone (Android, iPhone) ou ordinateur.
+        Exportez l'intégralité des données de votre atelier en toute liberté. Vos données vous appartiennent définitivement : même sans connexion internet ou en cas de panne, vous pouvez emporter vos commandes, clients, mesures et finances au format Tableur Excel, Document PDF, Fiche Web ou Archive ZIP.
       </p>
 
-      {/* EXPORTS MAJEURS TOUT-EN-UN (SANS AUCUN LOGICIEL REQUIS) */}
+      {/* EXPORTS MAJEURS TOUT-EN-UN */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-1">
         <Button
           type="button"
@@ -901,7 +901,7 @@ function PrivacyDataProtectionSection({ business }: { business: { id: string; na
           {exportingZip ? <Loader2 className="mr-2.5 size-5 animate-spin text-primary" /> : <FolderArchive className="mr-2.5 size-5 text-primary shrink-0" />}
           <div className="text-left">
             <div className="font-bold text-sm text-foreground">Dossier ZIP Complet</div>
-            <div className="text-[0.68rem] text-muted-foreground">Web hors-ligne + Excel + Texte + JSON</div>
+            <div className="text-[0.68rem] text-muted-foreground">Tous les CSV + Web hors-ligne + JSON</div>
           </div>
         </Button>
 
@@ -916,7 +916,7 @@ function PrivacyDataProtectionSection({ business }: { business: { id: string; na
           {exportingPdf ? <Loader2 className="mr-2.5 size-5 animate-spin text-rose-600" /> : <FileText className="mr-2.5 size-5 text-rose-600 shrink-0" />}
           <div className="text-left">
             <div className="font-bold text-sm text-foreground">Grand Livre (PDF)</div>
-            <div className="text-[0.68rem] text-muted-foreground">Rapport d'atelier officiel prêt à imprimer</div>
+            <div className="text-[0.68rem] text-muted-foreground">Rapport d'atelier complet avec bouton retour</div>
           </div>
         </Button>
 
@@ -931,7 +931,7 @@ function PrivacyDataProtectionSection({ business }: { business: { id: string; na
           {exportingPortal ? <Loader2 className="mr-2.5 size-5 animate-spin text-amber-600" /> : <Globe className="mr-2.5 size-5 text-amber-600 shrink-0" />}
           <div className="text-left">
             <div className="font-bold text-sm text-foreground">Fiche Web Hors-Ligne</div>
-            <div className="text-[0.68rem] text-muted-foreground">S'ouvre sur mobile sans connexion ni app</div>
+            <div className="text-[0.68rem] text-muted-foreground">Consultable sur smartphone sans app</div>
           </div>
         </Button>
       </div>
@@ -941,17 +941,33 @@ function PrivacyDataProtectionSection({ business }: { business: { id: string; na
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1.5">
           <span className="text-[0.72rem] uppercase tracking-wider font-bold text-foreground flex items-center gap-1.5">
             <Smartphone className="size-3.5 text-primary" />
-            Format d'exportation pour les téléchargements ci-dessous
+            Format de téléchargement par catégorie
           </span>
           <span className="text-[0.68rem] text-muted-foreground">
-            {selectedFormat === "pdf" && "📄 Universel (100% des smartphones)"}
-            {selectedFormat === "html" && "🌐 Web hors-ligne (Aucune app requise)"}
-            {selectedFormat === "csv" && "📊 Tableur (Excel, Sheets, LibreOffice)"}
-            {selectedFormat === "txt" && "📋 Texte clair (Bloc-notes, SMS)"}
+            {selectedFormat === "csv" && "📊 Tableur (Excel, Sheets, LibreOffice — Format direct)"}
+            {selectedFormat === "pdf" && "📄 Document PDF (Format A4 avec retour sécurisé)"}
+            {selectedFormat === "html" && "🌐 Page Web (Fichier interactif hors-ligne)"}
+            {selectedFormat === "txt" && "📋 Texte clair (Lisible sur tout bloc-notes)"}
           </span>
         </div>
 
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+          <button
+            type="button"
+            onClick={() => setSelectedFormat("csv")}
+            className={`px-3 py-2 rounded-lg border text-xs font-semibold flex items-center gap-2 transition-all cursor-pointer ${
+              selectedFormat === "csv"
+                ? "bg-primary text-primary-foreground border-primary shadow-xs"
+                : "bg-muted/30 text-muted-foreground hover:bg-muted/60 border-border"
+            }`}
+          >
+            <FileSpreadsheet className="size-3.5 shrink-0" />
+            <div className="text-left">
+              <div className="leading-tight">Tableur</div>
+              <div className="text-[0.62rem] opacity-80">(Excel / Sheets)</div>
+            </div>
+          </button>
+
           <button
             type="button"
             onClick={() => setSelectedFormat("pdf")}
@@ -963,8 +979,8 @@ function PrivacyDataProtectionSection({ business }: { business: { id: string; na
           >
             <FileText className="size-3.5 shrink-0" />
             <div className="text-left">
-              <div className="leading-tight">PDF / Mobile</div>
-              <div className="text-[0.62rem] opacity-80">(Recommandé)</div>
+              <div className="leading-tight">Document PDF</div>
+              <div className="text-[0.62rem] opacity-80">(Imprimable A4)</div>
             </div>
           </button>
 
@@ -981,22 +997,6 @@ function PrivacyDataProtectionSection({ business }: { business: { id: string; na
             <div className="text-left">
               <div className="leading-tight">Page Web</div>
               <div className="text-[0.62rem] opacity-80">(.html hors-ligne)</div>
-            </div>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setSelectedFormat("csv")}
-            className={`px-3 py-2 rounded-lg border text-xs font-semibold flex items-center gap-2 transition-all cursor-pointer ${
-              selectedFormat === "csv"
-                ? "bg-primary text-primary-foreground border-primary shadow-xs"
-                : "bg-muted/30 text-muted-foreground hover:bg-muted/60 border-border"
-            }`}
-          >
-            <FileSpreadsheet className="size-3.5 shrink-0" />
-            <div className="text-left">
-              <div className="leading-tight">Tableur</div>
-              <div className="text-[0.62rem] opacity-80">(Excel / Sheets)</div>
             </div>
           </button>
 
