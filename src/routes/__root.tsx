@@ -44,7 +44,11 @@ function ErrorComponent({ error, reset }: { error: Error; reset: () => void }) {
     error.message.includes("Importing a module script") ||
     error.message.includes("Failed to fetch dynamically imported module") ||
     error.message.includes("error loading dynamically imported module") ||
-    error.message.includes("Unable to preload CSS")
+    error.message.includes("Unable to preload CSS") ||
+    error.message.includes("Loading chunk") ||
+    error.message.includes("Failed to load") ||
+    error.message.includes("Minified React error #130") ||
+    error.message.includes("Element type is invalid")
   );
 
   const isOffline = typeof navigator !== "undefined" && !navigator.onLine;
@@ -78,7 +82,10 @@ function ErrorComponent({ error, reset }: { error: Error; reset: () => void }) {
         <div className="mt-6 flex flex-wrap justify-center gap-2">
           <button
             onClick={() => {
-              if (isChunkError && !isOffline) {
+              if (isChunkError) {
+                if ("serviceWorker" in navigator && navigator.serviceWorker.controller) {
+                  navigator.serviceWorker.controller.postMessage({ type: "SKIP_WAITING" });
+                }
                 window.location.reload();
               } else {
                 router.invalidate();

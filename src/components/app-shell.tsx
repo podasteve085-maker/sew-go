@@ -133,7 +133,20 @@ export function AppShell({ children }: { children: ReactNode }) {
       ];
       // Importer rapidement par petits lots parallèles de 3 pour disponibilité offline immédiate
       for (let i = 0; i < routeImports.length; i += 3) {
-        await Promise.allSettled(routeImports.slice(i, i + 3).map((fn) => fn()));
+        await Promise.allSettled(
+          routeImports.slice(i, i + 3).map(async (fn) => {
+            const mod = await fn();
+            // Précharger le composant split sous-jacent (TanStack Router lazyRouteComponent)
+            const comp = (mod as any)?.Route?.options?.component;
+            if (comp && typeof comp.preload === "function") {
+              try {
+                await comp.preload();
+              } catch {
+                // silencieux
+              }
+            }
+          })
+        );
       }
 
       // Délai supplémentaire : laisser le navigateur enregistrer les entrées perf

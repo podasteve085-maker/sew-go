@@ -10,7 +10,7 @@
  * 5. Données API (Supabase) : Laissées au SyncEngine / IndexedDB client
  */
 
-const CACHE_NAME = "couturpro-v13";
+const CACHE_NAME = "couturpro-v14";
 const IMAGES_CACHE_NAME = "couturpro-images-v1";
 const OFFLINE_FALLBACK = "/offline.html";
 
@@ -56,14 +56,26 @@ function extractAssetUrlsFromModule(source, baseUrl) {
   const urls = new Set();
   if (!source || typeof source !== "string") return [];
 
-  const referenceRegex = /["']([^"']+\.(?:js|css)(?:\?[^"']*)?)["']/g;
+  // Découverte exhaustive des chunks JS, CSS et assets multimédia (guillemets simples, doubles et gabarits/backticks)
+  const referenceRegex = /["'`](\.?\/?[^"'`\s]+\.(?:js|css|woff2?|ttf|png|jpe?g|gif|svg|ico|webp)(?:\?[^"'`\s]*)?)["'`]/g;
   const cssAssetRegex = /url\(\s*["']?([^"')]+)["']?\s*\)/g;
   let match;
   while ((match = referenceRegex.exec(source)) !== null) {
     try {
-      const resolved = new URL(match[1], new URL(baseUrl, self.location.origin));
-      if (resolved.origin === self.location.origin && resolved.pathname.startsWith("/assets/")) {
-        urls.add(resolved.pathname + resolved.search);
+      const ref = match[1];
+      let pathname = null;
+      if (ref.startsWith("/assets/")) {
+        pathname = ref.split("?")[0];
+      } else if (ref.startsWith("assets/")) {
+        pathname = "/" + ref.split("?")[0];
+      } else {
+        const resolved = new URL(ref, new URL(baseUrl, self.location.origin));
+        if (resolved.origin === self.location.origin && resolved.pathname.startsWith("/assets/")) {
+          pathname = resolved.pathname;
+        }
+      }
+      if (pathname) {
+        urls.add(pathname);
       }
     } catch {
       // Ignore malformed build references.
@@ -71,9 +83,20 @@ function extractAssetUrlsFromModule(source, baseUrl) {
   }
   while ((match = cssAssetRegex.exec(source)) !== null) {
     try {
-      const resolved = new URL(match[1], new URL(baseUrl, self.location.origin));
-      if (resolved.origin === self.location.origin && resolved.pathname.startsWith("/assets/")) {
-        urls.add(resolved.pathname + resolved.search);
+      const ref = match[1];
+      let pathname = null;
+      if (ref.startsWith("/assets/")) {
+        pathname = ref.split("?")[0];
+      } else if (ref.startsWith("assets/")) {
+        pathname = "/" + ref.split("?")[0];
+      } else {
+        const resolved = new URL(ref, new URL(baseUrl, self.location.origin));
+        if (resolved.origin === self.location.origin && resolved.pathname.startsWith("/assets/")) {
+          pathname = resolved.pathname;
+        }
+      }
+      if (pathname) {
+        urls.add(pathname);
       }
     } catch {
       // Ignore malformed build references.
@@ -351,20 +374,14 @@ self.addEventListener("fetch", (event) => {
           }
           return networkResponse;
         } catch {
-          // 3. Échec réseau (hors-ligne) : si c'est un chunk JS et qu'on ne l'a pas,
-          // ne jamais renvoyer une 404 qui ferait crasher l'app,
-          // vérifier si une version proche existe dans le cache
-          const keys = await cache.keys();
-          const baseName = url.pathname.split("/").pop()?.split("-")[0]; // ex: 'statistiques'
-          if (baseName && baseName.length > 2) {
-            const matchedKey = keys.find((k) => k.url.includes(baseName));
-            if (matchedKey) {
-              const matchedRes = await cache.match(matchedKey);
-              if (matchedRes) return matchedRes;
-            }
-          }
-
-          return new Response("", { status: 404, statusText: "Resource Not Found Offline" });
+          // 3. Échec réseau (hors-ligne) : ne jamais substituer un chunk manquant par un
+          // autre chunk partageant le même préfixe (ce qui corrompt le runtime JS avec React Error #130).
+          // Tous les chunks de l'application sont pré-cachés exhaustivement à l'installation.
+          return new Response("Chunk non disponible hors ligne", {
+            status: 404,
+            statusText: "Resource Not Found Offline",
+            headers: { "Content-Type": "text/plain; charset=utf-8" },
+          });
         }
       })()
     );
