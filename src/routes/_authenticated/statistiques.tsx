@@ -11,6 +11,7 @@ import {
   CartesianGrid,
   Legend,
 } from "recharts";
+import { BarChart3, Receipt } from "lucide-react";
 
 import { useBusiness } from "@/hooks/use-business";
 import { fetchClients, fetchOrders, paidTotal, balance, type OrderRow } from "@/lib/queries";
@@ -18,18 +19,20 @@ import { ORDER_STATUS, isActive, isLate, type OrderStatus } from "@/lib/domain";
 import { fcfa } from "@/lib/format";
 import { Skeleton } from "@/components/ui/skeleton";
 import { SectionTitle, StatCard } from "@/components/bits";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { ExpensesManagement } from "@/components/expenses-management";
 
 export const Route = createFileRoute("/_authenticated/statistiques")({
   head: () => ({
     meta: [
-      { title: "Statistiques — CouturPro" },
+      { title: "Statistiques & Finances — CouturPro" },
       {
         name: "description",
         content:
-          "Chiffre d'affaires, commandes livrées, impayés et vêtements les plus demandés, mois par mois.",
+          "Chiffre d'affaires, comptabilité d'atelier, gestion des charges, bénéfice net et commandes livrées mois par mois.",
       },
-      { property: "og:title", content: "Statistiques — CouturPro" },
-      { property: "og:description", content: "Les chiffres clés de votre atelier de couture." },
+      { property: "og:title", content: "Statistiques & Finances — CouturPro" },
+      { property: "og:description", content: "Les chiffres clés et la comptabilité de votre atelier de couture." },
     ],
   }),
   component: StatsPage,
@@ -59,6 +62,16 @@ function StatsPage() {
     enabled: true,
   });
   const [month, setMonth] = useState(() => new Date().toISOString().slice(0, 7));
+
+  const [activeTab, setActiveTab] = useState<"ventes" | "charges">(() => {
+    if (typeof window !== "undefined") {
+      const params = new URLSearchParams(window.location.search);
+      if (params.get("tab") === "charges" || params.get("view") === "compta") {
+        return "charges";
+      }
+    }
+    return "ventes";
+  });
 
   const months = useMemo(() => {
     const set = new Set<string>();
@@ -140,7 +153,7 @@ function StatsPage() {
             value={month}
             onChange={(e) => setMonth(e.target.value)}
             aria-label="Mois"
-            className="h-11 rounded-xl border border-input bg-card px-3 text-base sm:text-sm font-medium focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
+            className="h-11 rounded-xl border border-input bg-card px-3 text-base sm:text-sm font-medium focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring cursor-pointer shadow-2xs"
           >
             {months.map((m) => (
               <option key={m} value={m}>
@@ -150,116 +163,152 @@ function StatsPage() {
           </select>
         }
       >
-        Statistiques
+        Statistiques & Finances
       </SectionTitle>
 
-      {/* KPI Cards */}
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        <StatCard label="Commandes du mois" value={String(stats.count)} />
-        <StatCard label="Chiffre d'affaires du mois" value={fcfa(stats.revenue, currency)} />
-        <StatCard label="Encaissé ce mois" value={fcfa(stats.collected, currency)} />
-        <StatCard label="Impayés (toutes commandes)" value={fcfa(stats.unpaid, currency)} />
-        <StatCard label="Livrées ce mois" value={String(stats.delivered)} />
-        <StatCard label="Commandes en cours" value={String(stats.active)} />
-        <StatCard label="En retard" value={String(stats.late)} />
-        <StatCard label="Panier moyen" value={fcfa(stats.average, currency)} />
-      </div>
+      <Tabs
+        value={activeTab}
+        onValueChange={(v) => setActiveTab(v as "ventes" | "charges")}
+        className="w-full"
+      >
+        <TabsList className="grid grid-cols-2 w-full max-w-md h-11 p-1 bg-muted/70 rounded-xl">
+          <TabsTrigger
+            value="ventes"
+            className="gap-2 text-xs sm:text-sm font-semibold rounded-lg data-[state=active]:bg-card data-[state=active]:shadow-xs"
+          >
+            <BarChart3 className="size-4" />
+            <span>Activité & Ventes</span>
+          </TabsTrigger>
+          <TabsTrigger
+            value="charges"
+            className="gap-2 text-xs sm:text-sm font-semibold rounded-lg data-[state=active]:bg-card data-[state=active]:shadow-xs"
+          >
+            <Receipt className="size-4" />
+            <span>Comptabilité & Charges</span>
+          </TabsTrigger>
+        </TabsList>
 
-      {/* Graphique d'évolution mensuelle */}
-      <section className="card-soft p-5">
-        <h2 className="font-display text-sm font-bold">
-          Évolution du chiffre d'affaires et des encaissements
-        </h2>
-        <p className="text-xs text-muted-foreground">Historique des 6 derniers mois d'activité.</p>
+        {/* ONGLET 1 : ACTIVITÉ & COMMANDES (100% CONSERVÉ SANS MODIFICATION DE STRUCTURE) */}
+        <TabsContent value="ventes" className="space-y-6 mt-6">
+          {/* KPI Cards */}
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            <StatCard label="Commandes du mois" value={String(stats.count)} />
+            <StatCard label="Chiffre d'affaires du mois" value={fcfa(stats.revenue, currency)} />
+            <StatCard label="Encaissé ce mois" value={fcfa(stats.collected, currency)} />
+            <StatCard label="Impayés (toutes commandes)" value={fcfa(stats.unpaid, currency)} />
+            <StatCard label="Livrées ce mois" value={String(stats.delivered)} />
+            <StatCard label="Commandes en cours" value={String(stats.active)} />
+            <StatCard label="En retard" value={String(stats.late)} />
+            <StatCard label="Panier moyen" value={fcfa(stats.average, currency)} />
+          </div>
 
-        <div className="mt-4 h-64 w-full min-w-0">
-          <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={monthlyEvolution} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
-              <CartesianGrid strokeDasharray="3 3" opacity={0.2} />
-              <XAxis dataKey="mois" fontSize={12} />
-              <YAxis
-                fontSize={11}
-                tickFormatter={(val) => `${Math.round(val / 1000)}k`}
-              />
-              <Tooltip
-                formatter={(val) => [fcfa(Number(val ?? 0), currency), ""]}
-                contentStyle={{
-                  backgroundColor: "var(--card)",
-                  borderColor: "var(--border)",
-                  borderRadius: "0.75rem",
-                  fontSize: "0.75rem",
-                }}
-              />
-              <Legend wrapperStyle={{ fontSize: "0.75rem", paddingTop: "0.5rem" }} />
-              <Bar dataKey="Chiffre d'affaires" fill="var(--primary)" radius={[4, 4, 0, 0]} />
-              <Bar dataKey="Encaissé" fill="var(--success)" radius={[4, 4, 0, 0]} />
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
-      </section>
+          {/* Graphique d'évolution mensuelle */}
+          <section className="card-soft p-5">
+            <h2 className="font-display text-sm font-bold">
+              Évolution du chiffre d'affaires et des encaissements
+            </h2>
+            <p className="text-xs text-muted-foreground">Historique des 6 derniers mois d'activité.</p>
 
-      <div className="grid gap-4 lg:grid-cols-2">
-        <section className="card-soft p-5">
-          <h2 className="font-display text-sm font-bold">Vêtements les plus demandés</h2>
-          {stats.topGarments.length === 0 ? (
-            <p className="mt-3 text-sm text-muted-foreground">Aucune commande sur ce mois.</p>
-          ) : (
-            <ul className="mt-4 space-y-3">
-              {stats.topGarments.map(([name, count]) => (
-                <li key={name}>
-                  <div className="flex items-center justify-between text-sm">
-                    <span>{name}</span>
-                    <span className="font-semibold">{count}</span>
-                  </div>
-                  <div className="mt-1 h-2 overflow-hidden rounded-full bg-muted">
-                    <div
-                      className="h-full rounded-full bg-primary"
-                      style={{ width: `${Math.round((count / maxGarment) * 100)}%` }}
-                    />
-                  </div>
-                </li>
-              ))}
-            </ul>
-          )}
-        </section>
+            <div className="mt-4 h-64 w-full min-w-0">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={monthlyEvolution} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" opacity={0.2} />
+                  <XAxis dataKey="mois" fontSize={12} />
+                  <YAxis
+                    fontSize={11}
+                    tickFormatter={(val) => `${Math.round(val / 1000)}k`}
+                  />
+                  <Tooltip
+                    formatter={(val) => [fcfa(Number(val ?? 0), currency), ""]}
+                    contentStyle={{
+                      backgroundColor: "var(--card)",
+                      borderColor: "var(--border)",
+                      borderRadius: "0.75rem",
+                      fontSize: "0.75rem",
+                    }}
+                  />
+                  <Legend wrapperStyle={{ fontSize: "0.75rem", paddingTop: "0.5rem" }} />
+                  <Bar dataKey="Chiffre d'affaires" fill="var(--primary)" radius={[4, 4, 0, 0]} />
+                  <Bar dataKey="Encaissé" fill="var(--success)" radius={[4, 4, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          </section>
 
-        <section className="card-soft p-5">
-          <h2 className="font-display text-sm font-bold">Répartition par statut</h2>
-          <ul className="mt-4 space-y-2 text-sm">
-            {(Object.keys(ORDER_STATUS) as OrderStatus[]).map((s) => (
-              <li key={s} className="flex items-center justify-between">
-                <span className="flex items-center gap-2">
-                  <span className={`size-2.5 rounded-full ${ORDER_STATUS[s].dot}`} />
-                  {ORDER_STATUS[s].label}
-                </span>
-                <span className="font-semibold">{stats.byStatus[s] ?? 0}</span>
-              </li>
-            ))}
-          </ul>
-        </section>
+          <div className="grid gap-4 lg:grid-cols-2">
+            <section className="card-soft p-5">
+              <h2 className="font-display text-sm font-bold">Vêtements les plus demandés</h2>
+              {stats.topGarments.length === 0 ? (
+                <p className="mt-3 text-sm text-muted-foreground">Aucune commande sur ce mois.</p>
+              ) : (
+                <ul className="mt-4 space-y-3">
+                  {stats.topGarments.map(([name, count]) => (
+                    <li key={name}>
+                      <div className="flex items-center justify-between text-sm">
+                        <span>{name}</span>
+                        <span className="font-semibold">{count}</span>
+                      </div>
+                      <div className="mt-1 h-2 overflow-hidden rounded-full bg-muted">
+                        <div
+                          className="h-full rounded-full bg-primary"
+                          style={{ width: `${Math.round((count / maxGarment) * 100)}%` }}
+                        />
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </section>
 
-        <section className="card-soft p-5">
-          <h2 className="font-display text-sm font-bold">Meilleurs clients</h2>
-          {stats.topClients.length === 0 ? (
-            <p className="mt-3 text-sm text-muted-foreground">Pas encore de données.</p>
-          ) : (
-            <ul className="mt-4 space-y-2 text-sm">
-              {stats.topClients.map(([name, total]) => (
-                <li key={name} className="flex items-center justify-between">
-                  <span className="truncate">{name}</span>
-                  <span className="font-semibold">{fcfa(total, currency)}</span>
-                </li>
-              ))}
-            </ul>
-          )}
-        </section>
+            <section className="card-soft p-5">
+              <h2 className="font-display text-sm font-bold">Répartition par statut</h2>
+              <ul className="mt-4 space-y-2 text-sm">
+                {(Object.keys(ORDER_STATUS) as OrderStatus[]).map((s) => (
+                  <li key={s} className="flex items-center justify-between">
+                    <span className="flex items-center gap-2">
+                      <span className={`size-2.5 rounded-full ${ORDER_STATUS[s].dot}`} />
+                      {ORDER_STATUS[s].label}
+                    </span>
+                    <span className="font-semibold">{stats.byStatus[s] ?? 0}</span>
+                  </li>
+                ))}
+              </ul>
+            </section>
 
-        <section className="card-soft p-5">
-          <h2 className="font-display text-sm font-bold">Clientèle</h2>
-          <p className="mt-4 text-3xl font-bold">{(clients.data ?? []).length}</p>
-          <p className="text-sm text-muted-foreground">clients enregistrés dans votre atelier</p>
-        </section>
-      </div>
+            <section className="card-soft p-5">
+              <h2 className="font-display text-sm font-bold">Meilleurs clients</h2>
+              {stats.topClients.length === 0 ? (
+                <p className="mt-3 text-sm text-muted-foreground">Pas encore de données.</p>
+              ) : (
+                <ul className="mt-4 space-y-2 text-sm">
+                  {stats.topClients.map(([name, total]) => (
+                    <li key={name} className="flex items-center justify-between">
+                      <span className="truncate">{name}</span>
+                      <span className="font-semibold">{fcfa(total, currency)}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </section>
+
+            <section className="card-soft p-5">
+              <h2 className="font-display text-sm font-bold">Clientèle</h2>
+              <p className="mt-4 text-3xl font-bold">{(clients.data ?? []).length}</p>
+              <p className="text-sm text-muted-foreground">clients enregistrés dans votre atelier</p>
+            </section>
+          </div>
+        </TabsContent>
+
+        {/* ONGLET 2 : COMPTABILITÉ & CHARGES (GESTION DES SALAIRES, CHARGES & BÉNÉFICE NET) */}
+        <TabsContent value="charges" className="mt-6">
+          <ExpensesManagement
+            orders={orders.data ?? []}
+            month={month}
+            currency={currency}
+            monthLabel={monthLabel(month)}
+          />
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }

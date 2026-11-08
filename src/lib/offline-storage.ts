@@ -4,7 +4,7 @@
  */
 
 const DB_NAME = "couturpro_offline_v1";
-const DB_VERSION = 3;
+const DB_VERSION = 4;
 
 export type SyncQueueItem = {
   id: string; // UUID de l'action de synchronisation
@@ -17,7 +17,8 @@ export type SyncQueueItem = {
     | "appointment"
     | "garment_type"
     | "catalog_model"
-    | "business";
+    | "business"
+    | "expense";
   action: "create" | "update" | "delete";
   payload: Record<string, unknown>;
   tempId?: string | undefined; // Si entité créée hors-ligne avec un ID temporaire
@@ -111,6 +112,13 @@ function getDB(): Promise<IDBDatabase> {
         const queueStore = db.createObjectStore("sync_queue", { keyPath: "id" });
         queueStore.createIndex("by_created", "createdAt", { unique: false });
         queueStore.createIndex("by_status", "status", { unique: false });
+      }
+
+      // 9. Dépenses & Charges d'Atelier
+      if (!db.objectStoreNames.contains("expenses")) {
+        const expenseStore = db.createObjectStore("expenses", { keyPath: "id" });
+        expenseStore.createIndex("by_business", "business_id", { unique: false });
+        expenseStore.createIndex("by_date", "expense_date", { unique: false });
       }
     };
 
