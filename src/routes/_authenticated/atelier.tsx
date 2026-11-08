@@ -1,10 +1,10 @@
-﻿import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Loader2, Plus, Trash2, Image as ImageIcon, KeyRound, LogOut, ShieldCheck, Download, AlertTriangle, FileSpreadsheet, ExternalLink, Eye, EyeOff, Check } from "lucide-react";
+import { Loader2, Plus, Trash2, Image as ImageIcon, KeyRound, LogOut, ShieldCheck, Download, AlertTriangle, FileSpreadsheet, ExternalLink, Eye, EyeOff, Check, FolderArchive, FileText, ShoppingBag, Receipt } from "lucide-react";
 import { toast } from "sonner";
 import { clearOfflineDatabase, addToSyncQueue, setLocalItem, getAllLocalItems, deleteLocalItem } from "@/lib/offline-storage";
-import { exportCompleteWorkshopJson, exportClientsCsv, exportMeasurementsCsv } from "@/lib/export-data";
+import { exportCompleteWorkshopJson, exportClientsCsv, exportMeasurementsCsv, exportOrdersCsv, exportExpensesCsv, exportWorkshopFullZip, exportWorkshopPdfReport } from "@/lib/export-data";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -784,19 +784,59 @@ function SessionSignOutSection() {
 }
 
 function PrivacyDataProtectionSection({ business }: { business: { id: string; name: string } }) {
-  const [exportingJson, setExportingJson] = useState(false);
+  const [exportingZip, setExportingZip] = useState(false);
+  const [exportingPdf, setExportingPdf] = useState(false);
+  const [exportingOrders, setExportingOrders] = useState(false);
+  const [exportingExpenses, setExportingExpenses] = useState(false);
   const [exportingClients, setExportingClients] = useState(false);
   const [exportingMeasures, setExportingMeasures] = useState(false);
+  const [exportingJson, setExportingJson] = useState(false);
 
-  async function handleExportJson() {
-    setExportingJson(true);
+  async function handleExportZip() {
+    setExportingZip(true);
     try {
-      await exportCompleteWorkshopJson(business.id, business.name);
-      toast.success("Sauvegarde complète téléchargée avec succès");
+      await exportWorkshopFullZip(business.id, business.name);
+      toast.success("Dossier ZIP complet téléchargé avec succès !");
     } catch {
-      toast.error("Échec de la sauvegarde des données");
+      toast.error("Échec du téléchargement du dossier ZIP");
     } finally {
-      setExportingJson(false);
+      setExportingZip(false);
+    }
+  }
+
+  async function handleExportPdf() {
+    setExportingPdf(true);
+    try {
+      await exportWorkshopPdfReport(business.id, business.name);
+      toast.success("Grand Livre PDF ouvert pour impression / enregistrement !");
+    } catch {
+      toast.error("Échec de la génération du dossier PDF");
+    } finally {
+      setExportingPdf(false);
+    }
+  }
+
+  async function handleExportOrders() {
+    setExportingOrders(true);
+    try {
+      await exportOrdersCsv(business.id, business.name);
+      toast.success("Fichier commandes Excel téléchargé avec succès !");
+    } catch {
+      toast.error("Échec du téléchargement des commandes");
+    } finally {
+      setExportingOrders(false);
+    }
+  }
+
+  async function handleExportExpenses() {
+    setExportingExpenses(true);
+    try {
+      await exportExpensesCsv(business.id, business.name);
+      toast.success("Fichier charges & dépenses Excel téléchargé avec succès !");
+    } catch {
+      toast.error("Échec du téléchargement des charges");
+    } finally {
+      setExportingExpenses(false);
     }
   }
 
@@ -804,7 +844,7 @@ function PrivacyDataProtectionSection({ business }: { business: { id: string; na
     setExportingClients(true);
     try {
       await exportClientsCsv(business.id, business.name);
-      toast.success("Fichier clients téléchargé avec succès");
+      toast.success("Fichier clients téléchargé avec succès !");
     } catch {
       toast.error("Échec du téléchargement des clients");
     } finally {
@@ -816,7 +856,7 @@ function PrivacyDataProtectionSection({ business }: { business: { id: string; na
     setExportingMeasures(true);
     try {
       await exportMeasurementsCsv(business.id, business.name);
-      toast.success("Carnet de mesures téléchargé avec succès");
+      toast.success("Carnet de mesures téléchargé avec succès !");
     } catch {
       toast.error("Échec du téléchargement des mesures");
     } finally {
@@ -824,29 +864,42 @@ function PrivacyDataProtectionSection({ business }: { business: { id: string; na
     }
   }
 
+  async function handleExportJson() {
+    setExportingJson(true);
+    try {
+      await exportCompleteWorkshopJson(business.id, business.name);
+      toast.success("Sauvegarde complète téléchargée avec succès !");
+    } catch {
+      toast.error("Échec de la sauvegarde des données");
+    } finally {
+      setExportingJson(false);
+    }
+  }
+
   return (
     <section className="card-soft space-y-4 p-5">
       <div className="flex items-center gap-2">
         <ShieldCheck className="size-5 text-emerald-600" />
-        <h2 className="font-display text-sm font-bold">Sauvegarde & Export des Données</h2>
+        <h2 className="font-display text-sm font-bold">Sauvegarde & Portabilité des Données</h2>
       </div>
       <p className="text-xs text-muted-foreground leading-relaxed">
-        Téléchargez une copie de vos données (clients, mesures, commandes) pour les conserver en sécurité sur votre appareil. Vos données d'atelier vous appartiennent entièrement.
+        Exportez l'intégralité des données de votre atelier en toute liberté. Vos données vous appartiennent définitivement : même sans connexion internet ou en cas de panne serveur, vous pouvez emporter vos fichiers Excel, votre rapport PDF ou votre archive ZIP complète.
       </p>
 
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-1">
+      {/* EXPORTS PRINCIPAUX (ZIP COMPLET & GRAND LIVRE PDF) */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
         <Button
           type="button"
           variant="outline"
           size="sm"
-          disabled={exportingJson}
-          onClick={handleExportJson}
-          className="text-xs font-semibold justify-start h-auto py-2.5 px-3"
+          disabled={exportingZip}
+          onClick={handleExportZip}
+          className="text-xs font-semibold justify-start h-auto py-3 px-3.5 border-primary/40 bg-primary/5 hover:bg-primary/10 transition-colors shadow-2xs cursor-pointer"
         >
-          {exportingJson ? <Loader2 className="mr-2 size-4 animate-spin" /> : <Download className="mr-2 size-4 text-primary shrink-0" />}
+          {exportingZip ? <Loader2 className="mr-2.5 size-5 animate-spin text-primary" /> : <FolderArchive className="mr-2.5 size-5 text-primary shrink-0" />}
           <div className="text-left">
-            <div className="font-bold">Sauvegarde Complète</div>
-            <div className="text-[0.65rem] text-muted-foreground">Toutes les données de l'atelier (JSON)</div>
+            <div className="font-bold text-sm text-foreground">Dossier ZIP Complet</div>
+            <div className="text-[0.7rem] text-muted-foreground">Tous les fichiers Excel + Sauvegarde JSON + Lisez-moi</div>
           </div>
         </Button>
 
@@ -854,42 +907,111 @@ function PrivacyDataProtectionSection({ business }: { business: { id: string; na
           type="button"
           variant="outline"
           size="sm"
-          disabled={exportingClients}
-          onClick={handleExportClients}
-          className="text-xs font-semibold justify-start h-auto py-2.5 px-3"
+          disabled={exportingPdf}
+          onClick={handleExportPdf}
+          className="text-xs font-semibold justify-start h-auto py-3 px-3.5 border-rose-500/30 bg-rose-500/5 hover:bg-rose-500/10 transition-colors shadow-2xs cursor-pointer"
         >
-          {exportingClients ? <Loader2 className="mr-2 size-4 animate-spin" /> : <FileSpreadsheet className="mr-2 size-4 text-emerald-600 shrink-0" />}
+          {exportingPdf ? <Loader2 className="mr-2.5 size-5 animate-spin text-rose-600" /> : <FileText className="mr-2.5 size-5 text-rose-600 shrink-0" />}
           <div className="text-left">
-            <div className="font-bold">Liste des Clients</div>
-            <div className="text-[0.65rem] text-muted-foreground">Fichier Excel (contacts & adresses)</div>
+            <div className="font-bold text-sm text-foreground">Grand Livre d'Atelier (PDF)</div>
+            <div className="text-[0.7rem] text-muted-foreground">Rapport d'atelier complet imprimable & enregistrable en PDF</div>
           </div>
         </Button>
+      </div>
 
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          disabled={exportingMeasures}
-          onClick={handleExportMeasures}
-          className="text-xs font-semibold justify-start h-auto py-2.5 px-3"
-        >
-          {exportingMeasures ? <Loader2 className="mr-2 size-4 animate-spin" /> : <Download className="mr-2 size-4 text-amber-600 shrink-0" />}
-          <div className="text-left">
-            <div className="font-bold">Carnet de Mesures</div>
-            <div className="text-[0.65rem] text-muted-foreground">Fichier Excel (gabarits & relevés)</div>
-          </div>
-        </Button>
+      {/* FICHIERS EXCEL INDIVIDUELS & JSON */}
+      <div className="pt-2">
+        <span className="text-[0.7rem] uppercase tracking-wider font-bold text-muted-foreground">
+          Téléchargement par catégorie (Excel / CSV)
+        </span>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-2">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={exportingOrders}
+            onClick={handleExportOrders}
+            className="text-xs font-semibold justify-start h-auto py-2.5 px-3 cursor-pointer"
+          >
+            {exportingOrders ? <Loader2 className="mr-2 size-4 animate-spin" /> : <ShoppingBag className="mr-2 size-4 text-primary shrink-0" />}
+            <div className="text-left">
+              <div className="font-bold">Commandes (Excel)</div>
+              <div className="text-[0.65rem] text-muted-foreground">Prix, acomptes, soldes & statuts</div>
+            </div>
+          </Button>
+
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={exportingClients}
+            onClick={handleExportClients}
+            className="text-xs font-semibold justify-start h-auto py-2.5 px-3 cursor-pointer"
+          >
+            {exportingClients ? <Loader2 className="mr-2 size-4 animate-spin" /> : <FileSpreadsheet className="mr-2 size-4 text-emerald-600 shrink-0" />}
+            <div className="text-left">
+              <div className="font-bold">Clients (Excel)</div>
+              <div className="text-[0.65rem] text-muted-foreground">Coordonnées, adresses & WhatsApp</div>
+            </div>
+          </Button>
+
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={exportingMeasures}
+            onClick={handleExportMeasures}
+            className="text-xs font-semibold justify-start h-auto py-2.5 px-3 cursor-pointer"
+          >
+            {exportingMeasures ? <Loader2 className="mr-2 size-4 animate-spin" /> : <Download className="mr-2 size-4 text-amber-600 shrink-0" />}
+            <div className="text-left">
+              <div className="font-bold">Carnet de Mesures</div>
+              <div className="text-[0.65rem] text-muted-foreground">Relevés de mensurations complets</div>
+            </div>
+          </Button>
+
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={exportingExpenses}
+            onClick={handleExportExpenses}
+            className="text-xs font-semibold justify-start h-auto py-2.5 px-3 cursor-pointer"
+          >
+            {exportingExpenses ? <Loader2 className="mr-2 size-4 animate-spin" /> : <Receipt className="mr-2 size-4 text-rose-500 shrink-0" />}
+            <div className="text-left">
+              <div className="font-bold">Charges & Dépenses</div>
+              <div className="text-[0.65rem] text-muted-foreground">Salaires, loyer, mercerie & factures</div>
+            </div>
+          </Button>
+
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={exportingJson}
+            onClick={handleExportJson}
+            className="text-xs font-semibold justify-start h-auto py-2.5 px-3 cursor-pointer"
+          >
+            {exportingJson ? <Loader2 className="mr-2 size-4 animate-spin" /> : <Download className="mr-2 size-4 text-slate-600 shrink-0" />}
+            <div className="text-left">
+              <div className="font-bold">Sauvegarde Brute (JSON)</div>
+              <div className="text-[0.65rem] text-muted-foreground">Archive informatique interopérable</div>
+            </div>
+          </Button>
+        </div>
       </div>
 
       <div className="pt-2 flex items-center justify-between text-xs text-muted-foreground border-t border-border/50">
-        <span>Règlement de confidentialité & sécurité active</span>
+        <span>Règlement de confidentialité & portabilité active (RGPD Art. 20)</span>
         <a
           href="/politique-confidentialite"
           target="_blank"
           rel="noopener noreferrer"
-          className="inline-flex items-center gap-1 text-primary hover:underline font-medium"
+          className="text-primary hover:underline inline-flex items-center gap-1 font-medium"
         >
-          Consulter la politique de confidentialité <ExternalLink className="size-3" />
+          Politique de protection des données
+          <ExternalLink className="size-3" />
         </a>
       </div>
     </section>
