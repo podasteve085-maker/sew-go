@@ -815,7 +815,7 @@ function PrivacyDataProtectionSection({ business }: { business: { id: string; na
     setExportingPdf(true);
     try {
       await exportWorkshopPdfReport(business.id, business.name);
-      toast.success("Grand Livre PDF ouvert pour impression / enregistrement !");
+      toast.success("Grand Livre PDF (.pdf) téléchargé avec succès !");
     } catch {
       toast.error("Échec de la génération du dossier PDF");
     } finally {
@@ -847,7 +847,7 @@ function PrivacyDataProtectionSection({ business }: { business: { id: string; na
       };
       const formatLabels = {
         csv: "Fichier Tableur Excel / Sheets téléchargé",
-        pdf: "Document PDF ouvert",
+        pdf: "Document PDF officiel (.pdf) téléchargé",
         html: "Fiche Web téléchargée",
         txt: "Fiche Texte téléchargée",
       };
@@ -945,7 +945,7 @@ function PrivacyDataProtectionSection({ business }: { business: { id: string; na
           </span>
           <span className="text-[0.68rem] text-muted-foreground">
             {selectedFormat === "csv" && "📊 Tableur (Excel, Sheets, LibreOffice — Format direct)"}
-            {selectedFormat === "pdf" && "📄 Document PDF (Format A4 avec retour sécurisé)"}
+            {selectedFormat === "pdf" && "📄 Document PDF (Véritable fichier .pdf universel)"}
             {selectedFormat === "html" && "🌐 Page Web (Fichier interactif hors-ligne)"}
             {selectedFormat === "txt" && "📋 Texte clair (Lisible sur tout bloc-notes)"}
           </span>
@@ -980,7 +980,7 @@ function PrivacyDataProtectionSection({ business }: { business: { id: string; na
             <FileText className="size-3.5 shrink-0" />
             <div className="text-left">
               <div className="leading-tight">Document PDF</div>
-              <div className="text-[0.62rem] opacity-80">(Imprimable A4)</div>
+              <div className="text-[0.62rem] opacity-80">(Fichier .pdf)</div>
             </div>
           </button>
 

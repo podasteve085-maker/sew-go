@@ -26,6 +26,7 @@ import {
 import type { ExpenseRow } from "@/lib/expenses-types";
 import { EXPENSE_CATEGORIES } from "@/lib/expenses-types";
 import { SimpleZip } from "@/lib/zip-builder";
+import { PdfDocument } from "@/lib/pdf-builder";
 import { fcfa } from "@/lib/format";
 
 export type ExportFormat = "csv" | "pdf" | "html" | "txt";
@@ -527,6 +528,45 @@ export function generateClientsTxtContent(clients: ClientRow[], businessName: st
   return lines.join("\r\n");
 }
 
+export function generateClientsPdf(clients: ClientRow[], businessName: string): PdfDocument {
+  const doc = new PdfDocument({
+    title: "RÉPERTOIRE OFFICIEL DES CLIENTS",
+    businessName,
+  });
+
+  const withPhone = clients.filter((c) => c.phone).length;
+  const withWa = clients.filter((c) => c.whatsapp).length;
+  const uniqueCities = new Set(clients.map((c) => c.city).filter(Boolean)).size;
+
+  doc.addSummaryCards([
+    { label: "Total Clients", value: String(clients.length), color: [0.1, 0.5, 0.3] },
+    { label: "Numéros Téléphone", value: String(withPhone), color: [0.2, 0.4, 0.8] },
+    { label: "WhatsApp Actifs", value: String(withWa), color: [0.15, 0.65, 0.4] },
+    { label: "Villes / Secteurs", value: String(uniqueCities), color: [0.8, 0.5, 0.1] },
+  ]);
+
+  doc.addSectionTitle(`Fichier des Coordonnées Clients (${clients.length} fiches)`);
+
+  const columns = [
+    { header: "Nom & Prénom", width: 140, bold: true },
+    { header: "Téléphone", width: 85 },
+    { header: "WhatsApp", width: 85 },
+    { header: "Ville / Adresse", width: 130 },
+    { header: "Date d'Ajout", width: 75, align: "center" as const },
+  ];
+
+  const rows = clients.map((c) => [
+    `${c.first_name || ""} ${c.last_name || ""}`.trim() || "Sans nom",
+    c.phone || "-",
+    c.whatsapp || "-",
+    [c.city, c.address].filter(Boolean).join(" • ") || "-",
+    c.created_at ? c.created_at.slice(0, 10) : "-",
+  ]);
+
+  doc.addTable(columns, rows);
+  return doc;
+}
+
 // -----------------------------------------------------------------------------
 // 2. GÉNÉRATEURS DE DOCUMENTS COMMANDES (CSV, PDF, WEB .HTML, TEXTE)
 // -----------------------------------------------------------------------------
@@ -732,6 +772,67 @@ export function generateOrdersTxtContent(orders: OrderRow[], businessName: strin
   return lines.join("\r\n");
 }
 
+export function generateOrdersPdf(orders: OrderRow[], businessName: string, currency = "FCFA"): PdfDocument {
+  const doc = new PdfDocument({
+    title: "LIVRE DES COMMANDES & ENCAISSEMENTS",
+    businessName,
+  });
+
+  const totalCA = orders.reduce((sum, o) => sum + (Number(o.price) || 0), 0);
+  const totalPaid = orders.reduce((sum, o) => sum + paidTotal(o), 0);
+  const totalBalance = orders.reduce((sum, o) => sum + Math.max(0, balance(o)), 0);
+
+  doc.addSummaryCards([
+    { label: "Total Commandes", value: String(orders.length), color: [0.2, 0.4, 0.8] },
+    { label: "Chiffre d'Affaires", value: fcfa(totalCA, currency), color: [0.1, 0.6, 0.3] },
+    { label: "Total Encaissé", value: fcfa(totalPaid, currency), color: [0.1, 0.5, 0.7] },
+    { label: "Solde Dû", value: fcfa(totalBalance, currency), color: [0.8, 0.2, 0.2] },
+  ]);
+
+  doc.addSectionTitle(`Registre Chronologique des Commandes (${orders.length})`);
+
+  const columns = [
+    { header: "Réf", width: 45, bold: true },
+    { header: "Client", width: 110 },
+    { header: "Modèle / Tenue", width: 115 },
+    { header: "Statut", width: 70 },
+    { header: "Prix Total", width: 60, align: "right" as const },
+    { header: "Acompte", width: 55, align: "right" as const },
+    { header: "Solde Dû", width: 60, align: "right" as const, bold: true, color: [0.8, 0.15, 0.15] as [number, number, number] },
+  ];
+
+  const statusLabels: Record<string, string> = {
+    pending: "En attente",
+    in_progress: "Confection",
+    ready: "Prêt",
+    delivered: "Livré",
+    cancelled: "Annulé",
+  };
+
+  const rows = orders.map((o) => {
+    const c = o.clients;
+    const clientName = c ? `${c.first_name || ""} ${c.last_name || ""}`.trim() : "Client anonyme";
+    const ref = o.order_number || o.id.slice(0, 8);
+    const status = statusLabels[o.status] || o.status || "En cours";
+    const price = Number(o.price) || 0;
+    const paid = paidTotal(o);
+    const rest = Math.max(0, balance(o));
+
+    return [
+      `#${ref}`,
+      clientName,
+      o.garment_type || "Sur-mesure",
+      status,
+      fcfa(price, currency),
+      fcfa(paid, currency),
+      rest > 0 ? fcfa(rest, currency) : "Soldé",
+    ];
+  });
+
+  doc.addTable(columns, rows);
+  return doc;
+}
+
 // -----------------------------------------------------------------------------
 // 3. GÉNÉRATEURS DE DOCUMENTS MESURES (CSV, PDF, WEB .HTML, TEXTE)
 // -----------------------------------------------------------------------------
@@ -892,6 +993,50 @@ export function generateMeasurementsTxtContent(sets: FullMeasurementSetRow[], bu
   return lines.join("\r\n");
 }
 
+export function generateMeasurementsPdf(sets: FullMeasurementSetRow[], businessName: string): PdfDocument {
+  const doc = new PdfDocument({
+    title: "CARNET OFFICIEL DES MESURES",
+    businessName,
+  });
+
+  const uniqueClients = new Set(sets.map((s) => s.client_id).filter(Boolean)).size;
+
+  doc.addSummaryCards([
+    { label: "Total Relevés", value: String(sets.length), color: [0.85, 0.55, 0.1] },
+    { label: "Clients Mesurés", value: String(uniqueClients), color: [0.2, 0.4, 0.8] },
+    { label: "Date de Référence", value: new Date().toLocaleDateString("fr-FR"), color: [0.3, 0.6, 0.4] },
+  ]);
+
+  doc.addSectionTitle(`Relevés de Mensurations de l'Atelier (${sets.length} fiches)`);
+
+  const columns = [
+    { header: "Client", width: 110, bold: true },
+    { header: "Modèle / Gabarit", width: 100 },
+    { header: "Date", width: 60, align: "center" as const },
+    { header: "Relevé des Mensurations (cm)", width: 245 },
+  ];
+
+  const rows = sets.map((s) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const c = (s as any).clients;
+    const clientName = c ? `${c.first_name || ""} ${c.last_name || ""}`.trim() : "Client";
+    const measuresStr = (s.values || [])
+      .filter((v) => v.value !== null && v.value !== undefined && v.value !== "")
+      .map((v) => `${v.name}: ${v.value}`)
+      .join(" • ") || "Aucune mesure saisie";
+
+    return [
+      clientName,
+      s.label || s.template_name || "Modèle",
+      s.recorded_at ? s.recorded_at.slice(0, 10) : "-",
+      measuresStr,
+    ];
+  });
+
+  doc.addTable(columns, rows);
+  return doc;
+}
+
 // -----------------------------------------------------------------------------
 // 4. GÉNÉRATEURS DE DOCUMENTS CHARGES & DÉPENSES (CSV, PDF, WEB .HTML, TEXTE)
 // -----------------------------------------------------------------------------
@@ -1038,6 +1183,48 @@ export function generateExpensesTxtContent(expenses: ExpenseRow[], businessName:
   });
 
   return lines.join("\r\n");
+}
+
+export function generateExpensesPdf(expenses: ExpenseRow[], businessName: string, currency = "FCFA"): PdfDocument {
+  const doc = new PdfDocument({
+    title: "REGISTRE DES CHARGES & DÉPENSES",
+    businessName,
+  });
+
+  const total = expenses.reduce((s, e) => s + (Number(e.amount) || 0), 0);
+  const avg = expenses.length > 0 ? Math.round(total / expenses.length) : 0;
+
+  doc.addSummaryCards([
+    { label: "Total Dépenses", value: String(expenses.length), color: [0.2, 0.4, 0.8] },
+    { label: "Total Décaissé", value: `- ${fcfa(total, currency)}`, color: [0.8, 0.2, 0.2] },
+    { label: "Dépense Moyenne", value: fcfa(avg, currency), color: [0.7, 0.4, 0.1] },
+  ]);
+
+  doc.addSectionTitle(`Comptabilité Analytique des Sorties d'Argent (${expenses.length})`);
+
+  const columns = [
+    { header: "Date", width: 65, align: "center" as const },
+    { header: "Catégorie", width: 95, bold: true },
+    { header: "Motif / Description", width: 165 },
+    { header: "Bénéficiaire", width: 95 },
+    { header: "Montant", width: 95, align: "right" as const, bold: true, color: [0.8, 0.2, 0.2] as [number, number, number] },
+  ];
+
+  const rows = expenses.map((e) => {
+    const catLabel = EXPENSE_CATEGORIES[e.category]?.label || e.category || "Autre";
+    const amt = Number(e.amount) || 0;
+
+    return [
+      e.expense_date ? e.expense_date.slice(0, 10) : "-",
+      catLabel,
+      e.title || "Dépense d'atelier",
+      e.beneficiary_name || "-",
+      `- ${fcfa(amt, currency)}`,
+    ];
+  });
+
+  doc.addTable(columns, rows);
+  return doc;
 }
 
 export function generateAppointmentsCsvContent(appts: AppointmentRow[]): string {
@@ -1291,6 +1478,131 @@ export function generateFullWorkshopHtmlContent(data: CompleteWorkshopData, busi
 </html>`;
 }
 
+export function generateFullWorkshopPdf(data: CompleteWorkshopData, businessName: string): PdfDocument {
+  const currency = (data.business?.currency as string) || "FCFA";
+  const doc = new PdfDocument({
+    title: "GRAND LIVRE D'ATELIER & DOSSIER COMPLET",
+    businessName,
+  });
+
+  const totalCA = data.orders.reduce((sum, o) => sum + (Number(o.price) || 0), 0);
+  const totalPaid = data.orders.reduce((sum, o) => sum + paidTotal(o), 0);
+  const totalExpenses = data.expenses.reduce((sum, e) => sum + (Number(e.amount) || 0), 0);
+  const netResult = totalPaid - totalExpenses;
+
+  doc.addSummaryCards([
+    { label: "Chiffre d'Affaires", value: fcfa(totalCA, currency), color: [0.1, 0.6, 0.3] },
+    { label: "Encaissé Réel", value: fcfa(totalPaid, currency), color: [0.2, 0.4, 0.8] },
+    { label: "Total Dépenses", value: `- ${fcfa(totalExpenses, currency)}`, color: [0.8, 0.2, 0.2] },
+    {
+      label: "Bénéfice Net Cash",
+      value: `${netResult >= 0 ? "+" : ""}${fcfa(netResult, currency)}`,
+      color: netResult >= 0 ? [0.1, 0.6, 0.3] : [0.8, 0.2, 0.2],
+    },
+  ]);
+
+  // Section 1 : Commandes récentes
+  doc.addSectionTitle(`1. Commandes Récentes d'Atelier (${data.orders.length} au total)`);
+  const topOrders = data.orders.slice(0, 30);
+  const orderColumns = [
+    { header: "Réf", width: 45, bold: true },
+    { header: "Client", width: 120 },
+    { header: "Modèle", width: 120 },
+    { header: "Statut", width: 65 },
+    { header: "Prix", width: 55, align: "right" as const },
+    { header: "Acompte", width: 55, align: "right" as const },
+    { header: "Solde", width: 55, align: "right" as const, bold: true },
+  ];
+  const orderRows = topOrders.map((o) => {
+    const c = o.clients;
+    const clientName = c ? `${c.first_name || ""} ${c.last_name || ""}`.trim() : "Client";
+    const ref = o.order_number || o.id.slice(0, 8);
+    const rest = Math.max(0, balance(o));
+    return [
+      `#${ref}`,
+      clientName,
+      o.garment_type || "Sur-mesure",
+      o.status || "En cours",
+      fcfa(Number(o.price) || 0, currency),
+      fcfa(paidTotal(o), currency),
+      rest > 0 ? fcfa(rest, currency) : "Soldé",
+    ];
+  });
+  doc.addTable(orderColumns, orderRows);
+
+  // Section 2 : Dépenses récentes
+  if (data.expenses.length > 0) {
+    doc.startNewPage();
+    doc.addSectionTitle(`2. Dernières Charges & Dépenses (${data.expenses.length} au total)`);
+    const expColumns = [
+      { header: "Date", width: 65, align: "center" as const },
+      { header: "Catégorie", width: 95, bold: true },
+      { header: "Motif", width: 165 },
+      { header: "Bénéficiaire", width: 95 },
+      { header: "Montant", width: 95, align: "right" as const, bold: true, color: [0.8, 0.2, 0.2] as [number, number, number] },
+    ];
+    const expRows = data.expenses.slice(0, 30).map((e) => [
+      e.expense_date ? e.expense_date.slice(0, 10) : "-",
+      EXPENSE_CATEGORIES[e.category]?.label || e.category || "Autre",
+      e.title || "Dépense",
+      e.beneficiary_name || "-",
+      `- ${fcfa(Number(e.amount) || 0, currency)}`,
+    ]);
+    doc.addTable(expColumns, expRows);
+  }
+
+  // Section 3 : Clients
+  if (data.clients.length > 0) {
+    doc.startNewPage();
+    doc.addSectionTitle(`3. Répertoire des Clients (${data.clients.length} au total)`);
+    const clientColumns = [
+      { header: "Nom & Prénom", width: 145, bold: true },
+      { header: "Téléphone", width: 85 },
+      { header: "WhatsApp", width: 85 },
+      { header: "Ville / Quartier", width: 125 },
+      { header: "Date Ajout", width: 75, align: "center" as const },
+    ];
+    const clientRows = data.clients.slice(0, 35).map((c) => [
+      `${c.first_name || ""} ${c.last_name || ""}`.trim() || "Sans nom",
+      c.phone || "-",
+      c.whatsapp || "-",
+      [c.city, c.address].filter(Boolean).join(" • ") || "-",
+      c.created_at ? c.created_at.slice(0, 10) : "-",
+    ]);
+    doc.addTable(clientColumns, clientRows);
+  }
+
+  // Section 4 : Mesures
+  if (data.measurementSets.length > 0) {
+    doc.startNewPage();
+    doc.addSectionTitle(`4. Carnet de Mesures (${data.measurementSets.length} au total)`);
+    const measColumns = [
+      { header: "Client", width: 110, bold: true },
+      { header: "Modèle", width: 100 },
+      { header: "Date", width: 60, align: "center" as const },
+      { header: "Mensurations Clés", width: 245 },
+    ];
+    const measRows = data.measurementSets.slice(0, 30).map((s) => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const c = (s as any).clients;
+      const clientName = c ? `${c.first_name || ""} ${c.last_name || ""}`.trim() : "Client";
+      const measuresStr = (s.values || [])
+        .filter((v) => v.value !== null && v.value !== undefined && v.value !== "")
+        .map((v) => `${v.name}: ${v.value}`)
+        .join(" • ") || "Aucune mesure saisie";
+      return [
+        clientName,
+        s.label || s.template_name || "Modèle",
+        s.recorded_at ? s.recorded_at.slice(0, 10) : "-",
+        measuresStr,
+      ];
+    });
+    doc.addTable(measColumns, measRows);
+  }
+
+  return doc;
+}
+
 // -----------------------------------------------------------------------------
 // 6. EXPORT UNIVERSEL PAR CATÉGORIE ET FORMAT SOUHAITÉ
 // -----------------------------------------------------------------------------
@@ -1318,8 +1630,9 @@ export async function exportCategoryData(
         mimeType = "text/csv;charset=utf-8";
         filename += ".csv";
       } else if (format === "pdf") {
-        const html = generateClientsHtmlContent(data.clients, businessName);
-        openPrintDocument(html, `${filename}.html`);
+        const doc = generateClientsPdf(data.clients, businessName);
+        const pdfBlob = doc.generateBlob();
+        downloadBlob(pdfBlob, `${filename}.pdf`);
         await logAudit(businessId, "DATA_EXPORT_CLIENTS_PDF", { count: data.clients.length });
         return;
       } else if (format === "html") {
@@ -1341,8 +1654,9 @@ export async function exportCategoryData(
         mimeType = "text/csv;charset=utf-8";
         filename += ".csv";
       } else if (format === "pdf") {
-        const html = generateOrdersHtmlContent(data.orders, businessName, currency);
-        openPrintDocument(html, `${filename}.html`);
+        const doc = generateOrdersPdf(data.orders, businessName, currency);
+        const pdfBlob = doc.generateBlob();
+        downloadBlob(pdfBlob, `${filename}.pdf`);
         await logAudit(businessId, "DATA_EXPORT_ORDERS_PDF", { count: data.orders.length });
         return;
       } else if (format === "html") {
@@ -1364,8 +1678,9 @@ export async function exportCategoryData(
         mimeType = "text/csv;charset=utf-8";
         filename += ".csv";
       } else if (format === "pdf") {
-        const html = generateMeasurementsHtmlContent(data.measurementSets, businessName);
-        openPrintDocument(html, `${filename}.html`);
+        const doc = generateMeasurementsPdf(data.measurementSets, businessName);
+        const pdfBlob = doc.generateBlob();
+        downloadBlob(pdfBlob, `${filename}.pdf`);
         await logAudit(businessId, "DATA_EXPORT_MEASURES_PDF", { count: data.measurementSets.length });
         return;
       } else if (format === "html") {
@@ -1387,8 +1702,9 @@ export async function exportCategoryData(
         mimeType = "text/csv;charset=utf-8";
         filename += ".csv";
       } else if (format === "pdf") {
-        const html = generateExpensesHtmlContent(data.expenses, businessName, currency);
-        openPrintDocument(html, `${filename}.html`);
+        const doc = generateExpensesPdf(data.expenses, businessName, currency);
+        const pdfBlob = doc.generateBlob();
+        downloadBlob(pdfBlob, `${filename}.pdf`);
         await logAudit(businessId, "DATA_EXPORT_EXPENSES_PDF", { count: data.expenses.length });
         return;
       } else if (format === "html") {
@@ -1419,25 +1735,33 @@ export async function exportWorkshopFullZip(businessId: string, businessName: st
   const data = await fetchFullWorkshopData(businessId);
   const zip = new SimpleZip();
   const dateStr = new Date().toISOString().slice(0, 10);
+  const currency = (data.business?.currency as string) || "FCFA";
 
   // 1. APPLICATION WEB HORS-LIGNE AUTONOME (CONSULTABLE SANS EXCEL SUR TOUT TÉLÉPHONE)
   const fullHtml = generateFullWorkshopHtmlContent(data, businessName);
   zip.addFile("00_CONSULTER_MON_ATELIER.html", fullHtml);
 
-  // 2. FICHIERS TABLEURS CSV (POUR EXCEL, SHEETS, LIBREOFFICE)
+  // 2. VÉRITABLES DOCUMENTS PDF STANDARDS (OUVRABLES SUR SMARTPHONE OU IMPRIMABLES DIRECTEMENT)
+  zip.addFile("00_Grand_Livre_Complet.pdf", generateFullWorkshopPdf(data, businessName).generateBytes());
+  zip.addFile("01_Clients_Document.pdf", generateClientsPdf(data.clients, businessName).generateBytes());
+  zip.addFile("02_Mesures_Document.pdf", generateMeasurementsPdf(data.measurementSets, businessName).generateBytes());
+  zip.addFile("03_Commandes_Document.pdf", generateOrdersPdf(data.orders, businessName, currency).generateBytes());
+  zip.addFile("04_Charges_Depenses_Document.pdf", generateExpensesPdf(data.expenses, businessName, currency).generateBytes());
+
+  // 3. FICHIERS TABLEURS CSV (POUR EXCEL, SHEETS, LIBREOFFICE)
   zip.addFile("01_Clients_Excel.csv", generateClientsCsvContent(data.clients));
   zip.addFile("02_Mesures_Excel.csv", generateMeasurementsCsvContent(data.measurementSets));
   zip.addFile("03_Commandes_Excel.csv", generateOrdersCsvContent(data.orders));
   zip.addFile("04_Charges_Depenses_Excel.csv", generateExpensesCsvContent(data.expenses));
   zip.addFile("05_Rendez_Vous_Excel.csv", generateAppointmentsCsvContent(data.appointments));
 
-  // 3. FICHES TEXTES CLAIRES (LISIBLES SUR TOUT BLOC-NOTES)
+  // 4. FICHES TEXTES CLAIRES (LISIBLES SUR TOUT BLOC-NOTES)
   zip.addFile("01_Clients_Texte.txt", generateClientsTxtContent(data.clients, businessName));
   zip.addFile("02_Mesures_Texte.txt", generateMeasurementsTxtContent(data.measurementSets, businessName));
-  zip.addFile("03_Commandes_Texte.txt", generateOrdersTxtContent(data.orders, businessName, (data.business?.currency as string) || "FCFA"));
-  zip.addFile("04_Charges_Depenses_Texte.txt", generateExpensesTxtContent(data.expenses, businessName, (data.business?.currency as string) || "FCFA"));
+  zip.addFile("03_Commandes_Texte.txt", generateOrdersTxtContent(data.orders, businessName, currency));
+  zip.addFile("04_Charges_Depenses_Texte.txt", generateExpensesTxtContent(data.expenses, businessName, currency));
 
-  // 4. SAUVEGARDE INFORMATIQUE BRUTE JSON (RGPD ART. 20)
+  // 5. SAUVEGARDE INFORMATIQUE BRUTE JSON (RGPD ART. 20)
   const jsonArchive = {
     metadata: {
       application: "CouturPro",
@@ -1459,7 +1783,7 @@ export async function exportWorkshopFullZip(businessId: string, businessName: st
   };
   zip.addFile("00_Sauvegarde_Integrale.json", JSON.stringify(jsonArchive, null, 2));
 
-  // 5. NOTICE EXPLICATIVE
+  // 6. NOTICE EXPLICATIVE
   const readme = [
     "==============================================================================",
     "COUTURPRO — DOSSIER COMPLET MULTI-FORMATS D'ATELIER",
@@ -1473,9 +1797,8 @@ export async function exportWorkshopFullZip(businessId: string, businessName: st
     "",
     "COMMENT CONSULTER VOS DONNÉES SELON VOTRE APPAREIL :",
     "1. SUR N'IMPORTE QUEL SMARTPHONE OU ORDINATEUR (SANS EXCEL) :",
-    "   -> Ouvrez '00_CONSULTER_MON_ATELIER.html'.",
-    "   -> Ce fichier s'ouvre directement dans votre navigateur (Chrome, Safari, etc.)",
-    "      100% hors-ligne avec recherche, filtres et bouton d'impression PDF !",
+    "   -> Ouvrez les documents PDF : 00_Grand_Livre_Complet.pdf, 01_Clients_Document.pdf, etc.",
+    "   -> Ou ouvrez '00_CONSULTER_MON_ATELIER.html' pour naviguer avec recherche interactive !",
     "",
     "2. SUR UN TABLEUR (MICROSOFT EXCEL, GOOGLE SHEETS, LIBREOFFICE) :",
     "   -> Ouvrez les fichiers 01_Clients_Excel.csv, 02_Mesures_Excel.csv, etc.",
@@ -1506,9 +1829,10 @@ export async function exportWorkshopFullZip(businessId: string, businessName: st
 
 export async function exportWorkshopPdfReport(businessId: string, businessName: string): Promise<void> {
   const data = await fetchFullWorkshopData(businessId);
-  const html = generateFullWorkshopHtmlContent(data, businessName);
-  const filename = `grand_livre_atelier_${sanitizeFilename(businessName)}_${new Date().toISOString().slice(0, 10)}.html`;
-  openPrintDocument(html, filename);
+  const doc = generateFullWorkshopPdf(data, businessName);
+  const blob = doc.generateBlob();
+  const filename = `grand_livre_atelier_${sanitizeFilename(businessName)}_${new Date().toISOString().slice(0, 10)}.pdf`;
+  downloadBlob(blob, filename);
 
   await logAudit(businessId, "DATA_PORTABILITY_EXPORT_PDF_REPORT", {
     client_count: data.clients.length,
