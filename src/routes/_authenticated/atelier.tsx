@@ -1,10 +1,17 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Loader2, Plus, Trash2, Image as ImageIcon, KeyRound, LogOut, ShieldCheck, Download, AlertTriangle, FileSpreadsheet, ExternalLink, Eye, EyeOff, Check, FolderArchive, FileText, ShoppingBag, Receipt } from "lucide-react";
+import { Loader2, Plus, Trash2, Image as ImageIcon, KeyRound, LogOut, ShieldCheck, Download, AlertTriangle, FileSpreadsheet, ExternalLink, Eye, EyeOff, Check, FolderArchive, FileText, ShoppingBag, Receipt, Smartphone, Globe, FileCode } from "lucide-react";
 import { toast } from "sonner";
 import { clearOfflineDatabase, addToSyncQueue, setLocalItem, getAllLocalItems, deleteLocalItem } from "@/lib/offline-storage";
-import { exportCompleteWorkshopJson, exportClientsCsv, exportMeasurementsCsv, exportOrdersCsv, exportExpensesCsv, exportWorkshopFullZip, exportWorkshopPdfReport } from "@/lib/export-data";
+import {
+  exportCategoryData,
+  exportWorkshopFullZip,
+  exportWorkshopPdfReport,
+  exportWorkshopHtmlPortal,
+  exportCompleteWorkshopJson,
+  type ExportFormat,
+} from "@/lib/export-data";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -784,12 +791,12 @@ function SessionSignOutSection() {
 }
 
 function PrivacyDataProtectionSection({ business }: { business: { id: string; name: string } }) {
+  // Par défaut : format universel "pdf" lisible sur 100% des smartphones sans installer Excel
+  const [selectedFormat, setSelectedFormat] = useState<ExportFormat>("pdf");
   const [exportingZip, setExportingZip] = useState(false);
   const [exportingPdf, setExportingPdf] = useState(false);
-  const [exportingOrders, setExportingOrders] = useState(false);
-  const [exportingExpenses, setExportingExpenses] = useState(false);
-  const [exportingClients, setExportingClients] = useState(false);
-  const [exportingMeasures, setExportingMeasures] = useState(false);
+  const [exportingPortal, setExportingPortal] = useState(false);
+  const [exportingCategory, setExportingCategory] = useState<string | null>(null);
   const [exportingJson, setExportingJson] = useState(false);
 
   async function handleExportZip() {
@@ -816,51 +823,39 @@ function PrivacyDataProtectionSection({ business }: { business: { id: string; na
     }
   }
 
-  async function handleExportOrders() {
-    setExportingOrders(true);
+  async function handleExportPortal() {
+    setExportingPortal(true);
     try {
-      await exportOrdersCsv(business.id, business.name);
-      toast.success("Fichier commandes Excel téléchargé avec succès !");
+      await exportWorkshopHtmlPortal(business.id, business.name);
+      toast.success("Fiche Web d'atelier téléchargée avec succès !");
     } catch {
-      toast.error("Échec du téléchargement des commandes");
+      toast.error("Échec du téléchargement de la fiche web");
     } finally {
-      setExportingOrders(false);
+      setExportingPortal(false);
     }
   }
 
-  async function handleExportExpenses() {
-    setExportingExpenses(true);
+  async function handleExportCategory(category: "clients" | "orders" | "measurements" | "expenses") {
+    setExportingCategory(category);
     try {
-      await exportExpensesCsv(business.id, business.name);
-      toast.success("Fichier charges & dépenses Excel téléchargé avec succès !");
+      await exportCategoryData(category, selectedFormat, business.id, business.name);
+      const labels = {
+        clients: "Répertoire clients",
+        orders: "Registre commandes",
+        measurements: "Carnet de mesures",
+        expenses: "Charges & dépenses",
+      };
+      const formatLabels = {
+        pdf: "Document PDF ouvert",
+        html: "Fiche Web téléchargée",
+        csv: "Fichier Tableur téléchargé",
+        txt: "Fiche Texte téléchargée",
+      };
+      toast.success(`${labels[category]} : ${formatLabels[selectedFormat]} avec succès !`);
     } catch {
-      toast.error("Échec du téléchargement des charges");
+      toast.error("Échec de l'exportation des données");
     } finally {
-      setExportingExpenses(false);
-    }
-  }
-
-  async function handleExportClients() {
-    setExportingClients(true);
-    try {
-      await exportClientsCsv(business.id, business.name);
-      toast.success("Fichier clients téléchargé avec succès !");
-    } catch {
-      toast.error("Échec du téléchargement des clients");
-    } finally {
-      setExportingClients(false);
-    }
-  }
-
-  async function handleExportMeasures() {
-    setExportingMeasures(true);
-    try {
-      await exportMeasurementsCsv(business.id, business.name);
-      toast.success("Carnet de mesures téléchargé avec succès !");
-    } catch {
-      toast.error("Échec du téléchargement des mesures");
-    } finally {
-      setExportingMeasures(false);
+      setExportingCategory(null);
     }
   }
 
@@ -876,18 +871,25 @@ function PrivacyDataProtectionSection({ business }: { business: { id: string; na
     }
   }
 
+  const formatBadgeLabels = {
+    pdf: "Document PDF",
+    html: "Fiche Web .html",
+    csv: "Excel / Tableur",
+    txt: "Fiche Texte",
+  };
+
   return (
     <section className="card-soft space-y-4 p-5">
       <div className="flex items-center gap-2">
         <ShieldCheck className="size-5 text-emerald-600" />
-        <h2 className="font-display text-sm font-bold">Sauvegarde & Portabilité des Données</h2>
+        <h2 className="font-display text-sm font-bold">Sauvegarde & Portabilité Multi-Appareils</h2>
       </div>
       <p className="text-xs text-muted-foreground leading-relaxed">
-        Exportez l'intégralité des données de votre atelier en toute liberté. Vos données vous appartiennent définitivement : même sans connexion internet ou en cas de panne serveur, vous pouvez emporter vos fichiers Excel, votre rapport PDF ou votre archive ZIP complète.
+        Exportez l'intégralité des données de votre atelier en toute liberté. Vos données vous appartiennent définitivement : même sans connexion internet ou sans Excel installé, vous pouvez consulter vos clients, mesures, commandes et finances sur n'importe quel smartphone (Android, iPhone) ou ordinateur.
       </p>
 
-      {/* EXPORTS PRINCIPAUX (ZIP COMPLET & GRAND LIVRE PDF) */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+      {/* EXPORTS MAJEURS TOUT-EN-UN (SANS AUCUN LOGICIEL REQUIS) */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-1">
         <Button
           type="button"
           variant="outline"
@@ -899,7 +901,7 @@ function PrivacyDataProtectionSection({ business }: { business: { id: string; na
           {exportingZip ? <Loader2 className="mr-2.5 size-5 animate-spin text-primary" /> : <FolderArchive className="mr-2.5 size-5 text-primary shrink-0" />}
           <div className="text-left">
             <div className="font-bold text-sm text-foreground">Dossier ZIP Complet</div>
-            <div className="text-[0.7rem] text-muted-foreground">Tous les fichiers Excel + Sauvegarde JSON + Lisez-moi</div>
+            <div className="text-[0.68rem] text-muted-foreground">Web hors-ligne + Excel + Texte + JSON</div>
           </div>
         </Button>
 
@@ -913,29 +915,121 @@ function PrivacyDataProtectionSection({ business }: { business: { id: string; na
         >
           {exportingPdf ? <Loader2 className="mr-2.5 size-5 animate-spin text-rose-600" /> : <FileText className="mr-2.5 size-5 text-rose-600 shrink-0" />}
           <div className="text-left">
-            <div className="font-bold text-sm text-foreground">Grand Livre d'Atelier (PDF)</div>
-            <div className="text-[0.7rem] text-muted-foreground">Rapport d'atelier complet imprimable & enregistrable en PDF</div>
+            <div className="font-bold text-sm text-foreground">Grand Livre (PDF)</div>
+            <div className="text-[0.68rem] text-muted-foreground">Rapport d'atelier officiel prêt à imprimer</div>
+          </div>
+        </Button>
+
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          disabled={exportingPortal}
+          onClick={handleExportPortal}
+          className="text-xs font-semibold justify-start h-auto py-3 px-3.5 border-amber-600/30 bg-amber-500/5 hover:bg-amber-500/10 transition-colors shadow-2xs cursor-pointer"
+        >
+          {exportingPortal ? <Loader2 className="mr-2.5 size-5 animate-spin text-amber-600" /> : <Globe className="mr-2.5 size-5 text-amber-600 shrink-0" />}
+          <div className="text-left">
+            <div className="font-bold text-sm text-foreground">Fiche Web Hors-Ligne</div>
+            <div className="text-[0.68rem] text-muted-foreground">S'ouvre sur mobile sans connexion ni app</div>
           </div>
         </Button>
       </div>
 
-      {/* FICHIERS EXCEL INDIVIDUELS & JSON */}
-      <div className="pt-2">
-        <span className="text-[0.7rem] uppercase tracking-wider font-bold text-muted-foreground">
-          Téléchargement par catégorie (Excel / CSV)
-        </span>
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-2">
+      {/* SÉLECTEUR DE FORMAT ADAPTÉ À TOUT APPAREIL */}
+      <div className="pt-2 rounded-xl border border-border/70 bg-background/50 p-3.5 space-y-3">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1.5">
+          <span className="text-[0.72rem] uppercase tracking-wider font-bold text-foreground flex items-center gap-1.5">
+            <Smartphone className="size-3.5 text-primary" />
+            Format d'exportation pour les téléchargements ci-dessous
+          </span>
+          <span className="text-[0.68rem] text-muted-foreground">
+            {selectedFormat === "pdf" && "📄 Universel (100% des smartphones)"}
+            {selectedFormat === "html" && "🌐 Web hors-ligne (Aucune app requise)"}
+            {selectedFormat === "csv" && "📊 Tableur (Excel, Sheets, LibreOffice)"}
+            {selectedFormat === "txt" && "📋 Texte clair (Bloc-notes, SMS)"}
+          </span>
+        </div>
+
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+          <button
+            type="button"
+            onClick={() => setSelectedFormat("pdf")}
+            className={`px-3 py-2 rounded-lg border text-xs font-semibold flex items-center gap-2 transition-all cursor-pointer ${
+              selectedFormat === "pdf"
+                ? "bg-primary text-primary-foreground border-primary shadow-xs"
+                : "bg-muted/30 text-muted-foreground hover:bg-muted/60 border-border"
+            }`}
+          >
+            <FileText className="size-3.5 shrink-0" />
+            <div className="text-left">
+              <div className="leading-tight">PDF / Mobile</div>
+              <div className="text-[0.62rem] opacity-80">(Recommandé)</div>
+            </div>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setSelectedFormat("html")}
+            className={`px-3 py-2 rounded-lg border text-xs font-semibold flex items-center gap-2 transition-all cursor-pointer ${
+              selectedFormat === "html"
+                ? "bg-primary text-primary-foreground border-primary shadow-xs"
+                : "bg-muted/30 text-muted-foreground hover:bg-muted/60 border-border"
+            }`}
+          >
+            <Globe className="size-3.5 shrink-0" />
+            <div className="text-left">
+              <div className="leading-tight">Page Web</div>
+              <div className="text-[0.62rem] opacity-80">(.html hors-ligne)</div>
+            </div>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setSelectedFormat("csv")}
+            className={`px-3 py-2 rounded-lg border text-xs font-semibold flex items-center gap-2 transition-all cursor-pointer ${
+              selectedFormat === "csv"
+                ? "bg-primary text-primary-foreground border-primary shadow-xs"
+                : "bg-muted/30 text-muted-foreground hover:bg-muted/60 border-border"
+            }`}
+          >
+            <FileSpreadsheet className="size-3.5 shrink-0" />
+            <div className="text-left">
+              <div className="leading-tight">Tableur</div>
+              <div className="text-[0.62rem] opacity-80">(Excel / Sheets)</div>
+            </div>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setSelectedFormat("txt")}
+            className={`px-3 py-2 rounded-lg border text-xs font-semibold flex items-center gap-2 transition-all cursor-pointer ${
+              selectedFormat === "txt"
+                ? "bg-primary text-primary-foreground border-primary shadow-xs"
+                : "bg-muted/30 text-muted-foreground hover:bg-muted/60 border-border"
+            }`}
+          >
+            <FileCode className="size-3.5 shrink-0" />
+            <div className="text-left">
+              <div className="leading-tight">Texte Brut</div>
+              <div className="text-[0.62rem] opacity-80">(.txt léger)</div>
+            </div>
+          </button>
+        </div>
+
+        {/* TÉLÉCHARGEMENTS PAR CATÉGORIE DANS LE FORMAT CHOISI */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5 pt-1">
           <Button
             type="button"
             variant="outline"
             size="sm"
-            disabled={exportingOrders}
-            onClick={handleExportOrders}
+            disabled={exportingCategory === "orders"}
+            onClick={() => handleExportCategory("orders")}
             className="text-xs font-semibold justify-start h-auto py-2.5 px-3 cursor-pointer"
           >
-            {exportingOrders ? <Loader2 className="mr-2 size-4 animate-spin" /> : <ShoppingBag className="mr-2 size-4 text-primary shrink-0" />}
+            {exportingCategory === "orders" ? <Loader2 className="mr-2 size-4 animate-spin" /> : <ShoppingBag className="mr-2 size-4 text-primary shrink-0" />}
             <div className="text-left">
-              <div className="font-bold">Commandes (Excel)</div>
+              <div className="font-bold">Commandes ({formatBadgeLabels[selectedFormat]})</div>
               <div className="text-[0.65rem] text-muted-foreground">Prix, acomptes, soldes & statuts</div>
             </div>
           </Button>
@@ -944,13 +1038,13 @@ function PrivacyDataProtectionSection({ business }: { business: { id: string; na
             type="button"
             variant="outline"
             size="sm"
-            disabled={exportingClients}
-            onClick={handleExportClients}
+            disabled={exportingCategory === "clients"}
+            onClick={() => handleExportCategory("clients")}
             className="text-xs font-semibold justify-start h-auto py-2.5 px-3 cursor-pointer"
           >
-            {exportingClients ? <Loader2 className="mr-2 size-4 animate-spin" /> : <FileSpreadsheet className="mr-2 size-4 text-emerald-600 shrink-0" />}
+            {exportingCategory === "clients" ? <Loader2 className="mr-2 size-4 animate-spin" /> : <FileSpreadsheet className="mr-2 size-4 text-emerald-600 shrink-0" />}
             <div className="text-left">
-              <div className="font-bold">Clients (Excel)</div>
+              <div className="font-bold">Clients ({formatBadgeLabels[selectedFormat]})</div>
               <div className="text-[0.65rem] text-muted-foreground">Coordonnées, adresses & WhatsApp</div>
             </div>
           </Button>
@@ -959,13 +1053,13 @@ function PrivacyDataProtectionSection({ business }: { business: { id: string; na
             type="button"
             variant="outline"
             size="sm"
-            disabled={exportingMeasures}
-            onClick={handleExportMeasures}
+            disabled={exportingCategory === "measurements"}
+            onClick={() => handleExportCategory("measurements")}
             className="text-xs font-semibold justify-start h-auto py-2.5 px-3 cursor-pointer"
           >
-            {exportingMeasures ? <Loader2 className="mr-2 size-4 animate-spin" /> : <Download className="mr-2 size-4 text-amber-600 shrink-0" />}
+            {exportingCategory === "measurements" ? <Loader2 className="mr-2 size-4 animate-spin" /> : <Download className="mr-2 size-4 text-amber-600 shrink-0" />}
             <div className="text-left">
-              <div className="font-bold">Carnet de Mesures</div>
+              <div className="font-bold">Carnet de Mesures ({formatBadgeLabels[selectedFormat]})</div>
               <div className="text-[0.65rem] text-muted-foreground">Relevés de mensurations complets</div>
             </div>
           </Button>
@@ -974,13 +1068,13 @@ function PrivacyDataProtectionSection({ business }: { business: { id: string; na
             type="button"
             variant="outline"
             size="sm"
-            disabled={exportingExpenses}
-            onClick={handleExportExpenses}
+            disabled={exportingCategory === "expenses"}
+            onClick={() => handleExportCategory("expenses")}
             className="text-xs font-semibold justify-start h-auto py-2.5 px-3 cursor-pointer"
           >
-            {exportingExpenses ? <Loader2 className="mr-2 size-4 animate-spin" /> : <Receipt className="mr-2 size-4 text-rose-500 shrink-0" />}
+            {exportingCategory === "expenses" ? <Loader2 className="mr-2 size-4 animate-spin" /> : <Receipt className="mr-2 size-4 text-rose-500 shrink-0" />}
             <div className="text-left">
-              <div className="font-bold">Charges & Dépenses</div>
+              <div className="font-bold">Charges & Dépenses ({formatBadgeLabels[selectedFormat]})</div>
               <div className="text-[0.65rem] text-muted-foreground">Salaires, loyer, mercerie & factures</div>
             </div>
           </Button>

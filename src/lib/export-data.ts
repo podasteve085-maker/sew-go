@@ -1,10 +1,12 @@
 /**
- * CouturPro — Moteur d'Exportation, Portabilité & Sauvegarde Intégrale de l'Atelier
- * Génère des exports 100% hors-ligne (IndexedDB) ou synchronisés (Supabase) :
- * 1. Dossier ZIP Complet (Tous les fichiers Excel CSV + Sauvegarde JSON + Lisez-moi)
- * 2. Rapport PDF Imprimable du Grand Livre de l'Atelier
- * 3. Fichiers Excel individuels (Clients, Mesures, Commandes, Charges & Dépenses, Paiements)
- * 4. Fichier d'archive brute JSON conforme RGPD Art. 20.
+ * CouturPro — Moteur d'Exportation Multi-Formats, Portabilité & Sauvegarde Intégrale
+ * Formats universels adaptés à TOUT type d'appareil (Smartphones Android, iPhone, Tablettes, PC) :
+ * 1. Document Universel (PDF / Impression native) — S'ouvre sur 100% des smartphones sans aucune application
+ * 2. Fiche Web Autonome (.html) — Consultable dans n'importe quel navigateur hors-ligne, interactif
+ * 3. Tableur (.csv) — Compatible Microsoft Excel, Google Sheets, LibreOffice avec UTF-8 BOM
+ * 4. Fiche Texte Lisible (.txt) — Compatible bloc-notes, SMS, WhatsApp
+ * 5. Dossier ZIP Complet Multi-Formats — Contient l'application web hors-ligne, les CSV, TXT, JSON et notices
+ * 6. Sauvegarde Brute JSON conforme RGPD Art. 20
  */
 
 import { supabase } from "@/integrations/supabase/client";
@@ -21,6 +23,8 @@ import type { ExpenseRow } from "@/lib/expenses-types";
 import { EXPENSE_CATEGORIES } from "@/lib/expenses-types";
 import { SimpleZip } from "@/lib/zip-builder";
 import { fcfa } from "@/lib/format";
+
+export type ExportFormat = "pdf" | "html" | "csv" | "txt";
 
 function sanitizeFilename(name: string): string {
   return name.replace(/[^a-z0-9_-]/gi, "_").toLowerCase();
@@ -101,61 +105,384 @@ export async function fetchFullWorkshopData(businessId: string): Promise<Complet
         supabase.from("catalog_models").select("*").eq("business_id", businessId),
       ]);
 
-      return {
-        business: bizRes.data,
-        clients: (clientsRes.data as ClientRow[]) || [],
-        orders: (ordersRes.data as OrderRow[]) || [],
-        payments: (paymentsRes.data as Array<Record<string, unknown>>) || [],
-        measurementSets: (setsRes.data as FullMeasurementSetRow[]) || [],
-        appointments: (apptsRes.data as AppointmentRow[]) || [],
-        expenses: (expensesRes.data as ExpenseRow[]) || [],
-        garmentTypes: (garmentsRes.data as Array<Record<string, unknown>>) || [],
-        catalogModels: (modelsRes.data as Array<Record<string, unknown>>) || [],
-      };
+      if (!bizRes.error && !clientsRes.error && !ordersRes.error) {
+        return {
+          business: (bizRes.data as Record<string, unknown>) || null,
+          clients: (clientsRes.data as ClientRow[]) || [],
+          orders: (ordersRes.data as OrderRow[]) || [],
+          payments: (paymentsRes.data as Array<Record<string, unknown>>) || [],
+          measurementSets: (setsRes.data as FullMeasurementSetRow[]) || [],
+          appointments: (apptsRes.data as AppointmentRow[]) || [],
+          expenses: (expensesRes.data as ExpenseRow[]) || [],
+          garmentTypes: (garmentsRes.data as Array<Record<string, unknown>>) || [],
+          catalogModels: (modelsRes.data as Array<Record<string, unknown>>) || [],
+        };
+      }
     } catch {
-      // Fallback local en cas d'erreur réseau
+      // Bascule silencieuse vers stockage local
     }
   }
 
-  // Lecture instantanée 0ms depuis le stockage local IndexedDB
-  const business = (await getLocalItem<Record<string, unknown>>("workshop_data", businessId)) || null;
-  const allClients = await getAllLocalItems<ClientRow>("clients");
-  const allOrders = await getAllLocalItems<OrderRow>("orders");
-  const allPayments = await getAllLocalItems<Record<string, unknown>>("payments");
-  const allSets = await getAllLocalItems<FullMeasurementSetRow>("measurement_sets");
-  const allAppts = await getAllLocalItems<AppointmentRow>("appointments");
-  const allExpenses = await getAllLocalItems<ExpenseRow>("expenses");
-  const allGarments = await getAllLocalItems<Record<string, unknown>>("garment_types");
-  const allModels = await getAllLocalItems<Record<string, unknown>>("catalog_models");
+  // Fallback 100% local (IndexedDB)
+  const [biz, clients, orders, sets, appts, expenses] = await Promise.all([
+    getLocalItem<Record<string, unknown>>("business", businessId),
+    getAllLocalItems<ClientRow>("clients"),
+    getAllLocalItems<OrderRow>("orders"),
+    getAllLocalItems<FullMeasurementSetRow>("measurement_sets"),
+    getAllLocalItems<AppointmentRow>("appointments"),
+    getAllLocalItems<ExpenseRow>("expenses"),
+  ]);
+
+  const workshopClients = clients.filter((c) => c.business_id === businessId);
+  const clientMap = new Map(workshopClients.map((c) => [c.id, c]));
+
+  const workshopOrders = orders
+    .filter((o) => o.business_id === businessId)
+    .map((o) => ({
+      ...o,
+      clients: o.client_id ? clientMap.get(o.client_id) || null : null,
+    }));
+
+  const workshopSets = sets
+    .filter((s) => s.business_id === businessId)
+    .map((s) => ({
+      ...s,
+      clients: s.client_id ? clientMap.get(s.client_id) || null : null,
+    }));
+
+  const workshopAppts = appts
+    .filter((a) => a.business_id === businessId)
+    .map((a) => ({
+      ...a,
+      clients: a.client_id ? clientMap.get(a.client_id) || null : null,
+    }));
+
+  const workshopExpenses = expenses.filter((e) => !e.business_id || e.business_id === businessId);
 
   return {
-    business,
-    clients: allClients.filter((c) => c.business_id === businessId),
-    orders: allOrders.filter((o) => o.business_id === businessId),
-    payments: allPayments,
-    measurementSets: allSets.filter((s) => s.business_id === businessId),
-    appointments: allAppts.filter((a) => a.business_id === businessId),
-    expenses: allExpenses.filter((e) => e.business_id === businessId),
-    garmentTypes: allGarments.filter((g) => (g as Record<string, unknown>)["business_id"] === businessId),
-    catalogModels: allModels.filter((m) => (m as Record<string, unknown>)["business_id"] === businessId),
+    business: biz || null,
+    clients: workshopClients,
+    orders: workshopOrders,
+    payments: [],
+    measurementSets: workshopSets,
+    appointments: workshopAppts,
+    expenses: workshopExpenses,
+    garmentTypes: [],
+    catalogModels: [],
   };
 }
 
 // -----------------------------------------------------------------------------
-// GÉNÉRATION DES CONTENUS CSV (UTF-8 AVEC BOM EXCEL)
+// STYLES CSS POUR LES FICHES & LE PORTAIL MOBILE HORS-LIGNE
 // -----------------------------------------------------------------------------
+
+function getCommonCss(): string {
+  return `
+    * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      color: #1e293b;
+      background: #fdfaf6;
+      font-size: 13px;
+      line-height: 1.5;
+      margin: 0;
+      padding: 16px;
+    }
+    .container { max-width: 960px; margin: 0 auto; }
+    .header-box {
+      background: #8B4513;
+      color: #ffffff;
+      border-radius: 12px;
+      padding: 18px 20px;
+      margin-bottom: 20px;
+      box-shadow: 0 4px 12px rgba(139, 69, 19, 0.15);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 12px;
+    }
+    .atelier-title { font-size: 22px; font-weight: 800; margin: 0 0 4px 0; letter-spacing: -0.5px; }
+    .atelier-subtitle { font-size: 12px; opacity: 0.9; margin: 0; }
+    .btn-action {
+      background: #ffffff;
+      color: #8B4513;
+      font-weight: 700;
+      padding: 9px 16px;
+      border-radius: 8px;
+      border: none;
+      cursor: pointer;
+      font-size: 12px;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      text-decoration: none;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.1);
+    }
+    .btn-action:hover { background: #fdfaf6; }
+    .search-box {
+      width: 100%;
+      padding: 12px 16px;
+      border: 1.5px solid #cbd5e1;
+      border-radius: 10px;
+      font-size: 14px;
+      margin-bottom: 16px;
+      background: #ffffff;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+    .search-box:focus { border-color: #8B4513; }
+    .kpi-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+      gap: 12px;
+      margin-bottom: 20px;
+    }
+    .kpi-card {
+      background: #ffffff;
+      border: 1px solid #e2e8f0;
+      border-radius: 10px;
+      padding: 12px 14px;
+      text-align: center;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+    }
+    .kpi-card .val { font-size: 18px; font-weight: 800; color: #8B4513; margin-top: 2px; }
+    .kpi-card .lbl { font-size: 10px; text-transform: uppercase; color: #64748b; font-weight: 700; }
+    .item-card {
+      background: #ffffff;
+      border: 1px solid #e2e8f0;
+      border-radius: 10px;
+      padding: 14px 16px;
+      margin-bottom: 10px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.03);
+    }
+    .badge {
+      display: inline-block;
+      padding: 3px 8px;
+      border-radius: 6px;
+      font-size: 11px;
+      font-weight: 700;
+    }
+    .badge-paid { background: #dcfce7; color: #166534; }
+    .badge-unpaid { background: #fee2e2; color: #991b1b; }
+    .badge-neutral { background: #f1f5f9; color: #475569; }
+    .btn-contact {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 5px 10px;
+      border-radius: 6px;
+      font-size: 11px;
+      font-weight: 600;
+      text-decoration: none;
+      margin-right: 6px;
+    }
+    .btn-call { background: #ecfdf5; color: #047857; border: 1px solid #a7f3d0; }
+    .btn-wa { background: #f0fdf4; color: #15803d; border: 1px solid #bbf7d0; }
+    .tab-nav {
+      display: flex;
+      gap: 8px;
+      overflow-x: auto;
+      padding-bottom: 8px;
+      margin-bottom: 16px;
+      border-bottom: 2px solid #e2e8f0;
+    }
+    .tab-btn {
+      background: #ffffff;
+      border: 1px solid #cbd5e1;
+      padding: 8px 16px;
+      border-radius: 8px;
+      font-weight: 700;
+      font-size: 12px;
+      cursor: pointer;
+      white-space: nowrap;
+      color: #475569;
+    }
+    .tab-btn.active {
+      background: #8B4513;
+      color: #ffffff;
+      border-color: #8B4513;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-bottom: 16px;
+      background: #ffffff;
+      border-radius: 8px;
+      overflow: hidden;
+    }
+    th {
+      background: #f5ede6;
+      color: #5a3825;
+      font-weight: 700;
+      text-align: left;
+      padding: 8px 10px;
+      border-bottom: 2px solid #e2e8f0;
+      font-size: 11px;
+    }
+    td {
+      padding: 8px 10px;
+      border-bottom: 1px solid #f1f5f9;
+      font-size: 11px;
+    }
+    tr:last-child td { border-bottom: none; }
+    tr:nth-child(even) td { background: #faf8f5; }
+    .footer {
+      text-align: center;
+      margin-top: 30px;
+      padding-top: 15px;
+      border-top: 1px solid #cbd5e1;
+      color: #64748b;
+      font-size: 11px;
+    }
+    @page { size: A4 portrait; margin: 12mm; }
+    @media print {
+      body { background: #ffffff !important; padding: 0 !important; }
+      .no-print { display: none !important; }
+      .container { max-width: 100% !important; }
+      .header-box { background: #ffffff !important; color: #1e293b !important; border: 2px solid #8B4513 !important; box-shadow: none !important; }
+      .atelier-title { color: #8B4513 !important; }
+      .atelier-subtitle { color: #64748b !important; }
+      .item-card, table { break-inside: avoid; }
+      .tab-content { display: block !important; }
+    }
+  `;
+}
+
+function openPrintDocument(htmlContent: string, fallbackFilename: string): void {
+  const printWindow = window.open("", "_blank");
+  if (printWindow) {
+    printWindow.document.open();
+    printWindow.document.write(htmlContent);
+    printWindow.document.close();
+    setTimeout(() => {
+      try {
+        printWindow.focus();
+        printWindow.print();
+      } catch {
+        // Ignorer si bloqué
+      }
+    }, 400);
+  } else {
+    // Si popup bloqué sur mobile, télécharger directement le document HTML autonome
+    const blob = new Blob([htmlContent], { type: "text/html;charset=utf-8" });
+    downloadBlob(blob, fallbackFilename);
+  }
+}
+
+// -----------------------------------------------------------------------------
+// 1. GÉNÉRATEURS DE DOCUMENTS CLIENTS (PDF, WEB .HTML, TEXTE, CSV)
+// -----------------------------------------------------------------------------
+
+export function generateClientsHtmlContent(clients: ClientRow[], businessName: string): string {
+  const dateStr = new Date().toLocaleDateString("fr-FR", { dateStyle: "long" });
+
+  return `<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Répertoire Clients — ${businessName}</title>
+  <style>${getCommonCss()}</style>
+</head>
+<body>
+  <div class="container">
+    <div class="header-box">
+      <div>
+        <h1 class="atelier-title">${businessName}</h1>
+        <p class="atelier-subtitle">Répertoire Complet des Clients (${clients.length} contact${clients.length > 1 ? "s" : ""}) — Édité le ${dateStr}</p>
+      </div>
+      <div class="no-print">
+        <button class="btn-action" onclick="window.print()">🖨️ Enregistrer en PDF / Imprimer</button>
+      </div>
+    </div>
+
+    <div class="no-print">
+      <input type="text" id="searchInput" class="search-box" placeholder="🔍 Rechercher un client (nom, téléphone, quartier, notes)..." oninput="filterClients()" />
+    </div>
+
+    <div id="clientsContainer">
+      ${clients.length === 0 ? '<div class="item-card" style="text-align:center; color:#64748b;">Aucun client enregistré dans cet atelier.</div>' : clients.map((c, idx) => {
+        const fullName = `${c.first_name || ""} ${c.last_name || ""}`.trim() || "Client sans nom";
+        const phone = c.phone || c.whatsapp || "";
+        const cleanPhone = phone.replace(/[^0-9+]/g, "");
+        const location = [c.city, c.address].filter(Boolean).join(" • ");
+
+        return `
+          <div class="item-card client-item" data-search="${fullName.toLowerCase()} ${phone.toLowerCase()} ${location.toLowerCase()} ${(c.notes || '').toLowerCase()}">
+            <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:8px;">
+              <div>
+                <span style="font-size:10px; font-weight:700; color:#8B4513; text-transform:uppercase;">#${idx + 1}</span>
+                <h3 style="margin:2px 0 4px 0; font-size:15px; font-weight:700; color:#0f172a;">${fullName}</h3>
+                <div style="color:#64748b; font-size:12px;">${location || "Aucune adresse"}</div>
+              </div>
+              <div class="no-print" style="margin-top:2px;">
+                ${cleanPhone ? `
+                  <a href="tel:${cleanPhone}" class="btn-contact btn-call">📞 Appeler</a>
+                  <a href="https://wa.me/${cleanPhone.replace('+', '')}" target="_blank" class="btn-contact btn-wa">💬 WhatsApp</a>
+                ` : '<span style="color:#94a3b8; font-size:11px;">Aucun téléphone</span>'}
+              </div>
+            </div>
+            ${c.notes ? `<div style="margin-top:8px; padding-top:8px; border-top:1px dashed #e2e8f0; font-size:12px; color:#475569;"><strong>Notes :</strong> ${c.notes}</div>` : ""}
+          </div>
+        `;
+      }).join("")}
+    </div>
+
+    <div class="footer">
+      Document généré par CouturPro — Vos données sont votre propriété exclusive.<br />
+      Consultable sur tout smartphone, tablette ou ordinateur sans installer aucune application.
+    </div>
+  </div>
+
+  <script>
+    function filterClients() {
+      const q = document.getElementById('searchInput').value.toLowerCase().trim();
+      const items = document.querySelectorAll('.client-item');
+      items.forEach(el => {
+        const text = el.getAttribute('data-search') || '';
+        el.style.display = text.includes(q) ? 'block' : 'none';
+      });
+    }
+  </script>
+</body>
+</html>`;
+}
+
+export function generateClientsTxtContent(clients: ClientRow[], businessName: string): string {
+  const lines = [
+    "==============================================================================",
+    `COUTURPRO — RÉPERTOIRE DES CLIENTS : ${businessName}`,
+    `Date d'édition : ${new Date().toLocaleDateString("fr-FR", { dateStyle: "long" })}`,
+    `Total clients : ${clients.length}`,
+    "==============================================================================",
+    "",
+  ];
+
+  clients.forEach((c, idx) => {
+    const fullName = `${c.first_name || ""} ${c.last_name || ""}`.trim() || "Client sans nom";
+    lines.push(`[${idx + 1}] ${fullName}`);
+    if (c.phone) lines.push(`    Téléphone : ${c.phone}`);
+    if (c.whatsapp && c.whatsapp !== c.phone) lines.push(`    WhatsApp  : ${c.whatsapp}`);
+    if (c.city || c.address) lines.push(`    Adresse   : ${[c.city, c.address].filter(Boolean).join(" - ")}`);
+    if (c.notes) lines.push(`    Notes     : ${c.notes}`);
+    lines.push("------------------------------------------------------------------------------");
+  });
+
+  return lines.join("\r\n");
+}
 
 export function generateClientsCsvContent(clients: ClientRow[]): string {
   const headers = [
     "Nom",
-    "Prénom",
-    "Téléphone",
+    "Prenom",
+    "Telephone",
     "WhatsApp",
     "Ville",
-    "Adresse_Quartier",
+    "Adresse",
     "Genre",
+    "Date_Ajout",
     "Notes",
-    "Date_Enregistrement",
   ];
 
   const rows = clients.map((c) => [
@@ -166,46 +493,154 @@ export function generateClientsCsvContent(clients: ClientRow[]): string {
     escapeCsvField(c.city || ""),
     escapeCsvField(c.address || ""),
     escapeCsvField(c.gender || ""),
-    escapeCsvField(c.notes || ""),
     escapeCsvField(c.created_at ? c.created_at.slice(0, 10) : ""),
+    escapeCsvField(c.notes || ""),
   ]);
 
   return "\uFEFF" + [headers.join(";"), ...rows.map((r) => r.join(";"))].join("\r\n");
 }
 
-export function generateMeasurementsCsvContent(sets: FullMeasurementSetRow[]): string {
-  const headers = [
-    "Client",
-    "Telephone",
-    "Libelle_Modele",
-    "Gabarit",
-    "Date_Prise_Mesures",
-    "Mesures_Detaillees",
-    "Notes",
+// -----------------------------------------------------------------------------
+// 2. GÉNÉRATEURS DE DOCUMENTS COMMANDES (PDF, WEB .HTML, TEXTE, CSV)
+// -----------------------------------------------------------------------------
+
+export function generateOrdersHtmlContent(orders: OrderRow[], businessName: string, currency = "FCFA"): string {
+  const dateStr = new Date().toLocaleDateString("fr-FR", { dateStyle: "long" });
+  const totalCA = orders.reduce((s, o) => s + (Number(o.price) || 0), 0);
+  const totalEncaisse = orders.reduce((s, o) => s + paidTotal(o), 0);
+  const totalReste = orders.reduce((s, o) => s + Math.max(0, balance(o)), 0);
+
+  return `<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Registre des Commandes — ${businessName}</title>
+  <style>${getCommonCss()}</style>
+</head>
+<body>
+  <div class="container">
+    <div class="header-box">
+      <div>
+        <h1 class="atelier-title">${businessName}</h1>
+        <p class="atelier-subtitle">Registre des Commandes (${orders.length} commande${orders.length > 1 ? "s" : ""}) — Édité le ${dateStr}</p>
+      </div>
+      <div class="no-print">
+        <button class="btn-action" onclick="window.print()">🖨️ Enregistrer en PDF / Imprimer</button>
+      </div>
+    </div>
+
+    <!-- RECAPITULATIF FINANCIER -->
+    <div class="kpi-grid">
+      <div class="kpi-card">
+        <div class="lbl">Commandes</div>
+        <div class="val">${orders.length}</div>
+      </div>
+      <div class="kpi-card">
+        <div class="lbl">Total Facturé</div>
+        <div class="val">${fcfa(totalCA, currency)}</div>
+      </div>
+      <div class="kpi-card">
+        <div class="lbl">Total Encaissé</div>
+        <div class="val" style="color:#166534;">${fcfa(totalEncaisse, currency)}</div>
+      </div>
+      <div class="kpi-card">
+        <div class="lbl">Reste à Recouvrer</div>
+        <div class="val" style="color:#991b1b;">${fcfa(totalReste, currency)}</div>
+      </div>
+    </div>
+
+    <div class="no-print">
+      <input type="text" id="searchInput" class="search-box" placeholder="🔍 Rechercher une commande (client, modèle, réf, statut)..." oninput="filterOrders()" />
+    </div>
+
+    <div id="ordersContainer">
+      ${orders.length === 0 ? '<div class="item-card" style="text-align:center; color:#64748b;">Aucune commande enregistrée.</div>' : orders.map((o) => {
+        const c = o.clients;
+        const clientName = c ? `${c.first_name || ""} ${c.last_name || ""}`.trim() : "Client non spécifié";
+        const price = Number(o.price) || 0;
+        const paid = paidTotal(o);
+        const rest = Math.max(0, balance(o));
+        const ref = o.order_number || o.id.slice(0, 8);
+        const isFullyPaid = rest <= 0;
+
+        return `
+          <div class="item-card order-item" data-search="${ref.toLowerCase()} ${clientName.toLowerCase()} ${(o.garment_type || '').toLowerCase()} ${(o.status || '').toLowerCase()}">
+            <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:8px;">
+              <div>
+                <span style="font-size:10px; font-weight:700; color:#8B4513; text-transform:uppercase;">Réf: ${ref}</span>
+                <h3 style="margin:2px 0 4px 0; font-size:15px; font-weight:700; color:#0f172a;">${clientName}</h3>
+                <div style="color:#64748b; font-size:12px;">Modèle : <strong>${o.garment_type || "Sur-mesure"}</strong></div>
+              </div>
+              <div style="text-align:right;">
+                <span class="badge ${isFullyPaid ? 'badge-paid' : 'badge-unpaid'}">
+                  ${isFullyPaid ? 'Soldé' : `Reste : ${fcfa(rest, currency)}`}
+                </span>
+                <div style="font-size:11px; color:#64748b; margin-top:4px;">Statut : <strong>${o.status || 'En cours'}</strong></div>
+              </div>
+            </div>
+
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-top:10px; padding-top:8px; border-top:1px dashed #e2e8f0; font-size:12px;">
+              <div>
+                Prix : <strong>${fcfa(price, currency)}</strong> • Encaissé : <strong style="color:#166534;">${fcfa(paid, currency)}</strong>
+              </div>
+              <div style="color:#64748b; font-size:11px;">
+                Livraison : ${o.due_date ? o.due_date.slice(0, 10) : "Non définie"}
+              </div>
+            </div>
+            ${o.notes ? `<div style="margin-top:6px; font-size:11px; color:#475569; font-style:italic;">Notes : ${o.notes}</div>` : ""}
+          </div>
+        `;
+      }).join("")}
+    </div>
+
+    <div class="footer">
+      Document généré par CouturPro — Registre des Commandes d'Atelier.<br />
+      Tous droits réservés à l'atelier ${businessName}.
+    </div>
+  </div>
+
+  <script>
+    function filterOrders() {
+      const q = document.getElementById('searchInput').value.toLowerCase().trim();
+      const items = document.querySelectorAll('.order-item');
+      items.forEach(el => {
+        const text = el.getAttribute('data-search') || '';
+        el.style.display = text.includes(q) ? 'block' : 'none';
+      });
+    }
+  </script>
+</body>
+</html>`;
+}
+
+export function generateOrdersTxtContent(orders: OrderRow[], businessName: string, currency = "FCFA"): string {
+  const lines = [
+    "==============================================================================",
+    `COUTURPRO — REGISTRE DES COMMANDES : ${businessName}`,
+    `Date d'édition : ${new Date().toLocaleDateString("fr-FR", { dateStyle: "long" })}`,
+    `Total commandes : ${orders.length}`,
+    "==============================================================================",
+    "",
   ];
 
-  const rows = sets.map((s) => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const c = (s as any).clients;
-    const clientName = c ? `${c.first_name || ""} ${c.last_name || ""}`.trim() : "";
-    const clientPhone = c?.phone || "";
+  orders.forEach((o) => {
+    const c = o.clients;
+    const clientName = c ? `${c.first_name || ""} ${c.last_name || ""}`.trim() : "Client non spécifié";
+    const price = Number(o.price) || 0;
+    const paid = paidTotal(o);
+    const rest = Math.max(0, balance(o));
+    const ref = o.order_number || o.id.slice(0, 8);
 
-    const measuresStr = (s.values || [])
-      .map((v) => `${v.name}: ${v.value ?? "-"} ${v.unit}`)
-      .join(" | ");
-
-    return [
-      escapeCsvField(clientName),
-      escapeCsvField(clientPhone),
-      escapeCsvField(s.label || ""),
-      escapeCsvField(s.template_name || ""),
-      escapeCsvField(s.recorded_at ? s.recorded_at.slice(0, 10) : ""),
-      escapeCsvField(measuresStr),
-      escapeCsvField(s.notes || ""),
-    ];
+    lines.push(`COMMANDE Réf: ${ref} | Client: ${clientName}`);
+    lines.push(`    Modèle     : ${o.garment_type || "Sur-mesure"}`);
+    lines.push(`    Prix total : ${fcfa(price, currency)} | Encaissé: ${fcfa(paid, currency)} | Reste: ${fcfa(rest, currency)}`);
+    lines.push(`    Statut     : ${o.status || "En cours"} | Échéance: ${o.due_date ? o.due_date.slice(0, 10) : "Non définie"}`);
+    if (o.notes) lines.push(`    Notes      : ${o.notes}`);
+    lines.push("------------------------------------------------------------------------------");
   });
 
-  return "\uFEFF" + [headers.join(";"), ...rows.map((r) => r.join(";"))].join("\r\n");
+  return lines.join("\r\n");
 }
 
 export function generateOrdersCsvContent(orders: OrderRow[]): string {
@@ -244,6 +679,273 @@ export function generateOrdersCsvContent(orders: OrderRow[]): string {
   });
 
   return "\uFEFF" + [headers.join(";"), ...rows.map((r) => r.join(";"))].join("\r\n");
+}
+
+// -----------------------------------------------------------------------------
+// 3. GÉNÉRATEURS DE DOCUMENTS MESURES (PDF, WEB .HTML, TEXTE, CSV)
+// -----------------------------------------------------------------------------
+
+export function generateMeasurementsHtmlContent(sets: FullMeasurementSetRow[], businessName: string): string {
+  const dateStr = new Date().toLocaleDateString("fr-FR", { dateStyle: "long" });
+
+  return `<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Carnet de Mesures — ${businessName}</title>
+  <style>${getCommonCss()}</style>
+</head>
+<body>
+  <div class="container">
+    <div class="header-box">
+      <div>
+        <h1 class="atelier-title">${businessName}</h1>
+        <p class="atelier-subtitle">Carnet de Mesures & Gabarits (${sets.length} relevé${sets.length > 1 ? "s" : ""}) — Édité le ${dateStr}</p>
+      </div>
+      <div class="no-print">
+        <button class="btn-action" onclick="window.print()">🖨️ Enregistrer en PDF / Imprimer</button>
+      </div>
+    </div>
+
+    <div class="no-print">
+      <input type="text" id="searchInput" class="search-box" placeholder="🔍 Rechercher un relevé (client, modèle, libellé)..." oninput="filterSets()" />
+    </div>
+
+    <div id="setsContainer">
+      ${sets.length === 0 ? '<div class="item-card" style="text-align:center; color:#64748b;">Aucun relevé de mesure enregistré.</div>' : sets.map((s) => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const c = (s as any).clients;
+        const clientName = c ? `${c.first_name || ""} ${c.last_name || ""}`.trim() : "Client non spécifié";
+        const phone = c?.phone || "";
+        const label = s.label || s.template_name || "Mesures standards";
+        const dateRecorded = s.recorded_at ? s.recorded_at.slice(0, 10) : "";
+        const values = s.values || [];
+
+        return `
+          <div class="item-card set-item" data-search="${clientName.toLowerCase()} ${label.toLowerCase()} ${phone}">
+            <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:8px;">
+              <div>
+                <span style="font-size:10px; font-weight:700; color:#8B4513; text-transform:uppercase;">Gabarit / Modèle</span>
+                <h3 style="margin:2px 0 2px 0; font-size:15px; font-weight:700; color:#0f172a;">${clientName}</h3>
+                <div style="color:#64748b; font-size:12px;">${label} ${dateRecorded ? `• Relevé le ${dateRecorded}` : ""}</div>
+              </div>
+              ${phone ? `<div class="no-print"><a href="tel:${phone}" class="btn-contact btn-call">📞 ${phone}</a></div>` : ""}
+            </div>
+
+            <!-- VALEURS DES MESURES -->
+            <div style="margin-top:10px; padding:10px; background:#f8fafc; border-radius:8px; border:1px solid #e2e8f0;">
+              ${values.length === 0 ? '<span style="color:#94a3b8; font-size:11px;">Aucune mesure renseignée.</span>' : `
+                <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(130px, 1fr)); gap:6px;">
+                  ${values.map((v) => `
+                    <div style="background:#ffffff; border:1px solid #e2e8f0; border-radius:6px; padding:4px 8px; font-size:11px;">
+                      <span style="color:#64748b; font-size:10px; display:block;">${v.name}</span>
+                      <strong style="color:#8B4513; font-size:12px;">${v.value ?? "-"}</strong>
+                    </div>
+                  `).join("")}
+                </div>
+              `}
+            </div>
+            ${s.notes ? `<div style="margin-top:8px; font-size:11px; color:#475569;"><strong>Notes :</strong> ${s.notes}</div>` : ""}
+          </div>
+        `;
+      }).join("")}
+    </div>
+
+    <div class="footer">
+      Document officiel généré par CouturPro — Carnet de Mesures de l'Atelier.<br />
+      Tous droits réservés à l'atelier ${businessName}.
+    </div>
+  </div>
+
+  <script>
+    function filterSets() {
+      const q = document.getElementById('searchInput').value.toLowerCase().trim();
+      const items = document.querySelectorAll('.set-item');
+      items.forEach(el => {
+        const text = el.getAttribute('data-search') || '';
+        el.style.display = text.includes(q) ? 'block' : 'none';
+      });
+    }
+  </script>
+</body>
+</html>`;
+}
+
+export function generateMeasurementsTxtContent(sets: FullMeasurementSetRow[], businessName: string): string {
+  const lines = [
+    "==============================================================================",
+    `COUTURPRO — CARNET DE MESURES : ${businessName}`,
+    `Date d'édition : ${new Date().toLocaleDateString("fr-FR", { dateStyle: "long" })}`,
+    `Total gabarits : ${sets.length}`,
+    "==============================================================================",
+    "",
+  ];
+
+  sets.forEach((s) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const c = (s as any).clients;
+    const clientName = c ? `${c.first_name || ""} ${c.last_name || ""}`.trim() : "Client non spécifié";
+    const label = s.label || s.template_name || "Mesures";
+
+    lines.push(`CLIENT : ${clientName} | Modèle: ${label} | Date: ${s.recorded_at ? s.recorded_at.slice(0, 10) : "—"}`);
+    if (s.values && s.values.length > 0) {
+      lines.push("    Valeurs :");
+      s.values.forEach((v) => {
+        lines.push(`      - ${v.name.padEnd(25, " ")}: ${v.value ?? "-"}`);
+      });
+    }
+    if (s.notes) lines.push(`    Notes : ${s.notes}`);
+    lines.push("------------------------------------------------------------------------------");
+  });
+
+  return lines.join("\r\n");
+}
+
+export function generateMeasurementsCsvContent(sets: FullMeasurementSetRow[]): string {
+  const headers = [
+    "Client_Nom",
+    "Client_Prenom",
+    "Client_Telephone",
+    "Libelle_Modele",
+    "Gabarit_Type",
+    "Date_Enregistrement",
+    "Toutes_Les_Mesures",
+    "Notes",
+  ];
+
+  const rows = sets.map((s) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const c = (s as any).clients;
+    const measuresStr = (s.values || []).map((v) => `${v.name}: ${v.value ?? "-"}`).join(" | ");
+
+    return [
+      escapeCsvField(c?.last_name || ""),
+      escapeCsvField(c?.first_name || ""),
+      escapeCsvField(c?.phone || ""),
+      escapeCsvField(s.label || ""),
+      escapeCsvField(s.template_name || ""),
+      escapeCsvField(s.recorded_at ? s.recorded_at.slice(0, 10) : ""),
+      escapeCsvField(measuresStr),
+      escapeCsvField(s.notes || ""),
+    ];
+  });
+
+  return "\uFEFF" + [headers.join(";"), ...rows.map((r) => r.join(";"))].join("\r\n");
+}
+
+// -----------------------------------------------------------------------------
+// 4. GÉNÉRATEURS DE DOCUMENTS CHARGES & DÉPENSES (PDF, WEB .HTML, TEXTE, CSV)
+// -----------------------------------------------------------------------------
+
+export function generateExpensesHtmlContent(expenses: ExpenseRow[], businessName: string, currency = "FCFA"): string {
+  const dateStr = new Date().toLocaleDateString("fr-FR", { dateStyle: "long" });
+  const totalDepenses = expenses.reduce((s, e) => s + (Number(e.amount) || 0), 0);
+
+  return `<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Registre des Charges & Dépenses — ${businessName}</title>
+  <style>${getCommonCss()}</style>
+</head>
+<body>
+  <div class="container">
+    <div class="header-box">
+      <div>
+        <h1 class="atelier-title">${businessName}</h1>
+        <p class="atelier-subtitle">Registre des Charges & Dépenses (${expenses.length} dépense${expenses.length > 1 ? "s" : ""}) — Édité le ${dateStr}</p>
+      </div>
+      <div class="no-print">
+        <button class="btn-action" onclick="window.print()">🖨️ Enregistrer en PDF / Imprimer</button>
+      </div>
+    </div>
+
+    <!-- TOTAL DES CHARGES -->
+    <div class="kpi-grid">
+      <div class="kpi-card">
+        <div class="lbl">Nombre de dépenses</div>
+        <div class="val">${expenses.length}</div>
+      </div>
+      <div class="kpi-card">
+        <div class="lbl">Total des Sorties d'Argent</div>
+        <div class="val" style="color:#ef4444;">- ${fcfa(totalDepenses, currency)}</div>
+      </div>
+    </div>
+
+    <div class="no-print">
+      <input type="text" id="searchInput" class="search-box" placeholder="🔍 Rechercher une dépense (motif, bénéficiaire, catégorie)..." oninput="filterExpenses()" />
+    </div>
+
+    <div id="expensesContainer">
+      ${expenses.length === 0 ? '<div class="item-card" style="text-align:center; color:#64748b;">Aucune dépense enregistrée.</div>' : expenses.map((e) => {
+        const catLabel = EXPENSE_CATEGORIES[e.category]?.label || e.category;
+        const amount = Number(e.amount) || 0;
+
+        return `
+          <div class="item-card expense-item" data-search="${(e.title || '').toLowerCase()} ${catLabel.toLowerCase()} ${(e.beneficiary_name || '').toLowerCase()}">
+            <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:8px;">
+              <div>
+                <span class="badge badge-neutral">${catLabel}</span>
+                <h3 style="margin:4px 0 2px 0; font-size:15px; font-weight:700; color:#0f172a;">${e.title || "Dépense d'atelier"}</h3>
+                <div style="color:#64748b; font-size:12px;">
+                  ${e.expense_date ? `Date : ${e.expense_date}` : ""}
+                  ${e.beneficiary_name ? ` • Payé à : ${e.beneficiary_name}` : ""}
+                </div>
+              </div>
+              <div style="text-align:right;">
+                <span style="font-size:16px; font-weight:800; color:#ef4444;">- ${fcfa(amount, currency)}</span>
+                ${e.payment_method ? `<div style="font-size:10px; color:#64748b; margin-top:2px;">${e.payment_method}</div>` : ""}
+              </div>
+            </div>
+            ${e.notes ? `<div style="margin-top:6px; font-size:11px; color:#475569;"><strong>Notes :</strong> ${e.notes}</div>` : ""}
+          </div>
+        `;
+      }).join("")}
+    </div>
+
+    <div class="footer">
+      Document généré par CouturPro — Comptabilité & Gestion des Charges d'Atelier.<br />
+      Tous droits réservés à l'atelier ${businessName}.
+    </div>
+  </div>
+
+  <script>
+    function filterExpenses() {
+      const q = document.getElementById('searchInput').value.toLowerCase().trim();
+      const items = document.querySelectorAll('.expense-item');
+      items.forEach(el => {
+        const text = el.getAttribute('data-search') || '';
+        el.style.display = text.includes(q) ? 'block' : 'none';
+      });
+    }
+  </script>
+</body>
+</html>`;
+}
+
+export function generateExpensesTxtContent(expenses: ExpenseRow[], businessName: string, currency = "FCFA"): string {
+  const lines = [
+    "==============================================================================",
+    `COUTURPRO — REGISTRE DES CHARGES & DÉPENSES : ${businessName}`,
+    `Date d'édition : ${new Date().toLocaleDateString("fr-FR", { dateStyle: "long" })}`,
+    `Total dépenses : ${expenses.length}`,
+    "==============================================================================",
+    "",
+  ];
+
+  expenses.forEach((e) => {
+    const catLabel = EXPENSE_CATEGORIES[e.category]?.label || e.category;
+    lines.push(`[${e.expense_date || "—"}] ${catLabel.toUpperCase()} : ${e.title || "Dépense"}`);
+    lines.push(`    Montant      : ${fcfa(e.amount, currency)}`);
+    if (e.beneficiary_name) lines.push(`    Bénéficiaire : ${e.beneficiary_name}`);
+    if (e.payment_method) lines.push(`    Règlement    : ${e.payment_method}`);
+    if (e.notes) lines.push(`    Notes        : ${e.notes}`);
+    lines.push("------------------------------------------------------------------------------");
+  });
+
+  return lines.join("\r\n");
 }
 
 export function generateExpensesCsvContent(expenses: ExpenseRow[]): string {
@@ -301,72 +1003,427 @@ export function generateAppointmentsCsvContent(appts: AppointmentRow[]): string 
 }
 
 // -----------------------------------------------------------------------------
-// 1. EXPORT DU DOSSIER ZIP COMPLET DE L'ATELIER (TOUT EN UN)
+// 5. APPLICATION WEB HORS-LIGNE AUTONOME (PORTAIL MULTI-FORMATS D'ATELIER)
+// -----------------------------------------------------------------------------
+
+export function generateFullWorkshopHtmlContent(data: CompleteWorkshopData, businessName: string): string {
+  const currency = (data.business?.currency as string) || "FCFA";
+  const dateStr = new Date().toLocaleDateString("fr-FR", { dateStyle: "long" });
+
+  const totalCA = data.orders.reduce((s, o) => s + (Number(o.price) || 0), 0);
+  const totalEncaisse = data.orders.reduce((s, o) => s + paidTotal(o), 0);
+  const totalDepenses = data.expenses.reduce((s, e) => s + (Number(e.amount) || 0), 0);
+  const beneficeNet = totalEncaisse - totalDepenses;
+
+  return `<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Dossier Intégral d'Atelier — ${businessName}</title>
+  <style>${getCommonCss()}</style>
+</head>
+<body>
+  <div class="container">
+    <div class="header-box">
+      <div>
+        <h1 class="atelier-title">${businessName}</h1>
+        <p class="atelier-subtitle">Grand Livre & Dossier Complet d'Atelier — CouturPro</p>
+        <p style="font-size:11px; opacity:0.85; margin:3px 0 0 0;">
+          ${data.business?.address ? data.business.address + " • " : ""}${data.business?.city || ""} • Tél: ${data.business?.phone || "—"}
+        </p>
+      </div>
+      <div class="no-print">
+        <button class="btn-action" onclick="window.print()">🖨️ Enregistrer en PDF / Imprimer</button>
+      </div>
+    </div>
+
+    <!-- BILAN FINANCIER GLOBAL -->
+    <div class="kpi-grid">
+      <div class="kpi-card">
+        <div class="lbl">Clients</div>
+        <div class="val">${data.clients.length}</div>
+      </div>
+      <div class="kpi-card">
+        <div class="lbl">Commandes</div>
+        <div class="val">${data.orders.length}</div>
+      </div>
+      <div class="kpi-card">
+        <div class="lbl">Chiffre d'Affaires</div>
+        <div class="val">${fcfa(totalCA, currency)}</div>
+      </div>
+      <div class="kpi-card">
+        <div class="lbl">Total Encaissé</div>
+        <div class="val" style="color:#166534;">${fcfa(totalEncaisse, currency)}</div>
+      </div>
+      <div class="kpi-card">
+        <div class="lbl">Total Charges</div>
+        <div class="val" style="color:#ef4444;">- ${fcfa(totalDepenses, currency)}</div>
+      </div>
+      <div class="kpi-card">
+        <div class="lbl">Bénéfice Net Réel</div>
+        <div class="val" style="color:${beneficeNet >= 0 ? '#166534' : '#ef4444'}; font-size:20px;">
+          ${fcfa(beneficeNet, currency)}
+        </div>
+      </div>
+    </div>
+
+    <!-- ONGLETS DE CONSULTATION (POUR SMARTPHONE & ORDINATEUR) -->
+    <div class="tab-nav no-print">
+      <button class="tab-btn active" onclick="switchTab('clients', this)">👥 Clients (${data.clients.length})</button>
+      <button class="tab-btn" onclick="switchTab('orders', this)">🧵 Commandes (${data.orders.length})</button>
+      <button class="tab-btn" onclick="switchTab('measures', this)">📐 Carnet de Mesures (${data.measurementSets.length})</button>
+      <button class="tab-btn" onclick="switchTab('expenses', this)">💰 Charges (${data.expenses.length})</button>
+    </div>
+
+    <!-- SECTION CLIENTS -->
+    <div id="tab-clients" class="tab-content">
+      <div class="no-print">
+        <input type="text" class="search-box" placeholder="🔍 Rechercher un client..." oninput="filterList(this, '#list-clients .item-card')" />
+      </div>
+      <div id="list-clients">
+        ${data.clients.map((c, i) => {
+          const fullName = `${c.first_name || ""} ${c.last_name || ""}`.trim() || "Client sans nom";
+          const phone = c.phone || c.whatsapp || "";
+          const cleanPhone = phone.replace(/[^0-9+]/g, "");
+          return `
+            <div class="item-card" data-search="${fullName.toLowerCase()} ${phone}">
+              <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
+                <div>
+                  <strong style="font-size:14px; color:#0f172a;">#${i+1} ${fullName}</strong>
+                  <div style="color:#64748b; font-size:12px;">${[c.city, c.address].filter(Boolean).join(" • ") || "Aucune adresse"}</div>
+                </div>
+                <div class="no-print">
+                  ${cleanPhone ? `
+                    <a href="tel:${cleanPhone}" class="btn-contact btn-call">📞 Appeler</a>
+                    <a href="https://wa.me/${cleanPhone.replace('+', '')}" target="_blank" class="btn-contact btn-wa">💬 WhatsApp</a>
+                  ` : '<span style="color:#94a3b8; font-size:11px;">Pas de numéro</span>'}
+                </div>
+              </div>
+              ${c.notes ? `<div style="margin-top:6px; font-size:11px; color:#475569;"><strong>Notes :</strong> ${c.notes}</div>` : ""}
+            </div>
+          `;
+        }).join("")}
+      </div>
+    </div>
+
+    <!-- SECTION COMMANDES -->
+    <div id="tab-orders" class="tab-content" style="display:none;">
+      <div class="no-print">
+        <input type="text" class="search-box" placeholder="🔍 Rechercher une commande..." oninput="filterList(this, '#list-orders .item-card')" />
+      </div>
+      <div id="list-orders">
+        ${data.orders.map((o) => {
+          const c = o.clients;
+          const clientName = c ? `${c.first_name || ""} ${c.last_name || ""}`.trim() : "Client non spécifié";
+          const paid = paidTotal(o);
+          const rest = Math.max(0, balance(o));
+          return `
+            <div class="item-card" data-search="${clientName.toLowerCase()} ${(o.garment_type||'').toLowerCase()} ${(o.order_number||'').toLowerCase()}">
+              <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:8px;">
+                <div>
+                  <span style="font-size:10px; font-weight:700; color:#8B4513;">RÉF: ${o.order_number || o.id.slice(0,8)}</span>
+                  <div style="font-size:14px; font-weight:700; color:#0f172a;">${clientName}</div>
+                  <div style="font-size:12px; color:#64748b;">${o.garment_type || "Sur-mesure"}</div>
+                </div>
+                <div style="text-align:right;">
+                  <span class="badge ${rest <= 0 ? 'badge-paid' : 'badge-unpaid'}">
+                    ${rest <= 0 ? 'Soldé' : `Reste : ${fcfa(rest, currency)}`}
+                  </span>
+                  <div style="font-size:11px; color:#64748b; margin-top:4px;">Statut : ${o.status || 'En cours'}</div>
+                </div>
+              </div>
+              <div style="margin-top:8px; padding-top:6px; border-top:1px dashed #e2e8f0; font-size:11px; display:flex; justify-content:space-between;">
+                <span>Prix: ${fcfa(Number(o.price)||0, currency)} • Acompte: ${fcfa(paid, currency)}</span>
+                <span>Livraison: ${o.due_date ? o.due_date.slice(0,10) : "Non définie"}</span>
+              </div>
+            </div>
+          `;
+        }).join("")}
+      </div>
+    </div>
+
+    <!-- SECTION MESURES -->
+    <div id="tab-measures" class="tab-content" style="display:none;">
+      <div class="no-print">
+        <input type="text" class="search-box" placeholder="🔍 Rechercher une fiche de mesure..." oninput="filterList(this, '#list-measures .item-card')" />
+      </div>
+      <div id="list-measures">
+        ${data.measurementSets.map((s) => {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const c = (s as any).clients;
+          const clientName = c ? `${c.first_name || ""} ${c.last_name || ""}`.trim() : "Client non spécifié";
+          return `
+            <div class="item-card" data-search="${clientName.toLowerCase()} ${(s.label||'').toLowerCase()}">
+              <strong style="font-size:14px; color:#0f172a;">${clientName}</strong> — <span style="color:#64748b; font-size:12px;">${s.label || s.template_name || "Mesures"}</span>
+              <div style="margin-top:8px; display:grid; grid-template-columns:repeat(auto-fit, minmax(120px, 1fr)); gap:6px;">
+                ${(s.values || []).map(v => `
+                  <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:6px; padding:4px 8px; font-size:11px;">
+                    <span style="color:#64748b; font-size:10px; display:block;">${v.name}</span>
+                    <strong style="color:#8B4513;">${v.value ?? "-"}</strong>
+                  </div>
+                `).join("")}
+              </div>
+            </div>
+          `;
+        }).join("")}
+      </div>
+    </div>
+
+    <!-- SECTION CHARGES -->
+    <div id="tab-expenses" class="tab-content" style="display:none;">
+      <div class="no-print">
+        <input type="text" class="search-box" placeholder="🔍 Rechercher une dépense..." oninput="filterList(this, '#list-expenses .item-card')" />
+      </div>
+      <div id="list-expenses">
+        ${data.expenses.map((e) => {
+          const cat = EXPENSE_CATEGORIES[e.category]?.label || e.category;
+          return `
+            <div class="item-card" data-search="${(e.title||'').toLowerCase()} ${cat.toLowerCase()}">
+              <div style="display:flex; justify-content:space-between; align-items:center;">
+                <div>
+                  <span class="badge badge-neutral">${cat}</span>
+                  <div style="font-weight:700; margin-top:2px;">${e.title || "Dépense"}</div>
+                  <div style="font-size:11px; color:#64748b;">${e.expense_date || ""} ${e.beneficiary_name ? "• " + e.beneficiary_name : ""}</div>
+                </div>
+                <div style="font-weight:800; color:#ef4444; font-size:15px;">- ${fcfa(e.amount, currency)}</div>
+              </div>
+            </div>
+          `;
+        }).join("")}
+      </div>
+    </div>
+
+    <div class="footer">
+      Dossier officiel généré par CouturPro — Consultation 100% hors-ligne active.<br />
+      Toutes les données ci-dessus constituent la propriété exclusive de l'atelier ${businessName}.
+    </div>
+  </div>
+
+  <script>
+    function switchTab(tabName, btn) {
+      document.querySelectorAll('.tab-content').forEach(el => el.style.display = 'none');
+      document.querySelectorAll('.tab-btn').forEach(el => el.classList.remove('active'));
+      document.getElementById('tab-' + tabName).style.display = 'block';
+      if (btn) btn.classList.add('active');
+    }
+    function filterList(input, selector) {
+      const q = input.value.toLowerCase().trim();
+      document.querySelectorAll(selector).forEach(el => {
+        const text = el.getAttribute('data-search') || '';
+        el.style.display = text.includes(q) ? 'block' : 'none';
+      });
+    }
+  </script>
+</body>
+</html>`;
+}
+
+// -----------------------------------------------------------------------------
+// 6. EXPORT UNIVERSEL PAR CATÉGORIE ET FORMAT SOUHAITÉ
+// -----------------------------------------------------------------------------
+
+export async function exportCategoryData(
+  category: "clients" | "orders" | "measurements" | "expenses",
+  format: ExportFormat,
+  businessId: string,
+  businessName: string
+): Promise<void> {
+  const data = await fetchFullWorkshopData(businessId);
+  const cleanName = sanitizeFilename(businessName);
+  const dateStr = new Date().toISOString().slice(0, 10);
+  const currency = (data.business?.currency as string) || "FCFA";
+
+  let content = "";
+  let filename = "";
+  let mimeType = "";
+
+  switch (category) {
+    case "clients": {
+      filename = `couturpro_clients_${cleanName}_${dateStr}`;
+      if (format === "pdf") {
+        const html = generateClientsHtmlContent(data.clients, businessName);
+        openPrintDocument(html, `${filename}.html`);
+        await logAudit(businessId, "DATA_EXPORT_CLIENTS_PDF", { count: data.clients.length });
+        return;
+      }
+      if (format === "html") {
+        content = generateClientsHtmlContent(data.clients, businessName);
+        mimeType = "text/html;charset=utf-8";
+        filename += ".html";
+      } else if (format === "csv") {
+        content = generateClientsCsvContent(data.clients);
+        mimeType = "text/csv;charset=utf-8";
+        filename += ".csv";
+      } else if (format === "txt") {
+        content = generateClientsTxtContent(data.clients, businessName);
+        mimeType = "text/plain;charset=utf-8";
+        filename += ".txt";
+      }
+      break;
+    }
+
+    case "orders": {
+      filename = `couturpro_commandes_${cleanName}_${dateStr}`;
+      if (format === "pdf") {
+        const html = generateOrdersHtmlContent(data.orders, businessName, currency);
+        openPrintDocument(html, `${filename}.html`);
+        await logAudit(businessId, "DATA_EXPORT_ORDERS_PDF", { count: data.orders.length });
+        return;
+      }
+      if (format === "html") {
+        content = generateOrdersHtmlContent(data.orders, businessName, currency);
+        mimeType = "text/html;charset=utf-8";
+        filename += ".html";
+      } else if (format === "csv") {
+        content = generateOrdersCsvContent(data.orders);
+        mimeType = "text/csv;charset=utf-8";
+        filename += ".csv";
+      } else if (format === "txt") {
+        content = generateOrdersTxtContent(data.orders, businessName, currency);
+        mimeType = "text/plain;charset=utf-8";
+        filename += ".txt";
+      }
+      break;
+    }
+
+    case "measurements": {
+      filename = `couturpro_mesures_${cleanName}_${dateStr}`;
+      if (format === "pdf") {
+        const html = generateMeasurementsHtmlContent(data.measurementSets, businessName);
+        openPrintDocument(html, `${filename}.html`);
+        await logAudit(businessId, "DATA_EXPORT_MEASURES_PDF", { count: data.measurementSets.length });
+        return;
+      }
+      if (format === "html") {
+        content = generateMeasurementsHtmlContent(data.measurementSets, businessName);
+        mimeType = "text/html;charset=utf-8";
+        filename += ".html";
+      } else if (format === "csv") {
+        content = generateMeasurementsCsvContent(data.measurementSets);
+        mimeType = "text/csv;charset=utf-8";
+        filename += ".csv";
+      } else if (format === "txt") {
+        content = generateMeasurementsTxtContent(data.measurementSets, businessName);
+        mimeType = "text/plain;charset=utf-8";
+        filename += ".txt";
+      }
+      break;
+    }
+
+    case "expenses": {
+      filename = `couturpro_charges_depenses_${cleanName}_${dateStr}`;
+      if (format === "pdf") {
+        const html = generateExpensesHtmlContent(data.expenses, businessName, currency);
+        openPrintDocument(html, `${filename}.html`);
+        await logAudit(businessId, "DATA_EXPORT_EXPENSES_PDF", { count: data.expenses.length });
+        return;
+      }
+      if (format === "html") {
+        content = generateExpensesHtmlContent(data.expenses, businessName, currency);
+        mimeType = "text/html;charset=utf-8";
+        filename += ".html";
+      } else if (format === "csv") {
+        content = generateExpensesCsvContent(data.expenses);
+        mimeType = "text/csv;charset=utf-8";
+        filename += ".csv";
+      } else if (format === "txt") {
+        content = generateExpensesTxtContent(data.expenses, businessName, currency);
+        mimeType = "text/plain;charset=utf-8";
+        filename += ".txt";
+      }
+      break;
+    }
+  }
+
+  if (content && filename && mimeType) {
+    const blob = new Blob([content], { type: mimeType });
+    downloadBlob(blob, filename);
+    await logAudit(businessId, `DATA_EXPORT_${category.toUpperCase()}_${format.toUpperCase()}`, { format });
+  }
+}
+
+// -----------------------------------------------------------------------------
+// 7. EXPORT DU DOSSIER MULTI-FORMATS ZIP COMPLET
 // -----------------------------------------------------------------------------
 
 export async function exportWorkshopFullZip(businessId: string, businessName: string): Promise<void> {
   const data = await fetchFullWorkshopData(businessId);
-  const dateStr = new Date().toISOString().slice(0, 10);
   const zip = new SimpleZip();
+  const dateStr = new Date().toISOString().slice(0, 10);
 
-  // Fichiers Excel CSV
+  // 1. APPLICATION WEB HORS-LIGNE AUTONOME (CONSULTABLE SANS EXCEL SUR TOUT TÉLÉPHONE)
+  const fullHtml = generateFullWorkshopHtmlContent(data, businessName);
+  zip.addFile("00_CONSULTER_MON_ATELIER.html", fullHtml);
+
+  // 2. FICHIERS TABLEURS CSV (POUR EXCEL, SHEETS, LIBREOFFICE)
   zip.addFile("01_Clients_Excel.csv", generateClientsCsvContent(data.clients));
   zip.addFile("02_Mesures_Excel.csv", generateMeasurementsCsvContent(data.measurementSets));
   zip.addFile("03_Commandes_Excel.csv", generateOrdersCsvContent(data.orders));
   zip.addFile("04_Charges_Depenses_Excel.csv", generateExpensesCsvContent(data.expenses));
   zip.addFile("05_Rendez_Vous_Excel.csv", generateAppointmentsCsvContent(data.appointments));
 
-  // Sauvegarde brute JSON conforme RGPD
+  // 3. FICHES TEXTES CLAIRES (LISIBLES SUR TOUT BLOC-NOTES)
+  zip.addFile("01_Clients_Texte.txt", generateClientsTxtContent(data.clients, businessName));
+  zip.addFile("02_Mesures_Texte.txt", generateMeasurementsTxtContent(data.measurementSets, businessName));
+  zip.addFile("03_Commandes_Texte.txt", generateOrdersTxtContent(data.orders, businessName, (data.business?.currency as string) || "FCFA"));
+  zip.addFile("04_Charges_Depenses_Texte.txt", generateExpensesTxtContent(data.expenses, businessName, (data.business?.currency as string) || "FCFA"));
+
+  // 4. SAUVEGARDE INFORMATIQUE BRUTE JSON (RGPD ART. 20)
   const jsonArchive = {
     metadata: {
       application: "CouturPro",
       version: "2.0",
-      type: "Sauvegarde Complète Atelier",
+      compliance: "RGPD Art. 20 (Portabilité intégrale des données)",
       exported_at: new Date().toISOString(),
       business_id: businessId,
       business_name: businessName,
-      stats: {
-        total_clients: data.clients.length,
-        total_orders: data.orders.length,
-        total_measurements: data.measurementSets.length,
-        total_expenses: data.expenses.length,
+      source: typeof navigator !== "undefined" && navigator.onLine ? "Cloud_Supabase" : "PWA_Offline_IndexedDB",
+      counts: {
+        clients: data.clients.length,
+        orders: data.orders.length,
+        measurement_sets: data.measurementSets.length,
+        expenses: data.expenses.length,
+        appointments: data.appointments.length,
       },
     },
     ...data,
   };
   zip.addFile("00_Sauvegarde_Integrale.json", JSON.stringify(jsonArchive, null, 2));
 
-  // Notice explicative
+  // 5. NOTICE EXPLICATIVE
   const readme = [
-    `==============================================================================`,
-    `COUTURPRO — DOSSIER COMPLET D'EXPORTATION D'ATELIER`,
-    `==============================================================================`,
+    "==============================================================================",
+    "COUTURPRO — DOSSIER COMPLET MULTI-FORMATS D'ATELIER",
+    "==============================================================================",
     `Atelier : ${businessName}`,
     `Date d'exportation : ${new Date().toLocaleDateString("fr-FR", { dateStyle: "full" })}`,
     `Nombre de clients : ${data.clients.length}`,
     `Nombre de commandes : ${data.orders.length}`,
     `Fiches de mesures : ${data.measurementSets.length}`,
     `Dépenses enregistrées : ${data.expenses.length}`,
-    ``,
-    `CONTENU DU DOSSIER :`,
-    `1. 01_Clients_Excel.csv          -> Liste complète de vos clients avec téléphones et adresses`,
-    `2. 02_Mesures_Excel.csv          -> Relevés détaillés de toutes les mesures clients`,
-    `3. 03_Commandes_Excel.csv        -> Historique des commandes, prix, acomptes et soldes`,
-    `4. 04_Charges_Depenses_Excel.csv -> Registre de toutes les sorties d'argent (salaires, loyer, mercerie)`,
-    `5. 05_Rendez_Vous_Excel.csv      -> Agenda des rendez-vous clients`,
-    `6. 00_Sauvegarde_Integrale.json  -> Fichier de sauvegarde informatique réutilisable`,
-    ``,
-    `IMPORTANT :`,
-    `Ces fichiers sont compatibles avec Microsoft Excel, LibreOffice, Google Sheets,`,
-    `et lisibles sur tout ordinateur ou smartphone sans logiciel spécial.`,
-    `Vos données vous appartiennent définitivement.`,
-    `==============================================================================`,
+    "",
+    "COMMENT CONSULTER VOS DONNÉES SELON VOTRE APPAREIL :",
+    "1. SUR N'IMPORTE QUEL SMARTPHONE OU ORDINATEUR (SANS EXCEL) :",
+    "   -> Double-cliquez sur '00_CONSULTER_MON_ATELIER.html'.",
+    "   -> Ce fichier s'ouvre directement dans votre navigateur (Chrome, Safari, etc.)",
+    "      100% hors-ligne avec recherche, filtres et bouton d'impression PDF !",
+    "",
+    "2. SUR UN TABLEUR (MICROSOFT EXCEL, GOOGLE SHEETS, LIBREOFFICE) :",
+    "   -> Ouvrez les fichiers 01_Clients_Excel.csv, 02_Mesures_Excel.csv, etc.",
+    "",
+    "3. SUR N'IMPORTE QUEL BLOC-NOTES OU TÉLÉPHONE BASIQUE :",
+    "   -> Ouvrez les fichiers 01_Clients_Texte.txt, 02_Mesures_Texte.txt, etc.",
+    "",
+    "4. SAUVEGARDE INFORMATIQUE :",
+    "   -> Le fichier 00_Sauvegarde_Integrale.json contient toutes les données brutes.",
+    "==============================================================================",
   ].join("\r\n");
 
   zip.addFile("LISEZ_MOI_ARCHIVE.txt", readme);
 
   const zipBlob = zip.generateBlob();
-  const filename = `dossier_atelier_${sanitizeFilename(businessName)}_${dateStr}.zip`;
+  const filename = `dossier_complet_${sanitizeFilename(businessName)}_${dateStr}.zip`;
   downloadBlob(zipBlob, filename);
 
   await logAudit(businessId, "DATA_PORTABILITY_EXPORT_FULL_ZIP", {
@@ -376,317 +1433,14 @@ export async function exportWorkshopFullZip(businessId: string, businessName: st
 }
 
 // -----------------------------------------------------------------------------
-// 2. EXPORT DU RAPPORT PDF IMPRIMABLE DU GRAND LIVRE D'ATELIER
+// 8. FONCTIONS RÉSERVÉES ET CONSERVÉES (RÉTROCOMPATIBILITÉ TOTALE)
 // -----------------------------------------------------------------------------
 
 export async function exportWorkshopPdfReport(businessId: string, businessName: string): Promise<void> {
   const data = await fetchFullWorkshopData(businessId);
-  const currency = (data.business?.currency as string) || "FCFA";
-  const dateStr = new Date().toLocaleDateString("fr-FR", { dateStyle: "long" });
-
-  const totalCA = data.orders.reduce((s, o) => s + (Number(o.price) || 0), 0);
-  const totalEncaisse = data.orders.reduce((s, o) => s + paidTotal(o), 0);
-  const totalImpayes = data.orders.reduce((s, o) => s + Math.max(0, balance(o)), 0);
-  const totalDepenses = data.expenses.reduce((s, e) => s + (Number(e.amount) || 0), 0);
-  const beneficeNet = totalEncaisse - totalDepenses;
-
-  const html = `<!DOCTYPE html>
-<html lang="fr">
-<head>
-  <meta charset="utf-8" />
-  <title>Grand Livre d'Atelier — ${businessName}</title>
-  <style>
-    @page { size: A4 portrait; margin: 15mm; }
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-      color: #1a1a1a;
-      background: #fff;
-      font-size: 11px;
-      line-height: 1.4;
-      margin: 0;
-      padding: 10px;
-    }
-    .header {
-      border-bottom: 2px solid #8B4513;
-      padding-bottom: 12px;
-      margin-bottom: 15px;
-      display: flex;
-      justify-content: space-between;
-      align-items: flex-start;
-    }
-    .atelier-title {
-      font-size: 22px;
-      font-weight: bold;
-      color: #8B4513;
-      margin: 0 0 4px 0;
-    }
-    .atelier-subtitle {
-      font-size: 12px;
-      color: #666;
-      margin: 0;
-    }
-    .kpi-grid {
-      display: grid;
-      grid-template-columns: repeat(4, 1fr);
-      gap: 10px;
-      margin-bottom: 20px;
-    }
-    .kpi-box {
-      background: #fdfaf6;
-      border: 1px solid #e8dfd5;
-      border-radius: 6px;
-      padding: 8px 10px;
-      text-align: center;
-    }
-    .kpi-box .val {
-      font-size: 15px;
-      font-weight: bold;
-      color: #8B4513;
-      margin-top: 2px;
-    }
-    .kpi-box .lbl {
-      font-size: 9px;
-      text-transform: uppercase;
-      color: #777;
-      font-weight: 600;
-    }
-    .section-title {
-      font-size: 13px;
-      font-weight: bold;
-      color: #333;
-      border-bottom: 1px solid #ddd;
-      padding-bottom: 4px;
-      margin: 20px 0 10px 0;
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
-    }
-    table {
-      width: 100%;
-      border-collapse: collapse;
-      margin-bottom: 15px;
-      font-size: 10px;
-    }
-    th {
-      background: #f5ede6;
-      color: #5a3825;
-      font-weight: bold;
-      text-align: left;
-      padding: 6px 8px;
-      border: 1px solid #e0d5cb;
-    }
-    td {
-      padding: 5px 8px;
-      border: 1px solid #e8e8e8;
-    }
-    tr:nth-child(even) td {
-      background: #fafafa;
-    }
-    .tag {
-      display: inline-block;
-      padding: 2px 6px;
-      border-radius: 4px;
-      font-size: 9px;
-      font-weight: bold;
-    }
-    .footer {
-      margin-top: 30px;
-      border-top: 1px solid #ddd;
-      padding-top: 10px;
-      text-align: center;
-      font-size: 9px;
-      color: #888;
-    }
-    .no-print {
-      margin-bottom: 15px;
-      padding: 10px;
-      background: #eef7ee;
-      border: 1px solid #bce2be;
-      border-radius: 6px;
-      text-align: center;
-    }
-    .btn-print {
-      background: #8B4513;
-      color: #fff;
-      border: none;
-      padding: 8px 16px;
-      font-size: 12px;
-      font-weight: bold;
-      border-radius: 6px;
-      cursor: pointer;
-    }
-    @media print {
-      .no-print { display: none; }
-      table { page-break-inside: auto; }
-      tr { page-break-inside: avoid; page-break-after: auto; }
-    }
-  </style>
-</head>
-<body>
-  <div class="no-print">
-    <strong>Dossier d'Atelier Prêt pour Impression & Sauvegarde PDF</strong><br />
-    <span style="font-size:11px; color:#555;">Cliquez sur le bouton ci-dessous pour enregistrer ce document au format PDF sur votre appareil.</span><br /><br />
-    <button class="btn-print" onclick="window.print()">Imprimer / Enregistrer en PDF</button>
-  </div>
-
-  <div class="header">
-    <div>
-      <h1 class="atelier-title">${businessName}</h1>
-      <p class="atelier-subtitle">Grand Livre & Registre d'Exploitation d'Atelier — CouturPro</p>
-      <p style="font-size:10px; color:#666; margin:2px 0 0 0;">
-        ${data.business?.address ? data.business.address + " • " : ""}${data.business?.city || ""} • Tél: ${data.business?.phone || "—"}
-      </p>
-    </div>
-    <div style="text-align: right;">
-      <span style="font-weight: bold; color: #555;">Date d'édition :</span><br />
-      <span>${dateStr}</span>
-    </div>
-  </div>
-
-  <!-- KPI SUMMARY -->
-  <div class="kpi-grid">
-    <div class="kpi-box">
-      <div class="lbl">Clients enregistrés</div>
-      <div class="val">${data.clients.length}</div>
-    </div>
-    <div class="kpi-box">
-      <div class="lbl">Commandes totales</div>
-      <div class="val">${data.orders.length}</div>
-    </div>
-    <div class="kpi-box">
-      <div class="lbl">Total Encaissé</div>
-      <div class="val">${fcfa(totalEncaisse, currency)}</div>
-    </div>
-    <div class="kpi-box">
-      <div class="lbl">Bénéfice Net Réel</div>
-      <div class="val" style="color: ${beneficeNet >= 0 ? '#10b981' : '#ef4444'}">${fcfa(beneficeNet, currency)}</div>
-    </div>
-  </div>
-
-  <!-- SECTION CLIENTS -->
-  <div class="section-title">1. Répertoire des Clients (${data.clients.length})</div>
-  <table>
-    <thead>
-      <tr>
-        <th style="width: 25%;">Nom & Prénom</th>
-        <th style="width: 20%;">Téléphone</th>
-        <th style="width: 15%;">Ville / Quartier</th>
-        <th style="width: 10%;">Genre</th>
-        <th style="width: 30%;">Notes</th>
-      </tr>
-    </thead>
-    <tbody>
-      ${data.clients.length === 0 ? '<tr><td colspan="5" style="text-align:center;">Aucun client enregistré.</td></tr>' : data.clients.map((c) => `
-        <tr>
-          <td><strong>${c.first_name || ""} ${c.last_name || ""}</strong></td>
-          <td>${c.phone || c.whatsapp || "—"}</td>
-          <td>${c.city || c.address || "—"}</td>
-          <td>${c.gender || "—"}</td>
-          <td>${c.notes || "—"}</td>
-        </tr>
-      `).join("")}
-    </tbody>
-  </table>
-
-  <!-- SECTION COMMANDES -->
-  <div class="section-title">2. Registre des Commandes (${data.orders.length})</div>
-  <table>
-    <thead>
-      <tr>
-        <th style="width: 15%;">Réf / Date</th>
-        <th style="width: 25%;">Client</th>
-        <th style="width: 20%;">Modèle / Habit</th>
-        <th style="width: 12%; text-align:right;">Prix</th>
-        <th style="width: 12%; text-align:right;">Encaissé</th>
-        <th style="width: 16%;">Statut</th>
-      </tr>
-    </thead>
-    <tbody>
-      ${data.orders.length === 0 ? '<tr><td colspan="6" style="text-align:center;">Aucune commande enregistrée.</td></tr>' : data.orders.map((o) => `
-        <tr>
-          <td><strong>${o.order_number || o.id.slice(0, 8)}</strong><br /><span style="font-size:9px; color:#777;">${o.ordered_at ? o.ordered_at.slice(0, 10) : ""}</span></td>
-          <td>${o.clients ? o.clients.first_name + " " + o.clients.last_name : "—"}</td>
-          <td>${o.garment_type || "—"}</td>
-          <td style="text-align:right;">${fcfa(Number(o.price) || 0, currency)}</td>
-          <td style="text-align:right; font-weight:bold;">${fcfa(paidTotal(o), currency)}</td>
-          <td><span class="tag" style="background:#eef; color:#336;">${o.status}</span></td>
-        </tr>
-      `).join("")}
-    </tbody>
-  </table>
-
-  <!-- SECTION MESURES -->
-  <div class="section-title">3. Relevés du Carnet de Mesures (${data.measurementSets.length})</div>
-  <table>
-    <thead>
-      <tr>
-        <th style="width: 25%;">Client</th>
-        <th style="width: 20%;">Libellé / Modèle</th>
-        <th style="width: 15%;">Date relevé</th>
-        <th style="width: 40%;">Mensurations clés</th>
-      </tr>
-    </thead>
-    <tbody>
-      ${data.measurementSets.length === 0 ? '<tr><td colspan="4" style="text-align:center;">Aucun relevé de mesure.</td></tr>' : data.measurementSets.slice(0, 100).map((s) => {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const c = (s as any).clients;
-        const cName = c ? `${c.first_name || ""} ${c.last_name || ""}`.trim() : "—";
-        const valStr = (s.values || []).map((v) => `${v.name}: ${v.value ?? "-"}`).join(", ");
-        return `
-          <tr>
-            <td><strong>${cName}</strong></td>
-            <td>${s.label || s.template_name || "—"}</td>
-            <td>${s.recorded_at ? s.recorded_at.slice(0, 10) : "—"}</td>
-            <td style="font-size:9px;">${valStr || "Aucune valeur renseignée"}</td>
-          </tr>
-        `;
-      }).join("")}
-    </tbody>
-  </table>
-
-  <!-- SECTION CHARGES & COMPTABILITÉ -->
-  <div class="section-title">4. Registre des Charges & Dépenses d'Atelier (${data.expenses.length})</div>
-  <table>
-    <thead>
-      <tr>
-        <th style="width: 15%;">Date</th>
-        <th style="width: 25%;">Catégorie</th>
-        <th style="width: 30%;">Motif de la dépense</th>
-        <th style="width: 15%;">Bénéficiaire</th>
-        <th style="width: 15%; text-align:right;">Montant</th>
-      </tr>
-    </thead>
-    <tbody>
-      ${data.expenses.length === 0 ? '<tr><td colspan="5" style="text-align:center;">Aucune dépense enregistrée.</td></tr>' : data.expenses.map((e) => `
-        <tr>
-          <td>${e.expense_date || ""}</td>
-          <td><strong>${EXPENSE_CATEGORIES[e.category]?.label || e.category}</strong></td>
-          <td>${e.title || "—"}</td>
-          <td>${e.beneficiary_name || "—"}</td>
-          <td style="text-align:right; font-weight:bold; color:#ef4444;">- ${fcfa(e.amount, currency)}</td>
-        </tr>
-      `).join("")}
-    </tbody>
-  </table>
-
-  <div class="footer">
-    Document officiel généré par CouturPro — Logiciel de Gestion pour Ateliers de Couture.<br />
-    Toutes les données présentées ci-dessus constituent la propriété exclusive de l'atelier ${businessName}.
-  </div>
-</body>
-</html>`;
-
-  // Ouvrir dans un nouvel onglet ou fenêtre d'impression
-  const printWindow = window.open("", "_blank");
-  if (printWindow) {
-    printWindow.document.open();
-    printWindow.document.write(html);
-    printWindow.document.close();
-  } else {
-    // Si popup bloqué, télécharger directement en document HTML imprimable
-    const blob = new Blob([html], { type: "text/html;charset=utf-8" });
-    const filename = `grand_livre_atelier_${sanitizeFilename(businessName)}_${new Date().toISOString().slice(0, 10)}.html`;
-    downloadBlob(blob, filename);
-  }
+  const html = generateFullWorkshopHtmlContent(data, businessName);
+  const filename = `grand_livre_atelier_${sanitizeFilename(businessName)}_${new Date().toISOString().slice(0, 10)}.html`;
+  openPrintDocument(html, filename);
 
   await logAudit(businessId, "DATA_PORTABILITY_EXPORT_PDF_REPORT", {
     client_count: data.clients.length,
@@ -694,36 +1448,27 @@ export async function exportWorkshopPdfReport(businessId: string, businessName: 
   });
 }
 
-// -----------------------------------------------------------------------------
-// 3. EXPORTS INDIVIDUELS EXCEL / CSV
-// -----------------------------------------------------------------------------
+export async function exportWorkshopHtmlPortal(businessId: string, businessName: string): Promise<void> {
+  const data = await fetchFullWorkshopData(businessId);
+  const html = generateFullWorkshopHtmlContent(data, businessName);
+  const blob = new Blob([html], { type: "text/html;charset=utf-8" });
+  downloadBlob(blob, `portail_atelier_${sanitizeFilename(businessName)}_${new Date().toISOString().slice(0, 10)}.html`);
+}
 
 export async function exportClientsCsv(businessId: string, businessName: string): Promise<void> {
-  const data = await fetchFullWorkshopData(businessId);
-  const csv = generateClientsCsvContent(data.clients);
-  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
-  downloadBlob(blob, `couturpro_clients_${sanitizeFilename(businessName)}_${new Date().toISOString().slice(0, 10)}.csv`);
+  return exportCategoryData("clients", "csv", businessId, businessName);
 }
 
 export async function exportMeasurementsCsv(businessId: string, businessName: string): Promise<void> {
-  const data = await fetchFullWorkshopData(businessId);
-  const csv = generateMeasurementsCsvContent(data.measurementSets);
-  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
-  downloadBlob(blob, `couturpro_mesures_${sanitizeFilename(businessName)}_${new Date().toISOString().slice(0, 10)}.csv`);
+  return exportCategoryData("measurements", "csv", businessId, businessName);
 }
 
 export async function exportOrdersCsv(businessId: string, businessName: string): Promise<void> {
-  const data = await fetchFullWorkshopData(businessId);
-  const csv = generateOrdersCsvContent(data.orders);
-  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
-  downloadBlob(blob, `couturpro_commandes_${sanitizeFilename(businessName)}_${new Date().toISOString().slice(0, 10)}.csv`);
+  return exportCategoryData("orders", "csv", businessId, businessName);
 }
 
 export async function exportExpensesCsv(businessId: string, businessName: string): Promise<void> {
-  const data = await fetchFullWorkshopData(businessId);
-  const csv = generateExpensesCsvContent(data.expenses);
-  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
-  downloadBlob(blob, `couturpro_charges_depenses_${sanitizeFilename(businessName)}_${new Date().toISOString().slice(0, 10)}.csv`);
+  return exportCategoryData("expenses", "csv", businessId, businessName);
 }
 
 export async function exportCompleteWorkshopJson(businessId: string, businessName: string): Promise<void> {
@@ -748,71 +1493,48 @@ export async function exportCompleteWorkshopJson(businessId: string, businessNam
     ...data,
   };
 
-  const jsonStr = JSON.stringify(jsonArchive, null, 2);
-  const blob = new Blob([jsonStr], { type: "application/json;charset=utf-8" });
-  downloadBlob(blob, `couturpro_sauvegarde_${sanitizeFilename(businessName)}_${new Date().toISOString().slice(0, 10)}.json`);
+  const blob = new Blob([JSON.stringify(jsonArchive, null, 2)], { type: "application/json;charset=utf-8" });
+  downloadBlob(blob, `sauvegarde_atelier_${sanitizeFilename(businessName)}_${new Date().toISOString().slice(0, 10)}.json`);
+
+  await logAudit(businessId, "DATA_PORTABILITY_EXPORT_JSON", {
+    client_count: data.clients.length,
+    order_count: data.orders.length,
+  });
 }
 
-export async function exportSingleClientJson(clientId: string, clientName: string, businessId?: string): Promise<void> {
-  const isOnline = typeof navigator !== "undefined" ? navigator.onLine : true;
-  let clientData: ClientRow | null = null;
-  let ordersData: OrderRow[] = [];
-  let setsData: FullMeasurementSetRow[] = [];
-  let apptsData: AppointmentRow[] = [];
+export async function exportSingleClientJson(clientId: string, clientName: string): Promise<void> {
+  const [clientRes, setsRes, ordersRes] = await Promise.all([
+    supabase.from("clients").select("*").eq("id", clientId).maybeSingle(),
+    supabase.from("measurement_sets").select("*, measurement_values(*)").eq("client_id", clientId),
+    supabase.from("orders").select("*").eq("client_id", clientId),
+  ]);
 
-  if (isOnline) {
-    try {
-      const [cRes, oRes, sRes, aRes] = await Promise.all([
-        supabase.from("clients").select("*").eq("id", clientId).maybeSingle(),
-        supabase.from("orders").select("*, payments(*)").eq("client_id", clientId),
-        supabase.from("measurement_sets").select("*, measurement_values(*)").eq("client_id", clientId),
-        supabase.from("appointments").select("*").eq("client_id", clientId),
-      ]);
-      clientData = cRes.data as ClientRow;
-      ordersData = (oRes.data as OrderRow[]) || [];
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      setsData = (sRes.data as any[]) || [];
-      apptsData = (aRes.data as AppointmentRow[]) || [];
-    } catch {
-      clientData = await getLocalItem<ClientRow>("clients", clientId);
-      const allOrders = await getAllLocalItems<OrderRow>("orders");
-      ordersData = allOrders.filter((o) => o.client_id === clientId);
-      const allSets = await getAllLocalItems<FullMeasurementSetRow>("measurement_sets");
-      setsData = allSets.filter((s) => s.client_id === clientId);
-      const allAppts = await getAllLocalItems<AppointmentRow>("appointments");
-      apptsData = allAppts.filter((a) => a.client_id === clientId);
-    }
-  } else {
-    clientData = await getLocalItem<ClientRow>("clients", clientId);
-    const allOrders = await getAllLocalItems<OrderRow>("orders");
-    ordersData = allOrders.filter((o) => o.client_id === clientId);
-    const allSets = await getAllLocalItems<FullMeasurementSetRow>("measurement_sets");
-    setsData = allSets.filter((s) => s.client_id === clientId);
-    const allAppts = await getAllLocalItems<AppointmentRow>("appointments");
-    apptsData = allAppts.filter((a) => a.client_id === clientId);
+  let clientData = clientRes.data;
+  let setsData = setsRes.data || [];
+  let ordersData = ordersRes.data || [];
+
+  if (!clientData) {
+    const localClients = await getAllLocalItems<ClientRow>("clients");
+    clientData = localClients.find((c) => c.id === clientId) || null;
+
+    const localSets = await getAllLocalItems<FullMeasurementSetRow>("measurement_sets");
+    setsData = localSets.filter((s) => s.client_id === clientId);
+
+    const localOrders = await getAllLocalItems<OrderRow>("orders");
+    ordersData = localOrders.filter((o) => o.client_id === clientId);
   }
 
-  const dossier = {
+  const exportPayload = {
     metadata: {
       application: "CouturPro",
-      type: "Fiche Personnelle Client (RGPD Art. 15)",
-      generated_at: new Date().toISOString(),
-      client_id: clientId,
-      client_name: clientName,
+      compliance: "RGPD Art. 20 (Droit d'accès et portabilité)",
+      exported_at: new Date().toISOString(),
     },
     client: clientData,
-    mesures: setsData,
-    commandes_et_paiements: ordersData,
-    rendez_vous: apptsData,
+    measurement_sets: setsData,
+    orders: ordersData,
   };
 
-  const jsonStr = JSON.stringify(dossier, null, 2);
-  const blob = new Blob([jsonStr], { type: "application/json;charset=utf-8" });
-  downloadBlob(blob, `fiche_client_${sanitizeFilename(clientName)}_${new Date().toISOString().slice(0, 10)}.json`);
-  if (businessId) {
-    await logAudit(businessId, "DATA_ACCESS_EXPORT_SINGLE_CLIENT", {
-      client_id: clientId,
-      client_name: clientName,
-    });
-  }
+  const blob = new Blob([JSON.stringify(exportPayload, null, 2)], { type: "application/json;charset=utf-8" });
+  downloadBlob(blob, `dossier_client_${sanitizeFilename(clientName)}_${new Date().toISOString().slice(0, 10)}.json`);
 }
