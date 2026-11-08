@@ -84,29 +84,50 @@ export interface CompleteWorkshopData {
   catalogModels: Array<Record<string, unknown>>;
 }
 
+async function safeGetLocalItems<T>(storeName: string): Promise<T[]> {
+  try {
+    return await getAllLocalItems<T>(storeName);
+  } catch {
+    return [];
+  }
+}
+
+async function safeGetLocalItem<T>(storeName: string, id: string): Promise<T | null> {
+  try {
+    return await getLocalItem<T>(storeName, id);
+  } catch {
+    return null;
+  }
+}
+
 export async function fetchFullWorkshopData(businessId: string): Promise<CompleteWorkshopData> {
-  // On utilise les requêtes officielles de l'application (fetchOrders, fetchClients, fetchAllMeasurementSets)
-  // pour garantir que les paiements, acomptes, soldes, clients et valeurs sont 100% exacts, enrichis et vérifiés.
-  const [biz, clientsList, ordersList, setsList, apptsList, localExpenses] = await Promise.all([
-    getLocalItem<Record<string, unknown>>("business", businessId),
-    fetchClients().catch(() => [] as ClientRow[]),
-    fetchOrders().catch(() => [] as OrderRow[]),
-    fetchAllMeasurementSets().catch(() => [] as FullMeasurementSetRow[]),
-    fetchAppointments().catch(() => [] as AppointmentRow[]),
-    getAllLocalItems<ExpenseRow>("expenses").catch(() => [] as ExpenseRow[]),
+  let bizData: Record<string, unknown> | null = null;
+  try {
+    bizData = await safeGetLocalItem<Record<string, unknown>>("workshop_data", businessId);
+  } catch {
+    bizData = null;
+  }
+
+  // 1. Récupération 100% sécurisée des données avec fallback local systématique
+  const [clientsList, ordersList, setsList, apptsList, localExpenses] = await Promise.all([
+    fetchClients().catch(async () => safeGetLocalItems<ClientRow>("clients")),
+    fetchOrders().catch(async () => safeGetLocalItems<OrderRow>("orders")),
+    fetchAllMeasurementSets().catch(async () => safeGetLocalItems<FullMeasurementSetRow>("measurement_sets")),
+    fetchAppointments().catch(async () => safeGetLocalItems<AppointmentRow>("appointments")),
+    safeGetLocalItems<ExpenseRow>("expenses"),
   ]);
 
   let serverExpenses: ExpenseRow[] = [];
-  let businessData = biz;
+  let businessData = bizData;
 
   if (typeof navigator === "undefined" || navigator.onLine) {
     try {
       const [bizRes, expRes] = await Promise.all([
-        supabase.from("businesses").select("*").eq("id", businessId).maybeSingle(),
-        supabase.from("expenses").select("*").eq("business_id", businessId).order("expense_date", { ascending: false }),
+        supabase.from("businesses").select("*").eq("id", businessId).maybeSingle().catch(() => ({ data: null })),
+        supabase.from("expenses").select("*").eq("business_id", businessId).order("expense_date", { ascending: false }).catch(() => ({ data: null })),
       ]);
-      if (bizRes.data) businessData = bizRes.data as Record<string, unknown>;
-      if (expRes.data) serverExpenses = (expRes.data as ExpenseRow[]) || [];
+      if (bizRes && bizRes.data) businessData = bizRes.data as Record<string, unknown>;
+      if (expRes && expRes.data) serverExpenses = (expRes.data as ExpenseRow[]) || [];
     } catch {
       // Ignorer si échec réseau
     }
