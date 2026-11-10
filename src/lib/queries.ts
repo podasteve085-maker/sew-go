@@ -15,6 +15,7 @@ import {
   removeSyncQueueItem,
 } from "./offline-storage";
 import { reconcileAppointmentRows } from "./appointment-reconciliation";
+import { isSubscriptionExpired } from "./quotas";
 
 // ─── Helper : timeout strict pour les appels Supabase en écriture ──────────────
 // Garantit que les mutations ne pendent jamais plus de 3 secondes.
@@ -1643,11 +1644,33 @@ export async function saveCatalogModelOffline(
 // OPÉRATIONS D'ÉCRITURE OFFLINE-FIRST (Clients, Commandes, etc.)
 // ============================================================
 
+// Anti-fraude offline : empêche toute écriture ou modification si l'abonnement est expiré
+function assertOfflineWriteAllowed(entityName: string) {
+  if (typeof window === "undefined") return;
+  try {
+    const cachedStr = localStorage.getItem("couturpro_cached_business");
+    if (!cachedStr) return;
+    const b = JSON.parse(cachedStr);
+    if (b.is_admin === true) return;
+    if (isSubscriptionExpired(b)) {
+      throw new Error(
+        `Action bloquée : votre Pass Atelier a expiré. Votre atelier est en mode consultation (lecture seule). Toutes vos données restent protégées et consultables. Veuillez réactiver votre forfait pour continuer à modifier vos ${entityName}.`
+      );
+    }
+  } catch (err: any) {
+    if (err.message && err.message.startsWith("Action bloquée")) {
+      throw err;
+    }
+  }
+}
+
+
 export async function saveClientOffline(
   clientData: Record<string, unknown>,
   isNew: boolean,
   existingId?: string,
 ): Promise<ClientRow> {
+  assertOfflineWriteAllowed("clients");
   const isOnline = typeof navigator !== "undefined" ? navigator.onLine : true;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const cData: Record<string, any> = clientData;
@@ -1792,6 +1815,7 @@ export async function saveOrderOffline(
   isNew: boolean,
   existingId?: string,
 ): Promise<OrderRow> {
+  assertOfflineWriteAllowed("commandes");
   const isOnline = typeof navigator !== "undefined" ? navigator.onLine : true;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const oData: Record<string, any> = orderData;
@@ -2057,6 +2081,7 @@ export async function saveMeasurementSetOffline(
   isNew: boolean = true,
   existingId?: string,
 ): Promise<FullMeasurementSetRow> {
+  assertOfflineWriteAllowed("mesures");
   const isOnline = typeof navigator !== "undefined" ? navigator.onLine : true;
   const setId = existingId || (setData["id"] as string) || uuid();
 
@@ -2199,6 +2224,7 @@ export async function saveAppointmentOffline(
   isNew: boolean,
   existingId?: string,
 ): Promise<AppointmentRow> {
+  assertOfflineWriteAllowed("rendez-vous");
   const isOnline = typeof navigator !== "undefined" ? navigator.onLine : true;
   const apptId = existingId || (data["id"] as string) || uuid();
 

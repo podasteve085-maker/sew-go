@@ -80,6 +80,18 @@ function SubscriptionPage() {
       const res = data as { success: boolean; message: string; plan?: string };
 
       if (res.success) {
+        if (typeof window !== "undefined") {
+          try {
+            const cachedStr = localStorage.getItem("couturpro_cached_business");
+            if (cachedStr) {
+              const cached = JSON.parse(cachedStr);
+              if (res.plan) cached.plan = res.plan;
+              cached.plan_status = "active";
+              if ((res as any).plan_expires_at) cached.plan_expires_at = (res as any).plan_expires_at;
+              localStorage.setItem("couturpro_cached_business", JSON.stringify(cached));
+            }
+          } catch {}
+        }
         toast.success(res.message || "Licence activée avec succès !");
         setLicenseKeyInput("");
         window.location.reload();

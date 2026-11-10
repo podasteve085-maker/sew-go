@@ -108,6 +108,39 @@ export const FREE_LIMITS = {
  * 
  * Pour les comptes non-administrateurs, vérifie si l'atelier a un Pass Pro valide et non expiré.
  */
+
+/**
+ * Anti-Fraude Temporelle Hors-Ligne (Monotonic Heartbeat Clock)
+ * Empêche le contournement de l'échéance des forfaits (30j, 90j, 365j) en mode offline-first.
+ * Si un utilisateur recule manuellement l'horloge de son appareil dans le passé,
+ * le système détecte l'écart et verrouille immédiatement la date effective au plus
+ * haut timestamp jamais enregistré localement.
+ */
+export function getEffectiveNow(): number {
+  const rawNow = Date.now();
+  if (typeof window === "undefined") return rawNow;
+
+  let lastSeen = 0;
+  try {
+    lastSeen = parseInt(localStorage.getItem("couturpro_last_active_time") || "0", 10);
+  } catch {
+    // ignore
+  }
+
+  // Protection anti-recul d'horloge : si l'horloge est reculée, on fige le temps
+  const effective = Math.max(rawNow, lastSeen);
+
+  if (rawNow >= lastSeen) {
+    try {
+      localStorage.setItem("couturpro_last_active_time", String(rawNow));
+    } catch {
+      // ignore
+    }
+  }
+
+  return effective;
+}
+
 export function isProOrAdmin(business: Business | null | undefined): boolean {
   if (!business) return false;
   
@@ -123,15 +156,16 @@ export function isProOrAdmin(business: Business | null | undefined): boolean {
   }
 
   // Si le plan est payant, vérifier si la date d'expiration est encore valide
+  const effectiveNow = getEffectiveNow();
   if (business.plan_expires_at) {
     const expiresTime = new Date(business.plan_expires_at).getTime();
     if (!isNaN(expiresTime)) {
-      return expiresTime > Date.now();
+      return expiresTime > effectiveNow;
     }
   }
 
-  // Si plan payant sans date d'expiration définie (cas exceptionnel), considérer actif
-  return true;
+  // Sécurité anti-fraude : un plan payant sans date d'expiration en cache ne peut être considéré actif
+  return false;
 }
 
 /**
@@ -193,11 +227,13 @@ export function getSubscriptionStatus(business: Business | null | undefined): {
     const expDate = new Date(business.plan_expires_at);
     const expTime = expDate.getTime();
     if (!isNaN(expTime)) {
-      const diffMs = expTime - Date.now();
+      const diffMs = expTime - getEffectiveNow();
       daysRemaining = Math.max(0, Math.ceil(diffMs / (1000 * 60 * 60 * 24)));
       isExpired = diffMs <= 0;
       formattedExpiresAt = expDate.toLocaleDateString("fr-FR");
     }
+  } else {
+    isExpired = true;
   }
 
   return {
@@ -214,13 +250,15 @@ export function getSubscriptionStatus(business: Business | null | undefined): {
 export function isSubscriptionExpired(business: Business | null | undefined): boolean {
   if (!business || business.is_admin === true) return false;
   if (!business.plan || business.plan === "free") return false;
+  const effectiveNow = getEffectiveNow();
   if (business.plan_expires_at) {
     const time = new Date(business.plan_expires_at).getTime();
     if (!isNaN(time)) {
-      return time <= Date.now();
+      return time <= effectiveNow;
     }
   }
-  return false;
+  // Si forfait payant sans date d'expiration connue en cache, sécurité anti-fraude stricte
+  return true;
 }
 
 /**

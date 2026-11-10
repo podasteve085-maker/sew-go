@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { setLocalItem } from "@/lib/offline-storage";
 import { supabase } from "@/integrations/supabase/client";
-import type { SubscriptionPlan, SubscriptionStatus } from "@/lib/quotas";
+import { getEffectiveNow, isSubscriptionExpired, type SubscriptionPlan, type SubscriptionStatus } from "@/lib/quotas";
 
 export type Business = {
   id: string;
@@ -32,8 +32,16 @@ export function useBusiness() {
       const getCached = (): Business | null => {
         if (typeof window === "undefined") return null;
         try {
-          const cached = localStorage.getItem("couturpro_cached_business");
-          return cached ? (JSON.parse(cached) as Business) : null;
+          const cachedStr = localStorage.getItem("couturpro_cached_business");
+          if (!cachedStr) return null;
+          const cached = JSON.parse(cachedStr) as Business;
+          // Sécurité anti-fraude offline : recalcul dynamique strict du statut
+          if (cached && !cached.is_admin && cached.plan && cached.plan !== "free") {
+            if (isSubscriptionExpired(cached)) {
+              cached.plan_status = "expired";
+            }
+          }
+          return cached;
         } catch {
           return null;
         }
@@ -86,8 +94,10 @@ export function useBusiness() {
         let planStatus: SubscriptionStatus = "active";
         if (rawData["is_admin"]) {
           planStatus = "admin";
-        } else if (plan !== "free" && planExpiresAt && new Date(planExpiresAt).getTime() <= Date.now()) {
-          planStatus = "expired";
+        } else if (plan !== "free") {
+          if (!planExpiresAt || new Date(planExpiresAt).getTime() <= getEffectiveNow()) {
+            planStatus = "expired";
+          }
         }
 
         const result: Business = {
