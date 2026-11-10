@@ -120,6 +120,20 @@ export function useBusiness() {
 
         // Persister dans IndexedDB workshop_data pour disponibilite hors-ligne complete (nouveau telephone)
         setLocalItem("workshop_data", { id: result.id, ...result }).catch(() => {});
+
+        // Sauvegarde de l'identite dans le coffre-fort d'authentification hors-ligne
+        import("@/lib/offline-auth").then(({ saveOfflineCredentials }) => {
+          saveOfflineCredentials({
+            identifier: result.phone || (rawData["whatsapp"] as string) || "",
+            userId: userId || result.owner_id,
+            businessId: result.id,
+            businessName: result.name,
+            ownerName: result.owner_name,
+            phone: result.phone,
+            business: result,
+          }).catch(() => {});
+        }).catch(() => {});
+
         return result;
       } catch (err) {
         // En cas d'échec réseau, renvoyer l'atelier mis en cache sans jamais bloquer l'interface

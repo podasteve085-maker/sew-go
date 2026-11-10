@@ -73,6 +73,14 @@ async function runPendingSync(): Promise<number> {
   let syncedCount = 0;
 
   try {
+    // 0. Synchronisation automatique des mots de passe mis a jour hors-ligne
+    try {
+      const { syncPendingOfflinePasswords } = await import("@/lib/offline-auth");
+      await syncPendingOfflinePasswords();
+    } catch (e) {
+      console.warn("[Sync Engine] Erreur synchro mot de passe hors-ligne :", e);
+    }
+
     // Acquire the in-tab guard before the first await so two callers cannot
     // both read and replay the same queue at once.
     const queue = await getPendingSyncQueue();

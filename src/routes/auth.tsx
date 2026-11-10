@@ -26,6 +26,12 @@ import { toast } from "sonner";
 import heroImage from "@/assets/hero-atelier.jpg";
 import { supabase } from "@/integrations/supabase/client";
 import { getPhoneValidationStatus, phoneToInternalEmail, isEmailIdentifier } from "@/lib/phone-utils";
+import {
+  verifyAndLoginOffline,
+  resetPasswordOffline,
+  saveOfflineCredentials,
+  isNetworkOrOfflineError,
+} from "@/lib/offline-auth";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
