@@ -74,13 +74,13 @@ function AppointmentsPage() {
   const { data: business } = useBusiness();
   const isPro = isProOrAdmin(business);
   const isExpired = isSubscriptionExpired(business);
-  const totalAppointments = (appointments.data ?? []).length;
-  const appointmentQuota = checkAppointmentQuota(business, totalAppointments);
   const appointments = useQuery({
     queryKey: ["appointments"],
     queryFn: () => fetchAppointments(),
     enabled: true,
   });
+  const totalAppointments = (appointments.data ?? []).length;
+  const appointmentQuota = checkAppointmentQuota(business, totalAppointments);
 
   const groups = useMemo(() => {
     const all = appointments.data ?? [];
@@ -543,7 +543,7 @@ function AppointmentDialog({
 
       onOpenChange(false);
     },
-    onError: () => toast.error("Enregistrement impossible"),
+    onError: (err: any) => toast.error(err?.message || "Enregistrement impossible"),
   });
 
   return (
@@ -690,7 +690,7 @@ function EditAppointmentDialog({
       toast.success("Rendez-vous modifié");
       onOpenChange(false);
     },
-    onError: () => toast.error("Modification impossible"),
+    onError: (err: any) => toast.error(err?.message || "Modification impossible"),
   });
 
   return (
