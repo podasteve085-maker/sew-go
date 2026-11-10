@@ -1,4 +1,7 @@
 import { useState, useMemo } from "react";
+import { useBusiness } from "@/hooks/use-business";
+import { isProOrAdmin, isSubscriptionExpired } from "@/lib/quotas";
+import { UpgradeDialog } from "@/components/upgrade-dialog";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Plus,
@@ -13,6 +16,8 @@ import {
   Edit2,
   Share2,
   Check,
+  Crown,
+  Eye,
 } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -59,6 +64,11 @@ export function ExpensesManagement({
   const [selectedCategory, setSelectedCategory] = useState<string>("all");
   const [searchTerm, setSearchTerm] = useState("");
   const [copied, setCopied] = useState(false);
+  const { data: business } = useBusiness();
+  const isPro = isProOrAdmin(business);
+  const isExpired = isSubscriptionExpired(business);
+  const [upgradeOpen, setUpgradeOpen] = useState(false);
+  const [upgradeReason, setUpgradeReason] = useState("");
 
   // Requête des dépenses pour le mois sélectionné
   const { data: expenses = [], isLoading, refetch } = useQuery({
@@ -148,6 +158,11 @@ export function ExpensesManagement({
 
   // Suppression d'une dépense
   const handleDelete = async (id: string, title: string) => {
+    if (isExpired && !isPro) {
+      setUpgradeReason("Mode Consultation actif. Vos charges passées sont archivées et protégées contre la suppression. Réactivez votre Pass Atelier pour gérer vos charges.");
+      setUpgradeOpen(true);
+      return;
+    }
     if (!window.confirm(`Confirmer la suppression de la dépense "${title}" ?`)) {
       return;
     }
@@ -218,13 +233,27 @@ export function ExpensesManagement({
           <Button
             size="sm"
             onClick={() => {
+              if (isExpired && !isPro) {
+                setUpgradeReason("Mode Consultation actif. Vos charges passées restent consultables. Réactivez votre Pass Atelier pour enregistrer de nouvelles dépenses.");
+                setUpgradeOpen(true);
+                return;
+              }
               setExpenseToEdit(null);
               setDialogOpen(true);
             }}
             className="flex-1 sm:flex-initial gap-1.5 bg-primary text-primary-foreground font-semibold"
           >
-            <Plus className="size-4" />
-            <span>Ajouter une charge</span>
+            {isExpired && !isPro ? (
+              <>
+                <Eye className="size-4" />
+                <span>Mode Consultation</span>
+              </>
+            ) : (
+              <>
+                <Plus className="size-4" />
+                <span>Ajouter une charge</span>
+              </>
+            )}
           </Button>
         </div>
       </div>
@@ -479,6 +508,11 @@ export function ExpensesManagement({
                         size="icon"
                         className="size-8"
                         onClick={() => {
+                          if (isExpired && !isPro) {
+                            setUpgradeReason("Mode Consultation actif. Vos charges passées sont protégées. Réactivez votre Pass Atelier pour modifier vos dépenses.");
+                            setUpgradeOpen(true);
+                            return;
+                          }
                           setExpenseToEdit(exp);
                           setDialogOpen(true);
                         }}

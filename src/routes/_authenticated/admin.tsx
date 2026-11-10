@@ -10,7 +10,20 @@ import {
   Sparkles,
   Flame,
   Award,
+  KeyRound,
+  Plus,
+  Copy,
+  Check,
+  MessageCircle,
+  Clock,
+  ShieldCheck,
+  CheckCircle2,
+  XCircle,
+  Loader2,
 } from "lucide-react";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
 
 import { supabase } from "@/integrations/supabase/client";
@@ -39,6 +52,21 @@ export const Route = createFileRoute("/_authenticated/admin")({
   component: AdminPage,
 });
 
+
+type AdminLicenseRow = {
+  id: string;
+  license_key: string;
+  plan: SubscriptionPlan;
+  duration_days: number;
+  assigned_phone: string | null;
+  assigned_business_id: string | null;
+  status: "active" | "used" | "revoked" | "expired";
+  used_by_business_id: string | null;
+  used_at: string | null;
+  notes: string | null;
+  created_at: string;
+};
+
 type BusinessRow = {
   id: string;
   name: string;
@@ -60,6 +88,91 @@ function AdminPage() {
   const [filterPlan, setFilterPlan] = useState<string>("all");
 
   const isAdmin = currentBusiness?.is_admin === true;
+  const [activeTab, setActiveTab] = useState<"ateliers" | "licences">("ateliers");
+  const [generateDialogOpen, setGenerateDialogOpen] = useState(false);
+  const [newPlan, setNewPlan] = useState<"monthly" | "quarterly" | "yearly">("monthly");
+  const [assignedPhone, setAssignedPhone] = useState("");
+  const [targetBusinessId, setTargetBusinessId] = useState("");
+  const [licenseNotes, setLicenseNotes] = useState("");
+  const [generatedKey, setGeneratedKey] = useState<string | null>(null);
+  const [copiedKey, setCopiedKey] = useState(false);
+
+  // 1b. Liste des licences générées
+  const licensesQuery = useQuery({
+    queryKey: ["admin", "licenses"],
+    queryFn: async (): Promise<AdminLicenseRow[]> => {
+      const { data, error } = await (supabase.from("licenses") as any)
+        .select("*")
+        .order("created_at", { ascending: false });
+
+      if (error) {
+        // Table non encore migrée ou vide
+        return [];
+      }
+      return (data ?? []) as AdminLicenseRow[];
+    },
+    enabled: isAdmin,
+  });
+
+  // Mutation génération de clé de licence
+  const generateLicenseMutation = useMutation({
+    mutationFn: async () => {
+      const { data, error } = await (supabase.rpc as any)("admin_generate_license_key", {
+        p_plan: newPlan,
+        p_duration_days: newPlan === "monthly" ? 30 : newPlan === "quarterly" ? 90 : 365,
+        p_assigned_phone: assignedPhone.trim() || null,
+        p_assigned_business_id: targetBusinessId || null,
+        p_notes: licenseNotes.trim() || null,
+      });
+
+      if (error) throw error;
+      return data;
+    },
+    onSuccess: (data: any) => {
+      queryClient.invalidateQueries({ queryKey: ["admin", "licenses"] });
+      setGeneratedKey(data.license_key);
+      toast.success("Clé de licence générée avec succès !");
+    },
+    onError: (err: any) => {
+      toast.error(err?.message || "Erreur lors de la génération de la clé.");
+    },
+  });
+
+  // Mutation activation directe depuis l'admin (cumul des jours)
+  const directActivateMutation = useMutation({
+    mutationFn: async ({
+      businessId,
+      plan,
+      durationDays,
+    }: {
+      businessId: string;
+      plan: string;
+      durationDays: number;
+    }) => {
+      const { data, error } = await (supabase.rpc as any)("admin_activate_business_plan", {
+        p_business_id: businessId,
+        p_plan: plan,
+        p_duration_days: durationDays,
+      });
+
+      if (error) {
+        // Fallback si RPC pas encore dispo
+        return updateBusinessMutation.mutateAsync({
+          businessId,
+          plan: plan as SubscriptionPlan,
+        });
+      }
+      return data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["admin", "businesses"] });
+      toast.success("Forfait de l'atelier mis à jour et prolongé avec succès !");
+    },
+    onError: (err: any) => {
+      toast.error(err?.message || "Erreur lors de la mise à jour de l'atelier.");
+    },
+  });
+
 
   // 1. Liste de tous les ateliers de la plateforme
   const businessesQuery = useQuery({
@@ -213,16 +326,29 @@ function AdminPage() {
           </div>
         </div>
 
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => {
-            businessesQuery.refetch();
-            statsQuery.refetch();
-          }}
-        >
-          <RefreshCw className="mr-1.5 size-3.5" /> Actualiser
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button
+            size="sm"
+            onClick={() => {
+              setGeneratedKey(null);
+              setGenerateDialogOpen(true);
+            }}
+            className="font-bold shadow-xs"
+          >
+            <Plus className="mr-1.5 size-4" /> Générer une Licence
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              businessesQuery.refetch();
+              statsQuery.refetch();
+              licensesQuery.refetch();
+            }}
+          >
+            <RefreshCw className="mr-1.5 size-3.5" /> Actualiser
+          </Button>
+        </div>
       </div>
 
       {/* KPI Plateforme */}
@@ -293,8 +419,22 @@ function AdminPage() {
             ))}
           </div>
         </div>
+      </div>
 
-        {/* Tableau des ateliers */}
+      {/* Onglets Ateliers & Licences */}
+      <Tabs value={activeTab} onValueChange={(v: any) => setActiveTab(v)} className="space-y-4">
+        <TabsList className="bg-muted p-1 rounded-xl">
+          <TabsTrigger value="ateliers" className="font-bold text-xs sm:text-sm">
+            Ateliers & Abonnements ({businesses.length})
+          </TabsTrigger>
+          <TabsTrigger value="licences" className="font-bold text-xs sm:text-sm">
+            <KeyRound className="mr-1.5 size-3.5" /> Clés de Licences ({(licensesQuery.data ?? []).length})
+          </TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="ateliers" className="space-y-4">
+          <div className="card-soft p-4 space-y-4">
+            {/* Tableau des ateliers */}
         <div className="overflow-x-auto rounded-lg border border-border">
           <table className="w-full text-left text-xs">
             <thead className="bg-muted/60 text-muted-foreground">
@@ -378,33 +518,36 @@ function AdminPage() {
                             <DropdownMenuLabel>Gestion du Forfait</DropdownMenuLabel>
                             <DropdownMenuItem
                               onClick={() =>
-                                updateBusinessMutation.mutate({
+                                directActivateMutation.mutate({
                                   businessId: b.id,
                                   plan: "monthly",
+                                  durationDays: 30,
                                 })
                               }
                             >
-                              ⭐ Activer Pro Mensuel (+30j)
+                              ⭐ Activer / Prolonger Pro Mensuel (+30j)
                             </DropdownMenuItem>
                             <DropdownMenuItem
                               onClick={() =>
-                                updateBusinessMutation.mutate({
+                                directActivateMutation.mutate({
                                   businessId: b.id,
                                   plan: "quarterly",
+                                  durationDays: 90,
                                 })
                               }
                             >
-                              🔥 Activer Pro Trimestriel (+90j)
+                              🔥 Activer / Prolonger Pass Saison (+90j)
                             </DropdownMenuItem>
                             <DropdownMenuItem
                               onClick={() =>
-                                updateBusinessMutation.mutate({
+                                directActivateMutation.mutate({
                                   businessId: b.id,
                                   plan: "yearly",
+                                  durationDays: 365,
                                 })
                               }
                             >
-                              ✨ Activer Pro Annuel (+365j)
+                              ✨ Activer / Prolonger Pass VIP (+365j)
                             </DropdownMenuItem>
                             <DropdownMenuItem
                               onClick={() =>
@@ -442,6 +585,304 @@ function AdminPage() {
           </table>
         </div>
       </div>
+      </TabsContent>
+
+      {/* Onglet 2 : Gestion des Clés de Licence */}
+      <TabsContent value="licences" className="space-y-4">
+        <div className="card-soft p-5 border border-border space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div>
+              <h2 className="font-display font-bold text-lg">Registre des Clés de Licence</h2>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                Clés d'activation cryptographiques infalsifiables. Chaque clé ne peut être utilisée qu'une seule fois.
+              </p>
+            </div>
+            <Button
+              size="sm"
+              onClick={() => {
+                setGeneratedKey(null);
+                setGenerateDialogOpen(true);
+              }}
+              className="font-bold shadow-xs shrink-0"
+            >
+              <Plus className="mr-1.5 size-4" /> Nouvelle Clé
+            </Button>
+          </div>
+
+          <div className="overflow-x-auto rounded-xl border border-border bg-card">
+            <table className="w-full text-left text-xs">
+              <thead className="border-b border-border bg-muted/50 font-bold uppercase tracking-wider text-muted-foreground text-[10px]">
+                <tr>
+                  <th className="p-3">Clé de Licence</th>
+                  <th className="p-3">Formule</th>
+                  <th className="p-3">Téléphone Scellé</th>
+                  <th className="p-3">Statut</th>
+                  <th className="p-3">Date Création</th>
+                  <th className="p-3">Date Utilisation</th>
+                  <th className="p-3 text-right">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border">
+                {licensesQuery.isLoading ? (
+                  <tr>
+                    <td colSpan={7} className="p-8 text-center text-muted-foreground">
+                      Chargement des licences…
+                    </td>
+                  </tr>
+                ) : (licensesQuery.data ?? []).length === 0 ? (
+                  <tr>
+                    <td colSpan={7} className="p-8 text-center text-muted-foreground">
+                      Aucune clé de licence générée pour le moment. Cliquez sur « Nouvelle Clé » pour en créer une.
+                    </td>
+                  </tr>
+                ) : (
+                  (licensesQuery.data ?? []).map((lic) => {
+                    const isUsed = lic.status === "used";
+                    const isRevoked = lic.status === "revoked";
+
+                    return (
+                      <tr key={lic.id} className="hover:bg-muted/30 transition-colors">
+                        <td className="p-3 font-mono font-bold text-xs text-foreground tracking-wider select-all">
+                          {lic.license_key}
+                        </td>
+                        <td className="p-3">
+                          <span className="rounded bg-primary/10 text-primary px-2 py-0.5 font-bold uppercase text-[10px]">
+                            {lic.plan} ({lic.duration_days}j)
+                          </span>
+                        </td>
+                        <td className="p-3 text-muted-foreground">
+                          {lic.assigned_phone ? (
+                            <span className="inline-flex items-center gap-1 text-foreground font-semibold">
+                              <ShieldCheck className="size-3 text-emerald-600" /> {lic.assigned_phone}
+                            </span>
+                          ) : (
+                            <span className="text-muted-foreground italic">Universelle (tout atelier)</span>
+                          )}
+                        </td>
+                        <td className="p-3">
+                          {isUsed ? (
+                            <span className="inline-flex items-center gap-1 rounded bg-muted text-muted-foreground px-2 py-0.5 font-semibold text-[10px]">
+                              <CheckCircle2 className="size-3 text-emerald-600" /> Consommée
+                            </span>
+                          ) : isRevoked ? (
+                            <span className="inline-flex items-center gap-1 rounded bg-destructive/15 text-destructive px-2 py-0.5 font-semibold text-[10px]">
+                              <XCircle className="size-3" /> Révoquée
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 rounded bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 px-2 py-0.5 font-bold text-[10px]">
+                              ● Active & Valide
+                            </span>
+                          )}
+                        </td>
+                        <td className="p-3 text-muted-foreground">
+                          {dateFr(lic.created_at)}
+                        </td>
+                        <td className="p-3 text-muted-foreground">
+                          {lic.used_at ? dateFr(lic.used_at) : "—"}
+                        </td>
+                        <td className="p-3 text-right">
+                          <div className="flex items-center justify-end gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                navigator.clipboard.writeText(lic.license_key);
+                                toast.success("Clé copiée dans le presse-papier !");
+                              }}
+                              className="size-7 inline-flex items-center justify-center rounded-lg border border-border hover:bg-muted text-muted-foreground hover:text-foreground"
+                              title="Copier la clé"
+                            >
+                              <Copy className="size-3.5" />
+                            </button>
+                            {lic.assigned_phone && !isUsed && (
+                              <a
+                                href={`https://wa.me/${lic.assigned_phone.replace(/[^0-9]/g, "")}?text=${encodeURIComponent(
+                                  `Bonjour,\nVoici votre Clé de Licence officielle CouturPro (*${lic.plan.toUpperCase()} - ${lic.duration_days} jours*) :\n\n🔑 *${lic.license_key}*\n\nPour l'activer : rendez-vous dans l'application CouturPro > menu « Mon Abonnement » > entrez cette clé dans l'encadré « Clé de Licence » et validez. Merci de votre confiance ! ✂️`
+                                )}`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="size-7 inline-flex items-center justify-center rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white"
+                                title="Envoyer par WhatsApp à l'artisan"
+                              >
+                                <MessageCircle className="size-3.5" />
+                              </a>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </TabsContent>
+      </Tabs>
+
+      {/* Boîte de dialogue : Génération de Clé de Licence */}
+      <Dialog open={generateDialogOpen} onOpenChange={setGenerateDialogOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <KeyRound className="size-5 text-primary" /> Générateur de Licence Officielle
+            </DialogTitle>
+            <DialogDescription>
+              Créez une clé d'activation sécurisée et scellez-la éventuellement avec le numéro WhatsApp de l'artisan.
+            </DialogDescription>
+          </DialogHeader>
+
+          {generatedKey ? (
+            <div className="space-y-4 py-2">
+              <div className="rounded-2xl border-2 border-emerald-500/50 bg-emerald-500/10 p-4 text-center space-y-2">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-emerald-800 dark:text-emerald-300">
+                  Clé Générée avec Succès
+                </span>
+                <p className="font-mono text-xl sm:text-2xl font-extrabold text-foreground tracking-widest select-all">
+                  {generatedKey}
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  Formule {newPlan.toUpperCase()} (
+                  {newPlan === "monthly" ? "30 jours" : newPlan === "quarterly" ? "90 jours" : "365 jours"})
+                </p>
+              </div>
+
+              <div className="flex gap-2">
+                <Button
+                  onClick={() => {
+                    navigator.clipboard.writeText(generatedKey);
+                    setCopiedKey(true);
+                    setTimeout(() => setCopiedKey(false), 2000);
+                    toast.success("Clé copiée !");
+                  }}
+                  className="flex-1 font-bold"
+                  variant="outline"
+                >
+                  {copiedKey ? <Check className="mr-1.5 size-4" /> : <Copy className="mr-1.5 size-4" />}
+                  {copiedKey ? "Copié !" : "Copier la clé"}
+                </Button>
+
+                {assignedPhone && (
+                  <a
+                    href={`https://wa.me/${assignedPhone.replace(/[^0-9]/g, "")}?text=${encodeURIComponent(
+                      `Bonjour,\nVoici votre Clé de Licence officielle CouturPro (*${newPlan.toUpperCase()}*) :\n\n🔑 *${generatedKey}*\n\nPour l'activer : rendez-vous dans l'application CouturPro > menu « Mon Abonnement » > entrez cette clé dans l'encadré « Clé de Licence » et validez. Merci de votre confiance ! ✂️`
+                    )}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex-1 inline-flex items-center justify-center gap-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs"
+                  >
+                    <MessageCircle className="size-4" /> WhatsApp
+                  </a>
+                )}
+              </div>
+
+              <Button
+                variant="ghost"
+                className="w-full text-xs text-muted-foreground"
+                onClick={() => setGenerateDialogOpen(false)}
+              >
+                Fermer
+              </Button>
+            </div>
+          ) : (
+            <div className="space-y-4 py-2 text-xs">
+              <div className="space-y-1.5">
+                <Label className="font-bold">Formule d'abonnement</Label>
+                <div className="grid grid-cols-3 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setNewPlan("monthly")}
+                    className={`rounded-xl border p-2.5 text-center transition-all ${
+                      newPlan === "monthly"
+                        ? "border-primary bg-primary/10 font-bold text-primary ring-1 ring-primary"
+                        : "border-border hover:bg-muted"
+                    }`}
+                  >
+                    <div className="text-xs font-bold">Mensuel</div>
+                    <div className="text-[10px] text-muted-foreground">3 000 F (30j)</div>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setNewPlan("quarterly")}
+                    className={`rounded-xl border p-2.5 text-center transition-all ${
+                      newPlan === "quarterly"
+                        ? "border-amber-500 bg-amber-500/10 font-bold text-amber-700 dark:text-amber-400 ring-1 ring-amber-500"
+                        : "border-border hover:bg-muted"
+                    }`}
+                  >
+                    <div className="text-xs font-bold">Trimestriel</div>
+                    <div className="text-[10px] text-muted-foreground">7 500 F (90j)</div>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setNewPlan("yearly")}
+                    className={`rounded-xl border p-2.5 text-center transition-all ${
+                      newPlan === "yearly"
+                        ? "border-emerald-600 bg-emerald-500/10 font-bold text-emerald-700 dark:text-emerald-400 ring-1 ring-emerald-600"
+                        : "border-border hover:bg-muted"
+                    }`}
+                  >
+                    <div className="text-xs font-bold">Annuel VIP</div>
+                    <div className="text-[10px] text-muted-foreground">35 000 F (365j)</div>
+                  </button>
+                </div>
+              </div>
+
+              <div className="space-y-1.5">
+                <Label className="font-bold">
+                  Téléphone de l'artisan (Recommandé anti-fraude)
+                </Label>
+                <Input
+                  placeholder="Ex : +226 70 00 00 00"
+                  value={assignedPhone}
+                  onChange={(e) => setAssignedPhone(e.target.value)}
+                  className="h-9"
+                />
+                <p className="text-[10px] text-muted-foreground">
+                  Si renseigné, seul l'atelier possédant ce numéro pourra activer la clé.
+                </p>
+              </div>
+
+              <div className="space-y-1.5">
+                <Label className="font-bold">Note administrative (optionnel)</Label>
+                <Input
+                  placeholder="Ex : Payé par Orange Money au guichet"
+                  value={licenseNotes}
+                  onChange={(e) => setLicenseNotes(e.target.value)}
+                  className="h-9"
+                />
+              </div>
+
+              <DialogFooter className="pt-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setGenerateDialogOpen(false)}
+                >
+                  Annuler
+                </Button>
+                <Button
+                  size="sm"
+                  onClick={() => generateLicenseMutation.mutate()}
+                  disabled={generateLicenseMutation.isPending}
+                  className="font-bold shadow-xs"
+                >
+                  {generateLicenseMutation.isPending ? (
+                    <>
+                      <Loader2 className="mr-2 size-3.5 animate-spin" /> Génération…
+                    </>
+                  ) : (
+                    <>
+                      <KeyRound className="mr-1.5 size-3.5" /> Créer la Clé Officielle
+                    </>
+                  )}
+                </Button>
+              </DialogFooter>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

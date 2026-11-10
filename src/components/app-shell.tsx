@@ -291,7 +291,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                 <Crown className="size-3.5" /> Formule Découverte
               </div>
               <p className="text-[11px] text-muted-foreground leading-tight">
-                Débloquez le Lookbook, clients et commandes illimités dès 2 000 F/mois.
+                Débloquez le Lookbook, clients et commandes illimités dès 3 000 F/mois.
               </p>
               <Button
                 asChild

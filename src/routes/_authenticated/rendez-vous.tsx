@@ -6,7 +6,7 @@ import { toast } from "sonner";
 
 import { supabase } from "@/integrations/supabase/client";
 import { useBusiness } from "@/hooks/use-business";
-import { isProOrAdmin, isSubscriptionExpired } from "@/lib/quotas";
+import { isProOrAdmin, isSubscriptionExpired, checkAppointmentQuota, FREE_LIMITS } from "@/lib/quotas";
 import { UpgradeDialog } from "@/components/upgrade-dialog";
 import {
   fetchAppointments,
@@ -74,6 +74,8 @@ function AppointmentsPage() {
   const { data: business } = useBusiness();
   const isPro = isProOrAdmin(business);
   const isExpired = isSubscriptionExpired(business);
+  const totalAppointments = (appointments.data ?? []).length;
+  const appointmentQuota = checkAppointmentQuota(business, totalAppointments);
   const appointments = useQuery({
     queryKey: ["appointments"],
     queryFn: () => fetchAppointments(),
@@ -144,6 +146,11 @@ function AppointmentsPage() {
               setUpgradeOpen(true);
               return;
             }
+            if (!appointmentQuota.allowed) {
+              setQuotaReason(appointmentQuota.message || "Limite de 10 rendez-vous atteinte pour la formule Découverte.");
+              setUpgradeOpen(true);
+              return;
+            }
             setOpen(true);
           }}
         >
@@ -174,6 +181,44 @@ function AppointmentsPage() {
             className="h-7 text-xs font-bold shadow-xs ml-auto"
           >
             <Crown className="mr-1 size-3.5" /> Réactiver mon Pass
+          </Button>
+        </div>
+      )}
+
+
+      {/* Jauge Quota pour la Formule Découverte */}
+      {!isPro && !isExpired && (
+        <div
+          className={`rounded-2xl border p-3.5 text-xs flex flex-wrap items-center justify-between gap-3 shadow-2xs ${
+            !appointmentQuota.allowed
+              ? "border-amber-500/40 bg-amber-500/10 text-amber-800 dark:text-amber-300"
+              : totalAppointments >= 8
+              ? "border-amber-500/30 bg-amber-50/50 dark:bg-amber-500/5 text-amber-800 dark:text-amber-300"
+              : "border-border bg-card text-muted-foreground"
+          }`}
+        >
+          <div className="flex items-center gap-2">
+            <CalendarPlus className="size-4 shrink-0 text-primary" />
+            <span>
+              Formule Découverte :{" "}
+              <strong className="text-foreground">
+                {totalAppointments} / {FREE_LIMITS.maxAppointments} rendez-vous
+              </strong>
+              {!appointmentQuota.allowed
+                ? " — Quota atteint. Vos rendez-vous restent consultables. Passez à Pro pour en planifier en illimité."
+                : ` (${appointmentQuota.remaining} restant${appointmentQuota.remaining > 1 ? "s" : ""})`}
+            </span>
+          </div>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => {
+              setQuotaReason("Passez à CouturPro Pro pour un planning de rendez-vous illimité.");
+              setUpgradeOpen(true);
+            }}
+            className="h-8 px-3 rounded-lg text-xs font-bold text-primary border-primary/30 hover:bg-primary/10 ml-auto"
+          >
+            <Crown className="mr-1 size-3.5" /> Passer à Pro (Illimité)
           </Button>
         </div>
       )}
@@ -456,6 +501,13 @@ function AppointmentDialog({
 
   const create = useMutation({
     mutationFn: async (values: Record<string, string>) => {
+      if (!isProOrAdmin(business)) {
+        const currentCount = (queryClient.getQueryData<any[]>(["appointments"]) ?? []).length;
+        const quota = checkAppointmentQuota(business, currentCount);
+        if (!quota.allowed) {
+          throw new Error(quota.message || "Quota de 10 rendez-vous atteint pour la formule Découverte.");
+        }
+      }
       await saveAppointmentOffline(
         {
           business_id: businessId,

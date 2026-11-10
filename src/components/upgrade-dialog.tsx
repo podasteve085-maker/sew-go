@@ -137,7 +137,7 @@ export function UpgradeDialog({
                   Mensuel
                 </span>
                 <p className="mt-1 font-display text-lg font-extrabold text-foreground">
-                  2 000 <span className="text-xs font-medium">FCFA</span>
+                  3 000 <span className="text-xs font-medium">FCFA</span>
                 </p>
                 <p className="text-[11px] text-muted-foreground">pour 1 mois (200 photos)</p>
               </div>
@@ -166,7 +166,7 @@ export function UpgradeDialog({
                   Trimestriel
                 </span>
                 <p className="mt-1 font-display text-lg font-extrabold text-foreground">
-                  5 000 <span className="text-xs font-medium">FCFA</span>
+                  7 500 <span className="text-xs font-medium">FCFA</span>
                 </p>
                 <p className="text-[11px] text-muted-foreground">
                   soit 1 666 F/mois (3 mois)
@@ -197,7 +197,7 @@ export function UpgradeDialog({
                   Annuel
                 </span>
                 <p className="mt-1 font-display text-lg font-extrabold text-foreground">
-                  15 000 <span className="text-xs font-medium">FCFA</span>
+                  17 500 <span className="text-xs font-medium">FCFA</span>
                 </p>
                 <p className="text-[11px] text-muted-foreground">
                   soit 1 250 F/mois (1 an)

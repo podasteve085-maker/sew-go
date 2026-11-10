@@ -4,6 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import {
   Users,
   Scissors,
+  MessageCircle,
   PackageCheck,
   CalendarDays,
   Wallet,
@@ -12,7 +13,6 @@ import {
   CalendarPlus,
   Ruler,
   Shirt,
-  MessageCircle,
   BookOpen,
   Crown,
 } from "lucide-react";
@@ -27,7 +27,7 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { StatCard, EmptyState, SectionTitle, OrderCard, LateBadge } from "@/components/bits";
 import { UpgradeDialog } from "@/components/upgrade-dialog";
-import { isProOrAdmin, isSubscriptionExpired, FREE_LIMITS } from "@/lib/quotas";
+import { isProOrAdmin, isSubscriptionExpired, FREE_LIMITS, getSubscriptionStatus, getPlanWhatsAppUrl } from "@/lib/quotas";
 
 export const Route = createFileRoute("/_authenticated/dashboard")({
   head: () => ({
@@ -141,8 +141,63 @@ function Dashboard() {
             onClick={() => setUpgradeOpen(true)}
             className="font-bold shrink-0 shadow-xs h-9 text-xs sm:text-sm bg-primary text-primary-foreground hover:bg-primary/90"
           >
-            <Crown className="mr-1.5 size-4" /> Réactiver mon Pass (dès 2 000 F)
+            <Crown className="mr-1.5 size-4" /> Réactiver mon Pass (dès 3 000 F)
           </Button>
+        </div>
+      )}
+
+
+      {/* Rappel d'échéance d'abonnement (J-7 à J-1) */}
+      {isPro && !business?.is_admin && getSubscriptionStatus(business).daysRemaining <= 7 && getSubscriptionStatus(business).daysRemaining > 0 && (
+        <div className={`rounded-2xl border p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-xs ${
+          getSubscriptionStatus(business).daysRemaining <= 1
+            ? "border-destructive/40 bg-destructive/10"
+            : getSubscriptionStatus(business).daysRemaining <= 3
+            ? "border-amber-500/40 bg-amber-500/10"
+            : "border-primary/30 bg-primary/5"
+        }`}>
+          <div className="space-y-1">
+            <div className="flex items-center gap-2">
+              <span className={`rounded-full px-2.5 py-0.5 text-[10px] font-extrabold text-white ${
+                getSubscriptionStatus(business).daysRemaining <= 1 ? "bg-destructive" : getSubscriptionStatus(business).daysRemaining <= 3 ? "bg-amber-600" : "bg-primary"
+              }`}>
+                {getSubscriptionStatus(business).daysRemaining === 1 ? "EXPIRATION DEMAIN" : `EXPIRE DANS ${getSubscriptionStatus(business).daysRemaining} JOURS`}
+              </span>
+              <span className="text-xs text-muted-foreground font-medium">
+                Échéance le {getSubscriptionStatus(business).formattedExpiresAt}
+              </span>
+            </div>
+            <p className="font-display text-sm font-bold text-foreground">
+              {getSubscriptionStatus(business).daysRemaining === 1
+                ? "Dernier jour de validité de votre Pass Atelier !"
+                : `Il vous reste ${getSubscriptionStatus(business).daysRemaining} jours de validité sur votre formule ${getSubscriptionStatus(business).planLabel}.`}
+            </p>
+            <p className="text-xs text-muted-foreground">
+              Renouvelez dès maintenant pour éviter le passage en mode consultation et continuer vos confections sans interruption.
+            </p>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <a
+              href={getPlanWhatsAppUrl(
+                business?.plan && business.plan !== "free" ? (business.plan as any) : "monthly",
+                business?.name,
+                business?.phone || undefined
+              )}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center justify-center gap-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 px-3.5 py-2 text-xs font-bold text-white shadow-xs transition-all active:scale-95"
+            >
+              <MessageCircle className="size-3.5" /> Renouveler par WhatsApp
+            </a>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => setUpgradeOpen(true)}
+              className="text-xs font-bold h-8.5"
+            >
+              Prolonger
+            </Button>
+          </div>
         </div>
       )}
 
@@ -167,7 +222,7 @@ function Dashboard() {
             onClick={() => setUpgradeOpen(true)}
             className="font-bold shrink-0 shadow-xs h-9 text-xs sm:text-sm bg-primary text-primary-foreground hover:bg-primary/90"
           >
-            <Crown className="mr-1.5 size-4" /> Passer à Pro (dès 2 000 F)
+            <Crown className="mr-1.5 size-4" /> Passer à Pro (dès 3 000 F)
           </Button>
         </div>
       )}

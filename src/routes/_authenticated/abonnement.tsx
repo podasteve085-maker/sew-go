@@ -3,6 +3,9 @@ import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   Crown,
+  KeyRound,
+  Loader2,
+  MessageCircle,
   Check,
   Zap,
   Sparkles,
@@ -33,6 +36,9 @@ import { fcfa } from "@/lib/format";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { SectionTitle } from "@/components/bits";
+import { Input } from "@/components/ui/input";
+import { toast } from "sonner";
+import { getPlanWhatsAppUrl } from "@/lib/quotas";
 import { UpgradeDialog } from "@/components/upgrade-dialog";
 
 export const Route = createFileRoute("/_authenticated/abonnement")({
@@ -51,6 +57,41 @@ export const Route = createFileRoute("/_authenticated/abonnement")({
 function SubscriptionPage() {
   const { data: business, isLoading } = useBusiness();
   const [upgradeOpen, setUpgradeOpen] = useState(false);
+  const [licenseKeyInput, setLicenseKeyInput] = useState("");
+  const [activatingLicense, setActivatingLicense] = useState(false);
+
+  const handleActivateLicense = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!business?.id) return;
+    const cleanKey = licenseKeyInput.trim().toUpperCase();
+    if (cleanKey.length < 8) {
+      toast.error("Veuillez saisir une clé de licence valide (ex: CP-M-XXXX-XXXX-XXXX).");
+      return;
+    }
+
+    setActivatingLicense(true);
+    try {
+      const { data, error } = await (supabase.rpc as any)("activate_license_key", {
+        p_license_key: cleanKey,
+        p_business_id: business.id,
+      });
+
+      if (error) throw error;
+      const res = data as { success: boolean; message: string; plan?: string };
+
+      if (res.success) {
+        toast.success(res.message || "Licence activée avec succès !");
+        setLicenseKeyInput("");
+        window.location.reload();
+      } else {
+        toast.error(res.message || "Impossible d'activer cette licence.");
+      }
+    } catch (err: any) {
+      toast.error(err?.message || "Erreur de validation de la licence.");
+    } finally {
+      setActivatingLicense(false);
+    }
+  };
 
   // 1. Quota clients actuels
   const clientsCountQuery = useQuery({
@@ -256,7 +297,7 @@ function SubscriptionPage() {
 
           {!isPro && (
             <Button onClick={() => setUpgradeOpen(true)} className="font-bold shadow-xs">
-              <Crown className="mr-1.5 size-4" /> {subInfo.status === "expired" ? "Réactiver mon Pass (dès 2 000 F)" : "Passer à Pro (dès 2 000 F)"}
+              <Crown className="mr-1.5 size-4" /> {subInfo.status === "expired" ? "Réactiver mon Pass (dès 3 000 F)" : "Passer à Pro (dès 3 000 F)"}
             </Button>
           )}
 
@@ -504,6 +545,57 @@ function SubscriptionPage() {
         </div>
       </section>
 
+
+      {/* Section Activation de Clé de Licence Officielle */}
+      <section className="card-soft p-5 sm:p-6 border-2 border-primary/20 bg-primary/5 space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <span className="flex size-10 items-center justify-center rounded-xl bg-primary text-primary-foreground shadow-xs shrink-0">
+              <KeyRound className="size-5" />
+            </span>
+            <div>
+              <h3 className="font-display font-bold text-base sm:text-lg">Vous disposez d'une Clé de Licence officielle ?</h3>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                Entrez la clé reçue par WhatsApp ou SMS pour activer ou prolonger immédiatement votre forfait d'atelier.
+              </p>
+            </div>
+          </div>
+          <a
+            href={getPlanWhatsAppUrl("monthly", business?.name, business?.phone || undefined)}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-emerald-600/40 bg-emerald-500/10 px-3.5 py-2 text-xs font-bold text-emerald-700 dark:text-emerald-400 hover:bg-emerald-500/20 transition-all shrink-0"
+          >
+            <MessageCircle className="size-3.5" /> Obtenir une clé par WhatsApp
+          </a>
+        </div>
+
+        <form onSubmit={handleActivateLicense} className="flex flex-col sm:flex-row gap-2 pt-2">
+          <Input
+            placeholder="Ex : CP-M-8F4A-92BC-71D0"
+            value={licenseKeyInput}
+            onChange={(e) => setLicenseKeyInput(e.target.value)}
+            disabled={activatingLicense}
+            className="font-mono text-sm uppercase font-bold tracking-wider bg-background h-10 flex-1"
+          />
+          <Button
+            type="submit"
+            disabled={activatingLicense || !licenseKeyInput.trim()}
+            className="font-bold h-10 px-5 shadow-xs"
+          >
+            {activatingLicense ? (
+              <>
+                <Loader2 className="mr-2 size-4 animate-spin" /> Activation…
+              </>
+            ) : (
+              <>
+                <Check className="mr-1.5 size-4" /> Activer ma Licence
+              </>
+            )}
+          </Button>
+        </form>
+      </section>
+
       {/* Grille des 3 Formules Pro */}
       <section className="space-y-3">
         <SectionTitle>Choisissez votre Pass Pro d'Atelier</SectionTitle>
@@ -523,7 +615,7 @@ function SubscriptionPage() {
 
               <div>
                 <p className="font-display text-2xl font-extrabold text-foreground">
-                  2 000 <span className="text-sm font-semibold">FCFA</span>
+                  3 000 <span className="text-sm font-semibold">FCFA</span>
                 </p>
                 <p className="text-xs text-muted-foreground">pour 30 jours, sans engagement</p>
               </div>
@@ -549,7 +641,7 @@ function SubscriptionPage() {
               variant={subInfo.planId === "monthly" ? "outline" : "default"}
               onClick={() => setUpgradeOpen(true)}
             >
-              {subInfo.planId === "monthly" ? "Prolonger le mois" : "Activer pour 2 000 F"}
+              {subInfo.planId === "monthly" ? "Prolonger le mois (3 000 F)" : "Activer pour 3 000 F"}
             </Button>
           </div>
 
@@ -571,10 +663,10 @@ function SubscriptionPage() {
 
               <div>
                 <p className="font-display text-2xl font-extrabold text-foreground">
-                  5 000 <span className="text-sm font-semibold">FCFA</span>
+                  7 500 <span className="text-sm font-semibold">FCFA</span>
                 </p>
                 <p className="text-xs text-muted-foreground">
-                  soit 1 666 F/mois (90 jours complets)
+                  soit 2 500 F/mois (90 jours complets)
                 </p>
               </div>
 
@@ -586,7 +678,7 @@ function SubscriptionPage() {
                   <Check className="size-4 text-emerald-600 shrink-0 font-bold" /> Tous les avantages Pro inclus
                 </p>
                 <p className="flex items-center gap-2 font-medium text-foreground">
-                  <Sparkles className="size-4 text-amber-600 shrink-0 font-bold" /> 1 000 FCFA d'économie immédiate
+                  <Sparkles className="size-4 text-amber-600 shrink-0 font-bold" /> 1 500 FCFA d'économie immédiate
                 </p>
                 <p className="flex items-center gap-2">
                   <Check className="size-4 text-emerald-600 shrink-0" /> Sérénité pour la Tabaski et fêtes
@@ -601,7 +693,7 @@ function SubscriptionPage() {
               className="w-full font-bold bg-amber-600 hover:bg-amber-700 text-white shadow-xs mt-4"
               onClick={() => setUpgradeOpen(true)}
             >
-              {subInfo.planId === "quarterly" ? "Prolonger de 3 mois" : "Choisir le Pass Saison (5 000 F)"}
+              {subInfo.planId === "quarterly" ? "Prolonger de 3 mois (7 500 F)" : "Choisir le Pass Saison (7 500 F)"}
             </Button>
           </div>
 
@@ -623,10 +715,10 @@ function SubscriptionPage() {
 
               <div>
                 <p className="font-display text-2xl font-extrabold text-foreground">
-                  15 000 <span className="text-sm font-semibold">FCFA</span>
+                  35 000 <span className="text-sm font-semibold">FCFA</span>
                 </p>
                 <p className="text-xs text-muted-foreground">
-                  soit 1 250 F/mois (1 an complet)
+                  pour 1 an complet (365 jours de sérénité)
                 </p>
               </div>
 
@@ -653,7 +745,7 @@ function SubscriptionPage() {
               className="w-full font-bold bg-emerald-600 hover:bg-emerald-700 text-white shadow-xs mt-4"
               onClick={() => setUpgradeOpen(true)}
             >
-              {subInfo.planId === "yearly" ? "Prolonger d'un an" : "Pass Annuel (15 000 F)"}
+              {subInfo.planId === "yearly" ? "Prolonger d'un an (35 000 F)" : "Pass Annuel VIP (35 000 F)"}
             </Button>
           </div>
         </div>

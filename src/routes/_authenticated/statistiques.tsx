@@ -11,7 +11,10 @@ import {
   CartesianGrid,
   Legend,
 } from "recharts";
-import { BarChart3, Receipt } from "lucide-react";
+import { BarChart3, Receipt, Crown, Lock, Sparkles, MessageCircle } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { UpgradeDialog } from "@/components/upgrade-dialog";
+import { isProOrAdmin, isSubscriptionExpired, getPlanWhatsAppUrl } from "@/lib/quotas";
 
 import { useBusiness } from "@/hooks/use-business";
 import { fetchClients, fetchOrders, paidTotal, balance, type OrderRow } from "@/lib/queries";
@@ -62,6 +65,9 @@ function StatsPage() {
     enabled: true,
   });
   const [month, setMonth] = useState(() => new Date().toISOString().slice(0, 7));
+  const isPro = isProOrAdmin(business);
+  const isExpired = isSubscriptionExpired(business);
+  const [upgradeOpen, setUpgradeOpen] = useState(false);
 
   const [activeTab, setActiveTab] = useState<"ventes" | "charges">(() => {
     if (typeof window !== "undefined") {
@@ -166,6 +172,75 @@ function StatsPage() {
         Statistiques & Finances
       </SectionTitle>
 
+
+      {/* Verrouillage Anti-Fraude Mode Découverte : Réservé aux Abonnés Pro */}
+      {!isPro && !isExpired && (
+        <div className="rounded-3xl border border-primary/30 bg-gradient-to-br from-primary/10 via-background to-amber-500/5 p-6 sm:p-8 text-center shadow-lg relative overflow-hidden">
+          <div className="mx-auto size-14 rounded-2xl bg-primary/20 text-primary flex items-center justify-center mb-4 ring-8 ring-primary/5">
+            <Lock className="size-7" />
+          </div>
+          <div className="inline-flex items-center gap-1.5 rounded-full bg-primary/15 text-primary border border-primary/30 px-3 py-1 text-xs font-bold mb-3">
+            <Crown className="size-3.5" /> FONCTIONNALITÉ PRO EXCLUSIVE
+          </div>
+          <h2 className="font-display text-xl sm:text-2xl font-bold text-foreground max-w-lg mx-auto">
+            Débloquez la Comptabilité & les Statistiques Financières de votre Atelier
+          </h2>
+          <p className="mt-2 text-sm text-muted-foreground max-w-xl mx-auto leading-relaxed">
+            En formule Découverte, le module d'analyses financières et de gestion des charges est désactivé. Passez au Pass Pro pour suivre votre chiffre d'affaires en direct, vos encaissements réels, vos charges fixes et votre bénéfice net.
+          </p>
+
+          <div className="mt-6 grid gap-3 sm:grid-cols-2 max-w-xl mx-auto text-left text-xs">
+            <div className="flex items-start gap-2.5 rounded-xl border border-border/80 bg-card p-3 shadow-2xs">
+              <span className="size-5 rounded-full bg-emerald-500/15 text-emerald-600 flex items-center justify-center shrink-0 font-bold">✓</span>
+              <div>
+                <p className="font-bold text-foreground">Bénéfice Net Automatique</p>
+                <p className="text-muted-foreground text-[11px]">Calcul immédiat : Recettes encaissées - Charges payées.</p>
+              </div>
+            </div>
+            <div className="flex items-start gap-2.5 rounded-xl border border-border/80 bg-card p-3 shadow-2xs">
+              <span className="size-5 rounded-full bg-emerald-500/15 text-emerald-600 flex items-center justify-center shrink-0 font-bold">✓</span>
+              <div>
+                <p className="font-bold text-foreground">Gestion des Salaires & Loyer</p>
+                <p className="text-muted-foreground text-[11px]">Enregistrez chaque dépense par catégorie avec justificatifs.</p>
+              </div>
+            </div>
+            <div className="flex items-start gap-2.5 rounded-xl border border-border/80 bg-card p-3 shadow-2xs">
+              <span className="size-5 rounded-full bg-emerald-500/15 text-emerald-600 flex items-center justify-center shrink-0 font-bold">✓</span>
+              <div>
+                <p className="font-bold text-foreground">Évolution sur 6 Mois</p>
+                <p className="text-muted-foreground text-[11px]">Graphiques comparatifs d'activité et saisonnalité.</p>
+              </div>
+            </div>
+            <div className="flex items-start gap-2.5 rounded-xl border border-border/80 bg-card p-3 shadow-2xs">
+              <span className="size-5 rounded-full bg-emerald-500/15 text-emerald-600 flex items-center justify-center shrink-0 font-bold">✓</span>
+              <div>
+                <p className="font-bold text-foreground">Top Vêtements & Clients VIP</p>
+                <p className="text-muted-foreground text-[11px]">Identifiez vos modèles les plus demandés et rentables.</p>
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
+            <Button
+              size="lg"
+              onClick={() => setUpgradeOpen(true)}
+              className="rounded-2xl font-bold shadow-md h-12 px-6 bg-primary text-primary-foreground hover:bg-primary/90"
+            >
+              <Crown className="mr-2 size-5" /> Activer mon Pass Pro (dès 3 000 F)
+            </Button>
+            <a
+              href={getPlanWhatsAppUrl("monthly", business?.name, business?.phone || undefined)}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center justify-center gap-2 rounded-2xl bg-emerald-600 hover:bg-emerald-700 px-5 h-12 text-sm font-bold text-white shadow-xs transition-all active:scale-95"
+            >
+              <MessageCircle className="size-4.5" /> Souscrire par WhatsApp
+            </a>
+          </div>
+        </div>
+      )}
+
+      {(isPro || isExpired) && (
       <Tabs
         value={activeTab}
         onValueChange={(v) => setActiveTab(v as "ventes" | "charges")}
@@ -309,6 +384,9 @@ function StatsPage() {
           />
         </TabsContent>
       </Tabs>
+      )}
+
+      <UpgradeDialog open={upgradeOpen} onOpenChange={setUpgradeOpen} triggerReason="Débloquez la comptabilité d'atelier, le calcul du bénéfice net et le suivi de chiffre d'affaires dès 3 000 FCFA/mois." />
     </div>
   );
 }

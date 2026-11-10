@@ -29,9 +29,10 @@ export const PLAN_CONFIG: Record<SubscriptionPlan, PlanConfigItem> = {
       "Jusqu'à 10 clients enregistrés",
       "Jusqu'à 10 commandes en cours",
       "Jusqu'à 10 fiches de mesures",
+      "Jusqu'à 10 rendez-vous d'essayage",
       "Reçus standards sans logo",
       "Fonctionnement hors-ligne PWA",
-      "Catalogue Lookbook désactivé",
+      "Catalogue Lookbook personnalisé désactivé",
       "Statistiques financières désactivées",
     ],
   },
@@ -39,7 +40,7 @@ export const PLAN_CONFIG: Record<SubscriptionPlan, PlanConfigItem> = {
     id: "monthly",
     name: "Pro Mensuel (Liberté)",
     tagline: "Sans engagement, flexibilité totale",
-    priceFcfa: 2000,
+    priceFcfa: 3000,
     durationDays: 30,
     badge: "Pro Mensuel",
     badgeColor: "bg-primary/15 text-primary border-primary/30",
@@ -57,11 +58,11 @@ export const PLAN_CONFIG: Record<SubscriptionPlan, PlanConfigItem> = {
   quarterly: {
     id: "quarterly",
     name: "Pro Trimestriel (Pass Saison)",
-    tagline: "Idéal pour les périodes de fêtes & mariages",
-    priceFcfa: 5000, // ~1 666 F / mois au lieu de 2 000 F
+    tagline: "Idéal pour les périodes de fêtes & mariages (soit 2 500 F / mois)",
+    priceFcfa: 7500, // 2 500 F / mois au lieu de 3 000 F (1 500 F d'économie)
     durationDays: 90,
     popular: true,
-    savingsBadge: "1 000 F d'économie (-17%)",
+    savingsBadge: "1 500 F d'économie (-17%)",
     badge: "Pro Trimestriel",
     badgeColor: "bg-amber-500/15 text-amber-700 dark:text-amber-400 border-amber-500/30",
     features: [
@@ -77,10 +78,10 @@ export const PLAN_CONFIG: Record<SubscriptionPlan, PlanConfigItem> = {
   yearly: {
     id: "yearly",
     name: "Pro Annuel (Maître Couturier)",
-    tagline: "Tranquillité absolue pendant 1 an complet",
-    priceFcfa: 15000, // 1 250 F / mois au lieu de 2 000 F (9 000 F d'économie)
+    tagline: "Tranquillité absolue pendant 1 an complet (Pack Sérénité VIP)",
+    priceFcfa: 35000, // Sérénité 365 jours + Support VIP
     durationDays: 365,
-    savingsBadge: "4,5 mois offerts (-37%)",
+    savingsBadge: "Formule Sérénité 1 An (VIP)",
     badge: "Pro Annuel VIP",
     badgeColor: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 border-emerald-500/30",
     features: [
@@ -98,6 +99,7 @@ export const FREE_LIMITS = {
   maxClients: 10,
   maxOrders: 10,
   maxMeasurements: 10,
+  maxAppointments: 10,
 } as const;
 
 /**
@@ -247,7 +249,7 @@ export function getReadOnlyStatus(
     return {
       isReadOnly: true,
       message:
-        "Votre atelier est actuellement en mode Consultation (lecture seule). Toutes vos mesures, commandes et fiches clients restent sauvegardées et consultables à tout moment. Réactivez votre Pass Atelier (dès 2 000 FCFA) pour créer ou modifier de nouvelles fiches.",
+        "Votre atelier est actuellement en mode Consultation (lecture seule). Toutes vos mesures, commandes et fiches clients restent sauvegardées et consultables à tout moment. Réactivez votre Pass Atelier (dès 3 000 FCFA) pour créer ou modifier de nouvelles fiches.",
     };
   }
 
@@ -305,7 +307,7 @@ export function checkClientQuota(
       current: currentCount,
       remaining: 0,
       message:
-        "Votre atelier est en mode Consultation : vous pouvez consulter vos clients en toute tranquillité. Pour enregistrer de nouveaux clients, réactivez votre Pass Atelier (dès 2 000 FCFA).",
+        "Votre atelier est en mode Consultation : vous pouvez consulter vos clients en toute tranquillité. Pour enregistrer de nouveaux clients, réactivez votre Pass Atelier (dès 3 000 FCFA).",
     };
   }
 
@@ -348,7 +350,7 @@ export function checkOrderQuota(
       current: currentCount,
       remaining: 0,
       message:
-        "Votre atelier est en mode Consultation : l'historique de vos confections et acomptes reste accessible. Pour lancer de nouvelles commandes, réactivez votre Pass Atelier (dès 2 000 FCFA).",
+        "Votre atelier est en mode Consultation : l'historique de vos confections et acomptes reste accessible. Pour lancer de nouvelles commandes, réactivez votre Pass Atelier (dès 3 000 FCFA).",
     };
   }
 
@@ -391,7 +393,7 @@ export function checkMeasurementQuota(
       current: currentCount,
       remaining: 0,
       message:
-        "Votre carnet de mesures reste 100 % consultable et protégé. Pour enregistrer ou modifier de nouvelles fiches de mesures, réactivez votre forfait (dès 2 000 FCFA).",
+        "Votre carnet de mesures reste 100 % consultable et protégé. Pour enregistrer ou modifier de nouvelles fiches de mesures, réactivez votre forfait (dès 3 000 FCFA).",
     };
   }
 
@@ -407,6 +409,50 @@ export function checkMeasurementQuota(
     message: allowed
       ? undefined
       : `Vous avez atteint la limite de ${limit} fiches de mesures de la formule Découverte. Vos mesures enregistrées restent toujours consultables. Passez à Pro pour un carnet illimité.`,
+  };
+}
+
+
+/**
+ * Contrôle rigoureux du quota de rendez-vous d'essayage (Mode Découverte 10 max & Mode Consultation)
+ */
+export function checkAppointmentQuota(
+  business: Business | null | undefined,
+  currentCount: number,
+): {
+  allowed: boolean;
+  limit: number;
+  current: number;
+  remaining: number;
+  message?: string | undefined;
+} {
+  if (isProOrAdmin(business)) {
+    return { allowed: true, limit: Infinity, current: currentCount, remaining: Infinity };
+  }
+
+  if (isSubscriptionExpired(business)) {
+    return {
+      allowed: false,
+      limit: currentCount,
+      current: currentCount,
+      remaining: 0,
+      message:
+        "Votre planning de rendez-vous reste consultable. Pour planifier de nouveaux rendez-vous d'essayage, réactivez votre forfait (dès 3 000 FCFA).",
+    };
+  }
+
+  const limit = FREE_LIMITS.maxAppointments;
+  const remaining = Math.max(0, limit - currentCount);
+  const allowed = currentCount < limit;
+
+  return {
+    allowed,
+    limit,
+    current: currentCount,
+    remaining,
+    message: allowed
+      ? undefined
+      : `Vous avez atteint la limite de ${limit} rendez-vous de la formule Découverte. Vos rendez-vous enregistrés restent consultables. Passez à Pro pour un planning illimité.`,
   };
 }
 
@@ -503,3 +549,42 @@ export function checkCatalogPhotosQuota(
   };
 }
 
+
+/**
+ * Numéro WhatsApp officiel pour l'encaissement et l'attribution de licences.
+ * Configurable via VITE_WHATSAPP_BILLING_PHONE ou modifiable directement.
+ */
+export const WHATSAPP_BILLING_PHONE =
+  (typeof import.meta !== "undefined" && import.meta.env?.VITE_WHATSAPP_BILLING_PHONE) ||
+  "22600000000";
+
+/**
+ * Construit un lien WhatsApp pré-rempli pour la souscription ou le réabonnement.
+ */
+export function getPlanWhatsAppUrl(
+  planId: "monthly" | "quarterly" | "yearly",
+  businessName?: string,
+  businessPhone?: string
+): string {
+  const plan = PLAN_CONFIG[planId];
+  const atelierInfo = businessName ? `\n• Mon atelier : *${businessName}*` : "";
+  const phoneInfo = businessPhone ? `\n• Téléphone : ${businessPhone}` : "";
+  const msg = `Bonjour CouturPro,\nJe souhaite souscrire à la formule *${plan.name}* (${plan.priceFcfa.toLocaleString("fr-FR")} FCFA pour ${plan.durationDays} jours).${atelierInfo}${phoneInfo}\n\nMerci de m'indiquer la procédure de paiement et de me transmettre ma clé d'activation officielle. ✂️`;
+  return `https://wa.me/${WHATSAPP_BILLING_PHONE}?text=${encodeURIComponent(msg)}`;
+}
+
+/**
+ * Interface pour les licences d'atelier officielles
+ */
+export interface LicenseRow {
+  id: string;
+  license_key: string;
+  plan: SubscriptionPlan;
+  duration_days: number;
+  assigned_phone: string | null;
+  assigned_business_id: string | null;
+  status: "active" | "used" | "revoked" | "expired";
+  used_by_business_id: string | null;
+  used_at: string | null;
+  created_at: string;
+}
