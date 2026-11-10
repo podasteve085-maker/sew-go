@@ -1,25 +1,50 @@
 -- ==============================================================================
 -- Migration : Correctif critique – Autoriser les RPC SECURITY DEFINER à mettre
---             à jour les colonnes protégées du plan d'abonnement.
+--             à jour les colonnes protégées du plan d'abonnement & création de
+--             la table d'audit des licences.
 --
 -- PROBLÈME :
---   Le trigger trg_protect_business_subscription bloque toute UPDATE sur
---   businesses.plan / plan_status / plan_expires_at sauf pour les admins.
---   Cela empêche le RPC activate_license_key (SECURITY DEFINER) de fonctionner
---   même s'il est légitime, car auth.uid() reste non-null à l'intérieur du RPC.
+--   1. Le trigger trg_protect_business_subscription bloque toute UPDATE sur
+--      businesses.plan / plan_status / plan_expires_at sauf pour les admins.
+--   2. La table public.license_key_audit_log n'existait pas encore dans la base.
 --
 -- SOLUTION :
---   1. Réécrire la fonction trigger pour vérifier un flag de session
+--   1. Créer la table public.license_key_audit_log avec RLS et index.
+--   2. Réécrire la fonction trigger pour vérifier un flag de session
 --      app.internal_subscription_update = 'true' (posé par les RPC internes).
---   2. Réécrire activate_license_key pour poser ce flag avant l'UPDATE.
---   3. Réécrire admin_activate_business_plan de même.
---
--- SÉCURITÉ :
---   - Le flag de session ne peut être posé que par du code serveur (SQL) ;
---     les clients JavaScript ne peuvent pas le définir via RLS.
---   - Le flag est transactionnel (true = local à la transaction) : il disparaît
---     dès que la transaction se termine, empêchant toute réutilisation.
+--   3. Réécrire activate_license_key pour poser ce flag avant l'UPDATE
+--      et rendre l'audit non-bloquant (résilient).
+--   4. Réécrire admin_activate_business_plan de même.
 -- ==============================================================================
+
+-- ------------------------------------------------------------------------------
+-- ÉTAPE 0 : Création de la table d'audit des clés de licence
+-- ------------------------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS public.license_key_audit_log (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  license_key text NOT NULL,
+  business_id uuid REFERENCES public.businesses(id) ON DELETE SET NULL,
+  action text NOT NULL,
+  performed_by uuid REFERENCES auth.users(id) ON DELETE SET NULL,
+  details jsonb DEFAULT '{}'::jsonb,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS license_key_audit_log_key_idx ON public.license_key_audit_log(license_key);
+CREATE INDEX IF NOT EXISTS license_key_audit_log_business_idx ON public.license_key_audit_log(business_id);
+
+ALTER TABLE public.license_key_audit_log ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "admin all on license_audit" ON public.license_key_audit_log;
+CREATE POLICY "admin all on license_audit" ON public.license_key_audit_log
+FOR ALL TO authenticated
+USING (public.is_admin())
+WITH CHECK (public.is_admin());
+
+GRANT SELECT, INSERT ON public.license_key_audit_log TO authenticated;
+GRANT ALL ON public.license_key_audit_log TO service_role;
+
 
 -- ------------------------------------------------------------------------------
 -- ÉTAPE 1 : Recréer le trigger protecteur avec vérification du flag interne
@@ -70,13 +95,12 @@ CREATE TRIGGER trg_protect_business_subscription
   FOR EACH ROW
   EXECUTE FUNCTION public.protect_business_subscription_and_admin();
 
--- Droits inchangés
 REVOKE ALL ON FUNCTION public.protect_business_subscription_and_admin() FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.protect_business_subscription_and_admin() TO authenticated, service_role;
 
 
 -- ------------------------------------------------------------------------------
--- ÉTAPE 2 : Réécrire activate_license_key avec le flag de bypass
+-- ÉTAPE 2 : Réécrire activate_license_key avec le flag de bypass & audit sécurisé
 -- ------------------------------------------------------------------------------
 
 CREATE OR REPLACE FUNCTION public.activate_license_key(
@@ -170,17 +194,14 @@ BEGIN
     v_new_expires := now() + (v_license.duration_days || ' days')::interval;
   END IF;
 
-  -- ----------------------------------------------------------------
   -- Poser le flag de bypass AVANT l'UPDATE pour passer le trigger
-  -- (true = local à la transaction ; disparaît à la fin de la txn)
-  -- ----------------------------------------------------------------
   PERFORM set_config('app.internal_subscription_update', 'true', true);
 
   -- Mise à jour de l'atelier
   UPDATE public.businesses
   SET
-    plan          = v_license.plan,
-    plan_status   = 'active',
+    plan            = v_license.plan,
+    plan_status     = 'active',
     plan_expires_at = v_new_expires
   WHERE id = p_business_id;
 
@@ -195,25 +216,29 @@ BEGIN
     used_at             = now()
   WHERE license_key = v_clean_key;
 
-  -- Enregistrer l'audit
-  INSERT INTO public.license_key_audit_log (
-    license_key,
-    business_id,
-    action,
-    performed_by,
-    details
-  ) VALUES (
-    v_clean_key,
-    p_business_id,
-    'activated',
-    auth.uid(),
-    jsonb_build_object(
-      'plan',            v_license.plan,
-      'duration_days',   v_license.duration_days,
-      'plan_expires_at', v_new_expires,
-      'business_name',   v_business.name
-    )
-  );
+  -- Enregistrer l'audit (résilient : ne bloque jamais l'activation)
+  BEGIN
+    INSERT INTO public.license_key_audit_log (
+      license_key,
+      business_id,
+      action,
+      performed_by,
+      details
+    ) VALUES (
+      v_clean_key,
+      p_business_id,
+      'activated',
+      auth.uid(),
+      jsonb_build_object(
+        'plan',            v_license.plan,
+        'duration_days',   v_license.duration_days,
+        'plan_expires_at', v_new_expires,
+        'business_name',   v_business.name
+      )
+    );
+  EXCEPTION WHEN OTHERS THEN
+    NULL;
+  END;
 
   RETURN jsonb_build_object(
     'success',         true,
