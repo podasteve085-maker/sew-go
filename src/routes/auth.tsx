@@ -69,6 +69,15 @@ export const Route = createFileRoute("/auth")({
           throw e;
         }
       }
+
+      // Redirection automatique hors-ligne si l'atelier a déjà été chargé
+      if (typeof navigator !== "undefined" && !navigator.onLine) {
+        const offlineBiz = localStorage.getItem("couturpro_current_business_id");
+        const offlineUserId = localStorage.getItem("couturpro_current_user_id");
+        if (offlineBiz && offlineUserId) {
+          throw redirect({ to: "/dashboard" });
+        }
+      }
     }
   },
   validateSearch: (
@@ -292,7 +301,7 @@ function AuthPage() {
     };
   }, [logout, reconnect, searchMode, searchError, searchErrorCode, searchErrorDesc]);
 
-  // Connexion universelle (Téléphone ou Email) avec protection anti-brute force
+  // Connexion universelle (Téléphone ou Email) avec support hors-ligne immédiat et protection anti-brute force
   async function signIn(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     if (lockoutUntil && Date.now() < lockoutUntil) {
@@ -313,6 +322,31 @@ function AuthPage() {
     }
 
     setLoading(true);
+
+    // 1. PRIORITÉ HORS-LIGNE DIRECTE : Si l'appareil n'a pas de connexion Internet
+    if (typeof navigator !== "undefined" && !navigator.onLine) {
+      try {
+        const offlineRes = await verifyAndLoginOffline(rawIdentifier, passVal);
+        setLoading(false);
+        if (offlineRes.success) {
+          toast.success("Connexion hors-ligne réussie !", {
+            description: `Bienvenue dans votre atelier ${offlineRes.account?.businessName || ""}. Vos données restent 100% accessibles.`,
+          });
+          navigate({ to: "/dashboard", replace: true });
+          return;
+        } else {
+          toast.error("Connexion impossible", {
+            description: offlineRes.message || "Identifiants non reconnus en mode hors-ligne.",
+          });
+          return;
+        }
+      } catch (err: any) {
+        setLoading(false);
+        toast.error("Erreur locale", { description: err?.message || "Impossible d'accéder au coffre-fort local." });
+        return;
+      }
+    }
+
     let authEmail = rawIdentifier;
 
     // Si l'utilisateur saisit un numéro de téléphone, résolution transparente vers l'email Supabase
@@ -331,13 +365,36 @@ function AuthPage() {
       }
     }
 
-    const { error } = await supabase.auth.signInWithPassword({
-      email: authEmail,
-      password: passVal,
-    });
+    let signInError: any = null;
+    try {
+      const { error } = await supabase.auth.signInWithPassword({
+        email: authEmail,
+        password: passVal,
+      });
+      signInError = error;
+    } catch (networkErr: any) {
+      signInError = networkErr;
+    }
     setLoading(false);
 
-    if (error) {
+    if (signInError) {
+      // 2. BASCULE AUTOMATIQUE HORS-LIGNE EN CAS D'ERREUR RÉSEAU / FETCH (Failed to fetch)
+      if (isNetworkOrOfflineError(signInError)) {
+        try {
+          const offlineRes = await verifyAndLoginOffline(rawIdentifier, passVal);
+          if (offlineRes.success) {
+            toast.success("Connexion hors-ligne réussie !", {
+              description: `Bienvenue dans votre atelier ${offlineRes.account?.businessName || ""}. Vos données restent 100% accessibles hors-ligne.`,
+            });
+            navigate({ to: "/dashboard", replace: true });
+            return;
+          } else if (offlineRes.message) {
+            toast.error("Connexion impossible", { description: offlineRes.message });
+            return;
+          }
+        } catch {}
+      }
+
       const nextFailures = failedAttempts + 1;
       setFailedAttempts(nextFailures);
       try {
@@ -356,7 +413,7 @@ function AuthPage() {
         return;
       }
 
-      const lower = error.message.toLowerCase();
+      const lower = (signInError.message || "").toLowerCase();
       let description = "Identifiant ou mot de passe incorrect.";
       if (lower.includes("invalid login credentials") || lower.includes("invalid credentials")) {
         description =
@@ -365,8 +422,8 @@ function AuthPage() {
         description = "Votre compte n'est pas encore activé. Contactez l'administrateur.";
       } else if (lower.includes("too many requests") || lower.includes("rate limit")) {
         description = "Trop de tentatives consécutives. Veuillez patienter 2 minutes avant de réessayer.";
-      } else if (error.message) {
-        description = error.message;
+      } else if (signInError.message) {
+        description = signInError.message;
       }
       toast.error("Connexion impossible", { description });
       return;
@@ -378,6 +435,33 @@ function AuthPage() {
       sessionStorage.removeItem("couturpro_auth_failures");
       sessionStorage.removeItem("couturpro_auth_lockout");
     } catch {}
+
+    // 3. ENREGISTREMENT SYSTÉMATIQUE DANS LE COFFRE-FORT LOCAL APRÈS SUCCÈS EN LIGNE
+    try {
+      const { data: uData } = await supabase.auth.getUser();
+      if (uData?.user?.id) {
+        const { data: bData } = await supabase
+          .from("businesses")
+          .select("*")
+          .eq("owner_id", uData.user.id)
+          .maybeSingle();
+
+        if (bData) {
+          await saveOfflineCredentials({
+            identifier: rawIdentifier,
+            password: passVal,
+            userId: uData.user.id,
+            businessId: bData.id,
+            businessName: bData.name,
+            ownerName: bData.owner_name,
+            phone: bData.phone,
+            email: uData.user.email,
+            business: bData,
+          });
+        }
+      }
+    } catch {}
+
     navigate({ to: "/dashboard", replace: true });
   }
 
@@ -489,20 +573,69 @@ function AuthPage() {
 
     setLoading(true);
     try {
-      const { data, error } = await supabase.rpc("reset_password_by_phone_verification", {
-        p_phone: num,
-        p_business_name: bName,
-        p_owner_name: oName,
-        p_new_password: phoneRecoveryNewPassword,
-      });
-
-      if (error) {
+      // 1. Détection hors-ligne directe
+      if (typeof navigator !== "undefined" && !navigator.onLine) {
+        const offlineResetRes = await resetPasswordOffline({
+          phone: num,
+          businessName: bName,
+          ownerName: oName,
+          newPassword: phoneRecoveryNewPassword,
+        });
         setLoading(false);
-        const errMsg = error.message || "Impossible de réinitialiser le mot de passe.";
+        if (offlineResetRes.success) {
+          toast.success("Mot de passe modifié hors-ligne !", {
+            description: "Votre atelier est déverrouillé. Le mot de passe sera synchronisé avec le serveur dès le retour d'Internet.",
+          });
+          navigate({ to: "/dashboard", replace: true });
+          return;
+        } else {
+          setPhoneRecoveryError(offlineResetRes.message || "Vérification locale impossible.");
+          toast.error("Vérification échouée", { description: offlineResetRes.message });
+          return;
+        }
+      }
+
+      let rpcData: any = null;
+      let rpcError: any = null;
+      try {
+        const { data, error } = await supabase.rpc("reset_password_by_phone_verification", {
+          p_phone: num,
+          p_business_name: bName,
+          p_owner_name: oName,
+          p_new_password: phoneRecoveryNewPassword,
+        });
+        rpcData = data;
+        rpcError = error;
+      } catch (networkErr: any) {
+        rpcError = networkErr;
+      }
+
+      if (rpcError) {
+        if (isNetworkOrOfflineError(rpcError)) {
+          const offlineResetRes = await resetPasswordOffline({
+            phone: num,
+            businessName: bName,
+            ownerName: oName,
+            newPassword: phoneRecoveryNewPassword,
+          });
+          setLoading(false);
+          if (offlineResetRes.success) {
+            toast.success("Mot de passe modifié hors-ligne !", {
+              description: "Votre atelier est déverrouillé. Le mot de passe sera synchronisé avec le serveur dès le retour d'Internet.",
+            });
+            navigate({ to: "/dashboard", replace: true });
+            return;
+          }
+        }
+        setLoading(false);
+        const errMsg = rpcError.message || "Impossible de réinitialiser le mot de passe.";
         setPhoneRecoveryError(errMsg);
         toast.error("Erreur de réinitialisation", { description: errMsg });
         return;
       }
+
+      const data = rpcData;
+      const error = null;
 
       const res = data as { success: boolean; email?: string; message?: string };
       if (!res || !res.success) {

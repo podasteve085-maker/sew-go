@@ -63,6 +63,62 @@ export async function hashPasswordOffline(password: string, salt: string): Promi
 }
 
 /**
+ * Auto-découverte des ateliers existants sur l'appareil si le coffre-fort est vide
+ */
+async function autoSeedVaultFromDevice(): Promise<OfflineAccountVault[]> {
+  const seeded: OfflineAccountVault[] = [];
+  if (typeof window === "undefined") return seeded;
+
+  try {
+    const cachedBizStr = localStorage.getItem("couturpro_cached_business");
+    const currentBizId = localStorage.getItem("couturpro_current_business_id");
+    const currentUserId = localStorage.getItem("couturpro_current_user_id");
+
+    let business: any = null;
+    if (cachedBizStr) {
+      try {
+        business = JSON.parse(cachedBizStr);
+      } catch {}
+    }
+
+    // Essayer de lire depuis IndexedDB workshop_data
+    if (!business) {
+      try {
+        const { getAllLocalItems } = await import("@/lib/offline-storage");
+        const items = await getAllLocalItems<any>("workshop_data");
+        const found = items.find((it) => it.id !== VAULT_IDB_KEY && (it.name || it.phone));
+        if (found) business = found;
+      } catch {}
+    }
+
+    if (business && (business.id || currentBizId)) {
+      const bId = business.id || currentBizId;
+      const uId = business.owner_id || currentUserId || bId;
+      const phone = business.phone || business.whatsapp || "";
+      const salt = typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `salt_${Date.now()}`;
+
+      seeded.push({
+        id: bId,
+        businessId: bId,
+        userId: uId,
+        phone: phone,
+        email: business.email || null,
+        businessName: business.name || "Mon Atelier",
+        ownerName: business.owner_name || null,
+        salt,
+        business,
+        lastLoginAt: new Date().toISOString(),
+      });
+
+      // Sauvegarder immédiatement ce compte auto-découvert
+      saveOfflineVault(seeded).catch(() => {});
+    }
+  } catch {}
+
+  return seeded;
+}
+
+/**
  * Récupère tous les comptes enregistrés dans le coffre-fort local
  */
 export async function getOfflineVault(): Promise<OfflineAccountVault[]> {
@@ -76,26 +132,24 @@ export async function getOfflineVault(): Promise<OfflineAccountVault[]> {
       VAULT_IDB_KEY,
     );
     if (item && Array.isArray(item.accounts) && item.accounts.length > 0) {
-      // Synchroniser le cache localStorage
       try {
         localStorage.setItem(VAULT_STORAGE_KEY, JSON.stringify(item.accounts));
       } catch {}
       return item.accounts;
     }
-  } catch {
-    // IDB temporairement inaccessible
-  }
+  } catch {}
 
   // 2. Lecture de secours depuis localStorage
   try {
     const raw = localStorage.getItem(VAULT_STORAGE_KEY);
     if (raw) {
       const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed)) return parsed;
+      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
     }
   } catch {}
 
-  return [];
+  // 3. Si aucun compte dans le coffre-fort, auto-découverte des données de l'atelier sur l'appareil
+  return await autoSeedVaultFromDevice();
 }
 
 /**
@@ -104,12 +158,10 @@ export async function getOfflineVault(): Promise<OfflineAccountVault[]> {
 export async function saveOfflineVault(accounts: OfflineAccountVault[]): Promise<void> {
   if (typeof window === "undefined") return;
 
-  // 1. Sauvegarde dans localStorage pour accès synchrone ultra-rapide
   try {
     localStorage.setItem(VAULT_STORAGE_KEY, JSON.stringify(accounts));
   } catch {}
 
-  // 2. Sauvegarde persistante dans IndexedDB (ne disparaît jamais lors d'une déconnexion)
   try {
     const { setLocalItem } = await import("@/lib/offline-storage");
     await setLocalItem("workshop_data", {
@@ -172,8 +224,6 @@ export async function saveOfflineCredentials(params: {
   filtered.push(updatedAccount);
 
   await saveOfflineVault(filtered);
-
-  // Mettre à jour les clés de session locales
   applyOfflineSession(updatedAccount);
 }
 
@@ -192,18 +242,17 @@ export function applyOfflineSession(account: OfflineAccountVault): void {
 }
 
 /**
- * Tentative de connexion hors-ligne avec vérification du mot de passe hashé
+ * Tentative de connexion hors-ligne avec vérification du mot de passe
  */
 export async function verifyAndLoginOffline(
   identifier: string,
   passwordVal: string,
 ): Promise<{ success: boolean; message?: string; account?: OfflineAccountVault }> {
-  const accounts = await getOfflineVault();
+  let accounts = await getOfflineVault();
+
+  // Si le coffre est vide, tentative ultime de chargement depuis l'appareil
   if (accounts.length === 0) {
-    return {
-      success: false,
-      message: "Aucun atelier n'est encore enregistré hors-ligne sur cet appareil. Connectez-vous avec Internet au moins une première fois.",
-    };
+    accounts = await autoSeedVaultFromDevice();
   }
 
   const digits = extractDigits(identifier);
@@ -211,39 +260,52 @@ export async function verifyAndLoginOffline(
   const lowerIdent = identifier.trim().toLowerCase();
 
   // Recherche de l'atelier correspondant
-  const account = accounts.find((a) => {
+  let account = accounts.find((a) => {
     if (cleanLast8 && extractDigits(a.phone).slice(-8) === cleanLast8) return true;
     if (a.email && a.email.toLowerCase() === lowerIdent) return true;
     if (extractDigits(a.phone) === digits && digits.length > 0) return true;
     return false;
   });
 
+  // Si toujours pas trouvé mais qu'un atelier existe sur cet appareil (mono-atelier typique)
+  if (!account && accounts.length === 1) {
+    account = accounts[0];
+  }
+
   if (!account) {
     return {
       success: false,
-      message: "Atelier introuvable hors-ligne pour ce numéro ou email. Vérifiez votre saisie.",
+      message: "Atelier introuvable hors-ligne pour ce numéro ou email sur cet appareil.",
     };
   }
 
+  // Si le mot de passe n'a pas encore été mémorisé en local pour cet atelier existant
   if (!account.passwordHash) {
-    return {
-      success: false,
-      message: "Aucun mot de passe hors-ligne n'est mémorisé pour cet atelier. Connectez-vous avec Internet pour initialiser le coffre-fort local.",
+    // Initialisation immédiate du mot de passe pour cet atelier sur cet appareil
+    account.passwordHash = await hashPasswordOffline(passwordVal, account.salt);
+    account.pendingPasswordSync = {
+      newPasswordPlain: passwordVal,
+      phone: account.phone || identifier,
+      businessName: account.businessName,
+      ownerName: account.ownerName || "",
+      requestedAt: new Date().toISOString(),
     };
+    await saveOfflineVault(accounts);
+    applyOfflineSession(account);
+    return { success: true, account };
   }
 
+  // Vérification de l'empreinte du mot de passe
   const computedHash = await hashPasswordOffline(passwordVal, account.salt);
   if (computedHash !== account.passwordHash) {
     return {
       success: false,
-      message: "Mot de passe incorrect pour cet atelier en mode hors-ligne. Vérifiez votre saisie ou utilisez « Mot de passe oublié ? ».",
+      message: "Mot de passe incorrect pour cet atelier en mode hors-ligne. Utilisez « Mot de passe oublié ? » pour le modifier.",
     };
   }
 
-  // Mot de passe correct : activation de la session hors-ligne
+  // Mot de passe correct : activation de la session locale
   applyOfflineSession(account);
-
-  // Mettre à jour l'heure de dernière connexion
   account.lastLoginAt = new Date().toISOString();
   await saveOfflineVault(accounts);
 
@@ -263,14 +325,22 @@ export async function resetPasswordOffline(params: {
   ownerName?: string;
   newPassword: string;
 }): Promise<{ success: boolean; message?: string }> {
-  const accounts = await getOfflineVault();
+  let accounts = await getOfflineVault();
+  if (accounts.length === 0) {
+    accounts = await autoSeedVaultFromDevice();
+  }
+
   const digits = extractDigits(params.phone);
   const cleanLast8 = digits.length >= 8 ? digits.slice(-8) : "";
 
-  const account = accounts.find((a) => {
+  let account = accounts.find((a) => {
     if (cleanLast8 && extractDigits(a.phone).slice(-8) === cleanLast8) return true;
     return false;
   });
+
+  if (!account && accounts.length === 1) {
+    account = accounts[0];
+  }
 
   if (!account) {
     return {
@@ -279,41 +349,40 @@ export async function resetPasswordOffline(params: {
     };
   }
 
-  // Vérification de sécurité : le nom de l'atelier ou le nom du propriétaire doit correspondre
+  // Vérification de sécurité : nom de l'atelier ou propriétaire
   const normInputBiz = params.businessName.trim().toLowerCase();
   const normSavedBiz = (account.businessName || "").trim().toLowerCase();
   const normInputOwner = (params.ownerName || "").trim().toLowerCase();
   const normSavedOwner = (account.ownerName || "").trim().toLowerCase();
 
   const bizMatches =
-    normSavedBiz.includes(normInputBiz) || normInputBiz.includes(normSavedBiz);
+    normSavedBiz.length > 0 &&
+    (normSavedBiz.includes(normInputBiz) || normInputBiz.includes(normSavedBiz));
   const ownerMatches =
-    normInputOwner.length > 2 &&
+    normSavedOwner.length > 0 &&
+    normInputOwner.length > 1 &&
     (normSavedOwner.includes(normInputOwner) || normInputOwner.includes(normSavedOwner));
 
   if (!bizMatches && !ownerMatches) {
     return {
       success: false,
-      message: "Les informations de l'atelier (nom de l'atelier ou propriétaire) ne correspondent pas aux données mémorisées sur cet appareil.",
+      message: "Le nom de l'atelier ou du propriétaire ne correspond pas aux données mémorisées sur cet appareil.",
     };
   }
 
-  // Génération du nouveau hash de mot de passe
+  // Mise à jour locale du mot de passe
   const newHash = await hashPasswordOffline(params.newPassword, account.salt);
   account.passwordHash = newHash;
 
-  // Enregistrement de l'action de synchronisation différée
   account.pendingPasswordSync = {
     newPasswordPlain: params.newPassword,
-    phone: account.phone,
+    phone: account.phone || params.phone,
     businessName: account.businessName,
     ownerName: account.ownerName || params.ownerName || "",
     requestedAt: new Date().toISOString(),
   };
 
   await saveOfflineVault(accounts);
-
-  // Connexion immédiate de l'artisan avec son nouveau mot de passe
   applyOfflineSession(account);
 
   return { success: true };
@@ -371,12 +440,10 @@ export async function syncPendingOfflinePasswords(): Promise<void> {
       if (!error && (data as any)?.success) {
         delete acc.pendingPasswordSync;
         await saveOfflineVault(accounts);
-        toast.success("Synchronisation du mot de passe réussie", {
-          description: `Le mot de passe de l'atelier ${acc.businessName} a été mis à jour sur le serveur distant.`,
+        toast.success("Synchronisation réussie", {
+          description: `Le mot de passe de l'atelier ${acc.businessName} a été synchronisé sur les serveurs sécurisés.`,
         });
       }
-    } catch {
-      // Réessaiera au prochain cycle de synchronisation
-    }
+    } catch {}
   }
 }
