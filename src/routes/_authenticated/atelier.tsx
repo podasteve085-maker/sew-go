@@ -752,18 +752,23 @@ function SessionSignOutSection() {
     } finally {
       if (typeof window !== "undefined") {
         try {
-          localStorage.clear();
+          localStorage.removeItem("couturpro_current_business_id");
+          localStorage.removeItem("couturpro_current_user_id");
+
+          for (let i = localStorage.length - 1; i >= 0; i--) {
+            const key = localStorage.key(i);
+            if (key && key.startsWith("sb-") && key.endsWith("-auth-token")) {
+              localStorage.removeItem(key);
+            }
+          }
+
           sessionStorage.clear();
         } catch {
           // ignore
         }
       }
-      try {
-        await clearOfflineDatabase();
-      } catch {
-        // ignore
-      }
-      window.location.href = "/auth";
+      // Ne pas détruire la base de données IndexedDB lors d'une simple déconnexion
+      window.location.href = "/auth?logout=true";
     }
   }
 

@@ -646,22 +646,25 @@ function SignOutButton({
         await supabase.auth.signOut();
       }
     } finally {
-      // 4. Détruire tous les jetons et données persistés dans le navigateur
+      // 4. Déconnexion de la session active SANS détruire le coffre local ni la base locale
       if (typeof window !== "undefined") {
         try {
-          localStorage.clear();
+          localStorage.removeItem("couturpro_current_business_id");
+          localStorage.removeItem("couturpro_current_user_id");
+
+          for (let i = localStorage.length - 1; i >= 0; i--) {
+            const key = localStorage.key(i);
+            if (key && key.startsWith("sb-") && key.endsWith("-auth-token")) {
+              localStorage.removeItem(key);
+            }
+          }
+
           sessionStorage.clear();
         } catch {
-          // ignore — certains navigateurs restreignent l'accès en mode privé
+          // ignore
         }
       }
-      // 5. Purge intégrale de la base de données locale IndexedDB (anti-fuite sur poste partagé)
-      try {
-        await clearOfflineDatabase();
-      } catch {
-        // ignore
-      }
-      // 6. Rechargement dur pour détruire tout état mémoire React/TanStack
+      // 5. Ne JAMAIS purger IndexedDB lors d'une simple déconnexion (vital pour le mode hors-ligne)
       window.location.href = "/auth?logout=true";
     }
   }

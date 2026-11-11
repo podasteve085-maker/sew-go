@@ -270,10 +270,19 @@ function AuthPage() {
       return;
     }
 
-    // 3. Déconnexion explicite demandée
+    // 3. Déconnexion explicite demandée (SANS détruire le coffre local ni les données hors-ligne)
     if (logout || reconnect) {
       try {
-        localStorage.clear();
+        localStorage.removeItem("couturpro_current_business_id");
+        localStorage.removeItem("couturpro_current_user_id");
+
+        for (let i = localStorage.length - 1; i >= 0; i--) {
+          const key = localStorage.key(i);
+          if (key && key.startsWith("sb-") && key.endsWith("-auth-token")) {
+            localStorage.removeItem(key);
+          }
+        }
+
         sessionStorage.clear();
       } catch {}
       supabase.auth.signOut({ scope: "global" }).catch(() => {});
@@ -366,11 +375,13 @@ function AuthPage() {
     }
 
     let signInError: any = null;
+    let authDataResult: any = null;
     try {
-      const { error } = await supabase.auth.signInWithPassword({
+      const { data, error } = await supabase.auth.signInWithPassword({
         email: authEmail,
         password: passVal,
       });
+      authDataResult = data;
       signInError = error;
     } catch (networkErr: any) {
       signInError = networkErr;
@@ -438,29 +449,47 @@ function AuthPage() {
 
     // 3. ENREGISTREMENT SYSTÉMATIQUE DANS LE COFFRE-FORT LOCAL APRÈS SUCCÈS EN LIGNE
     try {
-      const { data: uData } = await supabase.auth.getUser();
-      if (uData?.user?.id) {
-        const { data: bData } = await supabase
-          .from("businesses")
-          .select("*")
-          .eq("owner_id", uData.user.id)
-          .maybeSingle();
+      const currentUser = authDataResult?.user || (await supabase.auth.getUser()).data?.user;
+      const userId = currentUser?.id;
+      if (userId) {
+        let businessData: any = null;
+        try {
+          const { data: bData } = await supabase
+            .from("businesses")
+            .select("*")
+            .eq("owner_id", userId)
+            .maybeSingle();
+          businessData = bData;
+        } catch {}
 
-        if (bData) {
-          await saveOfflineCredentials({
-            identifier: rawIdentifier,
-            password: passVal,
-            userId: uData.user.id,
-            businessId: bData.id,
-            businessName: bData.name,
-            ownerName: bData.owner_name,
-            phone: bData.phone,
-            email: uData.user.email,
-            business: bData,
-          });
-        }
+        const bName =
+          businessData?.name ||
+          currentUser?.user_metadata?.business_name ||
+          "Mon Atelier";
+        const oName =
+          businessData?.owner_name ||
+          currentUser?.user_metadata?.owner_name ||
+          null;
+        const bPhone =
+          businessData?.phone ||
+          currentUser?.user_metadata?.phone ||
+          rawIdentifier;
+
+        await saveOfflineCredentials({
+          identifier: rawIdentifier,
+          password: passVal,
+          userId: userId,
+          businessId: businessData?.id || userId,
+          businessName: bName,
+          ownerName: oName,
+          phone: bPhone,
+          email: currentUser?.email || (isEmailIdentifier(rawIdentifier) ? rawIdentifier : null),
+          business: businessData || { id: userId, name: bName, phone: bPhone, owner_id: userId },
+        });
       }
-    } catch {}
+    } catch (saveErr) {
+      console.warn("[Auth] Sauvegarde coffre hors-ligne :", saveErr);
+    }
 
     navigate({ to: "/dashboard", replace: true });
   }
@@ -522,6 +551,19 @@ function AuthPage() {
     // Session directe
     if (data.session) {
       setLoading(false);
+      if (data.session.user) {
+        saveOfflineCredentials({
+          identifier: phoneVal || emailVal,
+          password: passwordVal,
+          userId: data.session.user.id,
+          businessId: data.session.user.id,
+          businessName: bName || "Mon Atelier",
+          ownerName: oName,
+          phone: phoneVal,
+          email: data.session.user.email || (emailVal || null),
+          business: { id: data.session.user.id, name: bName, phone: phoneVal, owner_name: oName, owner_id: data.session.user.id },
+        }).catch(() => {});
+      }
       toast.success("Atelier créé avec succès !", { description: "Bienvenue sur CouturPro !" });
       navigate({ to: "/dashboard", replace: true });
       return;
@@ -664,6 +706,22 @@ function AuthPage() {
         return;
       }
 
+      // Mémorisation immédiate dans le coffre-fort local
+      supabase.auth.getUser().then(({ data: uData }) => {
+        if (uData?.user?.id) {
+          saveOfflineCredentials({
+            identifier: num,
+            password: phoneRecoveryNewPassword,
+            userId: uData.user.id,
+            businessId: uData.user.id,
+            businessName: bName,
+            ownerName: oName,
+            phone: num,
+            email: uData.user.email || null,
+          }).catch(() => {});
+        }
+      }).catch(() => {});
+
       toast.success("Mot de passe mis à jour avec succès !", {
         description: "Bienvenue dans votre atelier CouturPro.",
       });
@@ -737,6 +795,20 @@ function AuthPage() {
       toast.error("Mise à jour impossible", { description: error.message });
       return;
     }
+
+    // Mémorisation dans le coffre-fort local
+    supabase.auth.getUser().then(({ data: uData }) => {
+      if (uData?.user?.id) {
+        saveOfflineCredentials({
+          identifier: uData.user.email || "",
+          password: newPassword,
+          userId: uData.user.id,
+          businessId: uData.user.id,
+          businessName: "Mon Atelier",
+          email: uData.user.email || null,
+        }).catch(() => {});
+      }
+    }).catch(() => {});
 
     toast.success("Nouveau mot de passe enregistré avec succès !", {
       description: "Connexion à votre espace atelier...",

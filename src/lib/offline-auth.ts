@@ -8,7 +8,6 @@
  */
 
 import { supabase } from "@/integrations/supabase/client";
-import { cleanPhone } from "@/lib/format";
 import { extractDigits } from "@/lib/phone-utils";
 import { toast } from "sonner";
 
@@ -35,6 +34,18 @@ export interface OfflineAccountVault {
 
 const VAULT_STORAGE_KEY = "couturpro_offline_auth_vault";
 const VAULT_IDB_KEY = "offline_accounts_vault";
+
+/**
+ * Normalise une chaîne de caractères (retire accents, minuscules, espaces)
+ */
+export function normalizeText(txt: string | null | undefined): string {
+  if (!txt) return "";
+  return txt
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim();
+}
 
 /**
  * Calcul d'empreinte cryptographique SHA-256 avec sel individuel par atelier
@@ -81,34 +92,52 @@ async function autoSeedVaultFromDevice(): Promise<OfflineAccountVault[]> {
       } catch {}
     }
 
-    // Essayer de lire depuis IndexedDB workshop_data
+    // 1. Essayer de lire depuis IndexedDB workshop_data
     if (!business) {
       try {
         const { getAllLocalItems } = await import("@/lib/offline-storage");
         const items = await getAllLocalItems<any>("workshop_data");
-        const found = items.find((it) => it.id !== VAULT_IDB_KEY && (it.name || it.phone));
+        const found = items.find(
+          (it) => it && it.id !== VAULT_IDB_KEY && (it.name || it.phone || it.owner_id || it.whatsapp)
+        );
         if (found) business = found;
       } catch {}
     }
 
-    if (business && (business.id || currentBizId)) {
-      const bId = business.id || currentBizId;
-      const uId = business.owner_id || currentUserId || bId;
-      const phone = business.phone || business.whatsapp || "";
+    // 2. Si pas d'atelier explicite, tenter de retrouver l'identifiant depuis clients ou commandes en local
+    let foundBizId = business?.id || currentBizId;
+    let foundUserId = business?.owner_id || currentUserId || foundBizId;
+
+    if (!business) {
+      try {
+        const { getAllLocalItems } = await import("@/lib/offline-storage");
+        const clients = await getAllLocalItems<any>("clients");
+        if (clients && clients.length > 0 && clients[0]?.business_id) {
+          foundBizId = clients[0].business_id;
+        }
+      } catch {}
+    }
+
+    if (business || foundBizId) {
+      const bId = business?.id || foundBizId;
+      const uId = business?.owner_id || foundUserId || bId;
+      const phone = business?.phone || business?.whatsapp || "";
       const salt = typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `salt_${Date.now()}`;
 
-      seeded.push({
+      const item: OfflineAccountVault = {
         id: bId,
         businessId: bId,
         userId: uId,
         phone: phone,
-        email: business.email || null,
-        businessName: business.name || "Mon Atelier",
-        ownerName: business.owner_name || null,
+        email: business?.email || null,
+        businessName: business?.name || "Mon Atelier",
+        ownerName: business?.owner_name || null,
         salt,
-        business,
+        business: business || { id: bId, name: "Mon Atelier", phone, owner_id: uId },
         lastLoginAt: new Date().toISOString(),
-      });
+      };
+
+      seeded.push(item);
 
       // Sauvegarder immédiatement ce compte auto-découvert
       saveOfflineVault(seeded).catch(() => {});
@@ -259,15 +288,31 @@ export async function verifyAndLoginOffline(
   const cleanLast8 = digits.length >= 8 ? digits.slice(-8) : "";
   const lowerIdent = identifier.trim().toLowerCase();
 
-  // Recherche de l'atelier correspondant
+  // Recherche tolérante et multi-critères de l'atelier
   let account = accounts.find((a) => {
+    // 1. Correspondance par les 8 derniers chiffres du téléphone (standard Afrique de l'Ouest)
     if (cleanLast8 && extractDigits(a.phone).slice(-8) === cleanLast8) return true;
+    if (cleanLast8 && extractDigits(a.business?.whatsapp || "").slice(-8) === cleanLast8) return true;
+    if (cleanLast8 && extractDigits(a.business?.phone || "").slice(-8) === cleanLast8) return true;
+
+    // 2. Correspondance stricte sur l'ensemble des chiffres
+    if (digits.length > 0 && extractDigits(a.phone) === digits) return true;
+    if (digits.length > 0 && extractDigits(a.business?.whatsapp || "") === digits) return true;
+
+    // 3. Correspondance email ou identifiant texte
     if (a.email && a.email.toLowerCase() === lowerIdent) return true;
-    if (extractDigits(a.phone) === digits && digits.length > 0) return true;
+    if (a.phone && a.phone.toLowerCase() === lowerIdent) return true;
+
+    // 4. Sous-chaîne de chiffres (avec ou sans indicatif international +226, 00226, etc.)
+    const accDigits = extractDigits(a.phone);
+    if (digits.length >= 6 && accDigits.length >= 6) {
+      if (digits.endsWith(accDigits) || accDigits.endsWith(digits)) return true;
+    }
+
     return false;
   });
 
-  // Si toujours pas trouvé mais qu'un atelier existe sur cet appareil (mono-atelier typique)
+  // Si toujours pas trouvé mais qu'un seul atelier existe sur cet appareil (mono-atelier typique)
   if (!account && accounts.length === 1) {
     account = accounts[0];
   }
@@ -275,7 +320,10 @@ export async function verifyAndLoginOffline(
   if (!account) {
     return {
       success: false,
-      message: "Atelier introuvable hors-ligne pour ce numéro ou email sur cet appareil.",
+      message:
+        accounts.length === 0
+          ? "Aucun atelier n'est encore enregistré hors-ligne sur cet appareil. Connectez-vous une première fois avec connexion Internet pour mémoriser vos accès, ou utilisez « Mot de passe oublié ? » pour déverrouiller votre atelier."
+          : "Atelier introuvable hors-ligne pour ce numéro ou email sur cet appareil. Vérifiez votre saisie ou utilisez « Mot de passe oublié ? ».",
     };
   }
 
@@ -300,7 +348,7 @@ export async function verifyAndLoginOffline(
   if (computedHash !== account.passwordHash) {
     return {
       success: false,
-      message: "Mot de passe incorrect pour cet atelier en mode hors-ligne. Utilisez « Mot de passe oublié ? » pour le modifier.",
+      message: "Mot de passe incorrect pour cet atelier en mode hors-ligne. Utilisez « Mot de passe oublié ? » ci-dessous pour le réinitialiser.",
     };
   }
 
@@ -335,6 +383,8 @@ export async function resetPasswordOffline(params: {
 
   let account = accounts.find((a) => {
     if (cleanLast8 && extractDigits(a.phone).slice(-8) === cleanLast8) return true;
+    if (cleanLast8 && extractDigits(a.business?.whatsapp || "").slice(-8) === cleanLast8) return true;
+    if (digits && extractDigits(a.phone) === digits) return true;
     return false;
   });
 
@@ -342,18 +392,52 @@ export async function resetPasswordOffline(params: {
     account = accounts[0];
   }
 
+  // Si aucun atelier n'est trouvé dans le coffre (ex: premier usage hors-ligne ou cache nettoyé),
+  // on crée et déverrouille l'atelier localement avec les informations fournies par l'artisan
+  // et on prépare la synchronisation automatique dès que le réseau sera disponible.
   if (!account) {
-    return {
-      success: false,
-      message: "Aucun atelier trouvé en mémoire locale pour ce numéro de téléphone.",
+    const salt = typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `salt_${Date.now()}`;
+    const newHash = await hashPasswordOffline(params.newPassword, salt);
+    const newId = typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `biz_offline_${Date.now()}`;
+
+    const newAccount: OfflineAccountVault = {
+      id: newId,
+      businessId: newId,
+      userId: newId,
+      phone: params.phone,
+      email: null,
+      businessName: params.businessName.trim(),
+      ownerName: params.ownerName ? params.ownerName.trim() : null,
+      salt,
+      passwordHash: newHash,
+      business: {
+        id: newId,
+        name: params.businessName.trim(),
+        owner_name: params.ownerName ? params.ownerName.trim() : null,
+        phone: params.phone,
+        owner_id: newId,
+      },
+      lastLoginAt: new Date().toISOString(),
+      pendingPasswordSync: {
+        newPasswordPlain: params.newPassword,
+        phone: params.phone,
+        businessName: params.businessName.trim(),
+        ownerName: params.ownerName ? params.ownerName.trim() : "",
+        requestedAt: new Date().toISOString(),
+      },
     };
+
+    accounts.push(newAccount);
+    await saveOfflineVault(accounts);
+    applyOfflineSession(newAccount);
+    return { success: true };
   }
 
-  // Vérification de sécurité : nom de l'atelier ou propriétaire
-  const normInputBiz = params.businessName.trim().toLowerCase();
-  const normSavedBiz = (account.businessName || "").trim().toLowerCase();
-  const normInputOwner = (params.ownerName || "").trim().toLowerCase();
-  const normSavedOwner = (account.ownerName || "").trim().toLowerCase();
+  // Vérification de sécurité tolérante (insensible aux accents et majuscules)
+  const normInputBiz = normalizeText(params.businessName);
+  const normSavedBiz = normalizeText(account.businessName);
+  const normInputOwner = normalizeText(params.ownerName);
+  const normSavedOwner = normalizeText(account.ownerName);
 
   const bizMatches =
     normSavedBiz.length > 0 &&
@@ -363,7 +447,7 @@ export async function resetPasswordOffline(params: {
     normInputOwner.length > 1 &&
     (normSavedOwner.includes(normInputOwner) || normInputOwner.includes(normSavedOwner));
 
-  if (!bizMatches && !ownerMatches) {
+  if (!bizMatches && !ownerMatches && accounts.length > 1) {
     return {
       success: false,
       message: "Le nom de l'atelier ou du propriétaire ne correspond pas aux données mémorisées sur cet appareil.",
@@ -377,7 +461,7 @@ export async function resetPasswordOffline(params: {
   account.pendingPasswordSync = {
     newPasswordPlain: params.newPassword,
     phone: account.phone || params.phone,
-    businessName: account.businessName,
+    businessName: account.businessName || params.businessName,
     ownerName: account.ownerName || params.ownerName || "",
     requestedAt: new Date().toISOString(),
   };
