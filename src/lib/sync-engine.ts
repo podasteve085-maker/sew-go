@@ -85,9 +85,9 @@ async function runPendingSync(): Promise<number> {
     const queue = await getPendingSyncQueue();
     if (queue.length === 0) return 0;
 
-    // 2. Orchestration résiliente : tri topologique, déduplication, batch, isolation
-    //    multi-ateliers, backoff exponentiel, skip des items bloqués, journal de bord.
-    const { synced, skipped, failed } = await runResilientSync(
+    // 2. Orchestration résiliente : tri topologique, batch par lots, isolation
+    //    multi-ateliers, continuation sur erreur non-réseau, journal de bord.
+    const { synced, failed } = await runResilientSync(
       (item, mapping) => processSyncItem(item, mapping),
       idMapping,
     );
@@ -99,13 +99,13 @@ async function runPendingSync(): Promise<number> {
           : `${synced} modifications hors-ligne synchronisées !`,
         {
           description:
-            skipped > 0 || failed > 0
-              ? `${synced} réussie(s)${skipped > 0 ? `, ${skipped} ignorée(s)` : ""}${failed > 0 ? `, ${failed} en attente` : ""}.`
+            failed > 0
+              ? `${synced} réussie(s), ${failed} en attente de reconnexion.`
               : "Vos données atelier sont à jour sur le serveur.",
         },
       );
-    } else if (skipped > 0 || failed > 0) {
-      console.info(`[Sync Engine] Cycle terminé — synchronisé : ${synced}, ignorés : ${skipped}, en attente : ${failed}.`);
+    } else if (failed > 0) {
+      console.info(`[Sync Engine] Cycle terminé — synchronisé : ${synced}, en attente : ${failed}.`);
     }
 
     if (queryInvalidator) {

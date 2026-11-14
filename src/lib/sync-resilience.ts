@@ -5,11 +5,15 @@
  *   - Les synchros différées (semaines/mois d'accumulation hors-ligne).
  *   - L'isolation stricte multi-ateliers : chaque atelier ne touche qu'à ses propres données.
  *   - La résistance aux conflits et aux collisions inter-ateliers et multi-onglets.
- *   - Le backoff exponentiel avec plafond pour les items temporairement en échec.
  *   - Le traitement par lots (batch) pour les grandes files sans bloquer le thread UI.
- *   - La déduplication renforcée en entrée de file (idempotence des mutations).
  *   - Le journal de bord de synchronisation persistant (audit-trail local).
  *   - Le classement topologique de la file : Client → Commande → Paiement → Mesure → RDV.
+ *
+ * PRINCIPES DE SÉCURITÉ :
+ *   - Aucun item de la file n'est JAMAIS supprimé ici sans avoir été traité avec succès.
+ *   - Aucun item n'est sauté définitivement : chaque item est toujours tenté à chaque cycle.
+ *   - Les erreurs non-réseau ne bloquent PAS les items suivants indépendants.
+ *   - Seules les erreurs réseau suspendent le cycle (connexion perdue).
  *
  * IMPORTANT : Ce fichier ne modifie, ne remplace et ne supprime aucun fichier existant.
  * Il exporte des fonctions additionnelles appelées depuis sync-engine.ts.
@@ -27,18 +31,6 @@ import {
 // CONSTANTES DE CONFIGURATION
 // ---------------------------------------------------------------------------
 
-/** Délai de base du backoff exponentiel (ms). Chaque retry ×2 (plafonné à MAX_BACKOFF_MS). */
-const BASE_BACKOFF_MS = 1_500;
-
-/** Plafond du délai de backoff (10 secondes max entre retries). */
-const MAX_BACKOFF_MS = 10_000;
-
-/**
- * Nombre maximal de tentatives avant qu'un item soit marqué "dead" et sauté
- * pour ne pas bloquer les items suivants indépendants.
- */
-const MAX_RETRIES_BEFORE_SKIP = 5;
-
 /**
  * Taille maximale d'un lot traité en une passe (protège le thread UI).
  * Au-delà, chaque lot est espacé d'une micro-pause.
@@ -46,7 +38,7 @@ const MAX_RETRIES_BEFORE_SKIP = 5;
 const BATCH_SIZE = 50;
 
 /** Pause inter-lots (ms) pour libérer le thread UI entre deux séries. */
-const INTER_BATCH_PAUSE_MS = 80;
+const INTER_BATCH_PAUSE_MS = 60;
 
 /** Clé de stockage du journal de bord de synchronisation dans IndexedDB. */
 const SYNC_LOG_STORE_KEY = "couturpro_sync_audit_log";
@@ -58,16 +50,16 @@ const SYNC_LOG_STORE_KEY = "couturpro_sync_audit_log";
 // ---------------------------------------------------------------------------
 
 const ENTITY_PRIORITY: Record<string, number> = {
-  business: 0,       // 1er : infos de l'atelier
-  client: 1,         // 2e : clients
-  order: 2,          // 3e : commandes (dépendent des clients)
-  order_image: 3,    // 4e : photos de commandes (dépendent des commandes)
+  business: 0,        // 1er : infos de l'atelier
+  garment_type: 0,    // 1er : types de vêtements (indépendants)
+  catalog_model: 0,   // 1er : modèles catalogue (indépendants)
+  client: 1,          // 2e : clients
+  expense: 1,         // 2e : dépenses (légèrement dépendantes de l'atelier)
+  order: 2,           // 3e : commandes (dépendent des clients)
+  order_image: 3,     // 4e : photos de commandes (dépendent des commandes)
   measurement_set: 3, // 4e : mesures (dépendent des clients)
-  payment: 4,        // 5e : paiements (dépendent des commandes)
-  appointment: 3,    // 4e : rendez-vous (dépendent des clients)
-  garment_type: 0,   // 1er : types de vêtements (indépendants)
-  catalog_model: 0,  // 1er : modèles catalogue (indépendants)
-  expense: 1,        // 2e : dépenses (légèrement dépendantes de l'atelier)
+  appointment: 3,     // 4e : rendez-vous (dépendent des clients)
+  payment: 4,         // 5e : paiements (dépendent des commandes)
 };
 
 // ---------------------------------------------------------------------------
@@ -82,64 +74,25 @@ function delay(ms: number): Promise<void> {
 }
 
 /**
- * Calcule le délai de backoff exponentiel avec jitter (±20%) pour éviter
- * la tempête de retries simultanés depuis plusieurs onglets/appareils.
+ * Détermine si une erreur est réseau (connexion perdue, timeout, surcharge serveur).
+ * Ces erreurs suspendent le cycle car les items suivants qui en dépendent échoueraient aussi.
  */
-export function computeBackoffDelay(retryCount: number): number {
-  const base = Math.min(BASE_BACKOFF_MS * Math.pow(2, retryCount), MAX_BACKOFF_MS);
-  // ±20% de jitter pour désynchroniser les retries multi-onglets
-  const jitter = base * 0.2 * (Math.random() * 2 - 1);
-  return Math.round(base + jitter);
-}
-
-/**
- * Détermine si un item en échec doit être sauté (pour débloquer la file)
- * ou si son erreur est définitivement fatale (violation FK non récupérable).
- */
-export function shouldSkipFailedItem(item: SyncQueueItem): boolean {
-  const retries = item.retryCount ?? 0;
-  if (retries >= MAX_RETRIES_BEFORE_SKIP) return true;
-
-  const msg = (item.errorMessage ?? "").toLowerCase();
-  // Erreurs définitivement fatales : violation de contrainte d'intégrité non transitoire
-  const fatalPatterns = [
-    "violates check constraint",
-    "violates not-null constraint",
-    "invalid input syntax",
-    "value too long",
-    "already exists",        // doublon irrécupérable
-    "permission denied",     // problème RLS : ne réessayera pas
-  ];
-  return fatalPatterns.some((p) => msg.includes(p));
-}
-
-/**
- * Détermine si une erreur est transitoire (réseau, timeout, surcharge serveur)
- * et mérite un retry avec backoff.
- */
-export function isTransientError(err: unknown): boolean {
-  if (!navigator.onLine) return true;
+function isNetworkError(err: unknown): boolean {
+  if (typeof navigator !== "undefined" && !navigator.onLine) return true;
   const msg =
     err instanceof Error
       ? err.message.toLowerCase()
       : typeof err === "string"
       ? err.toLowerCase()
       : "";
-  const transientPatterns = [
-    "failed to fetch",
-    "network",
-    "timeout",
-    "abort",
-    "503",
-    "502",
-    "504",
-    "too many requests",
-    "rate limit",
-    "load failed",
-    "fetch",
-    "connection",
-  ];
-  return transientPatterns.some((p) => msg.includes(p));
+  return (
+    msg.includes("failed to fetch") ||
+    msg.includes("network") ||
+    msg.includes("timeout") ||
+    msg.includes("abort") ||
+    msg.includes("load failed") ||
+    msg.includes("offline")
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -150,6 +103,8 @@ export function isTransientError(err: unknown): boolean {
  * Trie la file d'attente en respectant l'ordre de dépendance des entités.
  * À priorité égale, respecte l'ordre chronologique FIFO (createdAt ASC).
  * Garantit qu'un client est toujours synchronisé avant sa commande, etc.
+ *
+ * NOTE : Ne modifie jamais le contenu des items, uniquement leur ordre.
  */
 export function sortQueueTopologically(queue: SyncQueueItem[]): SyncQueueItem[] {
   return [...queue].sort((a, b) => {
@@ -194,59 +149,11 @@ export function itemBelongsToCurrentBusiness(
 }
 
 // ---------------------------------------------------------------------------
-// DÉDUPLICATION RENFORCÉE (IDEMPOTENCE)
-// ---------------------------------------------------------------------------
-
-/**
- * Déduplication à l'entrée de la file : si plusieurs mutations "update" successives
- * portent sur le même objet, fusionne leurs payloads en une seule opération.
- * Évite les N requêtes inutiles sur Supabase pour le même enregistrement.
- *
- * Cette déduplication est complémentaire à celle de addToSyncQueue dans offline-storage.ts
- * et opère au moment du traitement (file déjà stockée).
- */
-export function deduplicateQueue(queue: SyncQueueItem[]): SyncQueueItem[] {
-  const seen = new Map<string, SyncQueueItem>();
-  const result: SyncQueueItem[] = [];
-
-  for (const item of queue) {
-    // Clé de déduplication : entité + action + identifiant de l'objet
-    const objId =
-      (item.payload["id"] as string | undefined) ?? item.tempId ?? item.id;
-    const key = `${item.entity}::${item.action}::${objId}`;
-
-    if (item.action === "update" && seen.has(key)) {
-      // Fusionner les payloads : le plus récent écrase le plus ancien
-      const existing = seen.get(key)!;
-      const merged: SyncQueueItem = {
-        ...existing,
-        payload: { ...existing.payload, ...item.payload },
-        // Conserver la date la plus ancienne pour maintenir l'ordre FIFO
-        createdAt: existing.createdAt,
-      };
-      seen.set(key, merged);
-      // Supprimer l'entrée ancienne de la liste de résultat
-      const idx = result.findIndex((r) => r.id === existing.id);
-      if (idx !== -1) result[idx] = merged;
-      // Marquer l'item en double comme traité pour éviter double envoi
-      removeSyncQueueItem(item.id).catch(() => {});
-    } else {
-      seen.set(key, item);
-      result.push(item);
-    }
-  }
-
-  return result;
-}
-
-// ---------------------------------------------------------------------------
 // TRAITEMENT PAR LOTS (BATCH PROCESSING)
 // ---------------------------------------------------------------------------
 
 /**
  * Découpe un tableau en sous-tableaux de taille `size`.
- * Utilisé pour traiter la file hors-ligne par lots de BATCH_SIZE items,
- * en insérant une micro-pause entre chaque lot pour ne pas bloquer le thread UI.
  */
 export function chunkArray<T>(arr: T[], size: number): T[][] {
   const chunks: T[][] = [];
@@ -257,13 +164,17 @@ export function chunkArray<T>(arr: T[], size: number): T[][] {
 }
 
 /**
- * Génère les lots de traitement depuis une file déjà triée et dédupliquée.
- * Retourne un itérateur asynchrone de lots avec pause inter-lots.
+ * Génère les lots de traitement depuis une file déjà triée topologiquement.
+ * Insère une micro-pause entre chaque lot pour libérer le thread UI.
+ *
+ * IMPORTANT : Aucune déduplication ici — addToSyncQueue dans offline-storage.ts
+ * s'en charge déjà à l'écriture. Toute déduplication ici risquerait de supprimer
+ * des items légitimes ou de fusionner des payloads dans le mauvais ordre.
  */
 export async function* generateSyncBatches(
   queue: SyncQueueItem[],
 ): AsyncGenerator<SyncQueueItem[]> {
-  const sorted = sortQueueTopologically(deduplicateQueue(queue));
+  const sorted = sortQueueTopologically(queue);
   const chunks = chunkArray(sorted, BATCH_SIZE);
 
   for (let i = 0; i < chunks.length; i++) {
@@ -284,7 +195,7 @@ export interface SyncLogEntry {
   timestamp: string;
   entity: string;
   action: string;
-  status: "success" | "skipped" | "failed";
+  status: "success" | "failed";
   retryCount: number;
   errorMessage?: string;
   businessId?: string;
@@ -294,6 +205,7 @@ export interface SyncLogEntry {
  * Enregistre une entrée dans le journal local de synchronisation.
  * Stocké dans IndexedDB sous la clé `couturpro_sync_audit_log`.
  * Les 200 dernières entrées sont conservées (rotation automatique).
+ * Le journal ne bloque JAMAIS la synchronisation principale.
  */
 export async function logSyncEvent(entry: Omit<SyncLogEntry, "id" | "timestamp">): Promise<void> {
   try {
@@ -303,7 +215,6 @@ export async function logSyncEvent(entry: Omit<SyncLogEntry, "id" | "timestamp">
       timestamp: new Date().toISOString(),
     };
 
-    // Lire le journal existant
     const { getLocalItem } = await import("./offline-storage");
     const existing = await getLocalItem<{ id: string; entries: SyncLogEntry[] }>(
       "workshop_data",
@@ -314,11 +225,9 @@ export async function logSyncEvent(entry: Omit<SyncLogEntry, "id" | "timestamp">
     entries.push(logEntry);
 
     // Rotation : conserver uniquement les 200 dernières entrées
-    const trimmed = entries.slice(-200);
-
     await setLocalItem("workshop_data", {
       id: SYNC_LOG_STORE_KEY,
-      entries: trimmed,
+      entries: entries.slice(-200),
     });
   } catch {
     // Le journal ne doit jamais bloquer la synchronisation principale
@@ -347,82 +256,94 @@ export async function getSyncLog(): Promise<SyncLogEntry[]> {
 
 /**
  * Traite la file de synchronisation complète avec toutes les garanties de robustesse :
- * - Tri topologique (Client → Commande → Paiement → …)
- * - Déduplication
- * - Traitement par lots (BATCH_SIZE items)
- * - Isolation multi-ateliers
- * - Backoff exponentiel pour les erreurs transitoires
- * - Skip des items définitivement bloqués (sans arrêter les items indépendants)
- * - Journal de bord de chaque opération
  *
- * @param processFn Fonction de traitement d'un item unitaire (issue de processSyncItem dans sync-engine.ts)
+ * ✅ Tri topologique (business → client → order → payment → …) : les dépendances
+ *    sont toujours synchronisées AVANT leurs dépendants.
+ *
+ * ✅ Traitement par lots (BATCH_SIZE items) avec micro-pauses : ne bloque jamais
+ *    l'interface utilisateur, même avec des milliers d'items accumulés.
+ *
+ * ✅ Isolation multi-ateliers : filtrage par business_id courant, garantit qu'aucun
+ *    atelier ne touche aux données d'un autre.
+ *
+ * ✅ Continuation sur erreur non-réseau : un item en échec ne bloque PAS les items
+ *    suivants indépendants (comportement identique au moteur d'origine).
+ *
+ * ✅ Suspension sur erreur réseau : si la connexion est perdue, le cycle s'arrête
+ *    proprement pour reprendre au prochain cycle (evite les boucles d'erreurs).
+ *
+ * ✅ Aucun item supprimé sans traitement réussi : toute la gestion de la file
+ *    reste cohérente — un item n'est retiré de la file QUE si processFn réussit.
+ *
+ * ✅ Journal de bord : chaque opération (succès/échec) est tracée localement.
+ *
+ * @param processFn Fonction de traitement d'un item unitaire (processSyncItem de sync-engine.ts)
  * @param idMapping Table de correspondance des identifiants temporaires → identifiants Supabase
- * @returns Nombre d'items synchronisés avec succès
+ * @returns Statistiques du cycle : items synchronisés, en échec
  */
 export async function runResilientSync(
   processFn: (item: SyncQueueItem, idMapping: Map<string, string>) => Promise<void>,
   idMapping: Map<string, string>,
-): Promise<{ synced: number; skipped: number; failed: number }> {
+): Promise<{ synced: number; failed: number }> {
   const currentBusinessId = getCurrentBusinessIdFast();
   let synced = 0;
-  let skipped = 0;
   let failed = 0;
 
-  // 1. Lire la file complète depuis IndexedDB
+  // 1. Lire la file complète depuis IndexedDB (déjà triée par createdAt ASC via l'index IDB)
   const rawQueue = await getPendingSyncQueue();
-  if (rawQueue.length === 0) return { synced: 0, skipped: 0, failed: 0 };
+  if (rawQueue.length === 0) return { synced: 0, failed: 0 };
 
-  // 2. Filtrer : seulement les items de l'atelier courant (isolation multi-ateliers)
+  // 2. Filtrer : seulement les items de l'atelier courant (isolation stricte multi-ateliers)
+  //    Cela garantit qu'un atelier A ne synchronise JAMAIS les données d'un atelier B,
+  //    même s'ils se connectent exactement au même moment.
   const ownQueue = rawQueue.filter((item) =>
     itemBelongsToCurrentBusiness(item, currentBusinessId),
   );
 
-  // 3. Traitement en lots triés et dédupliqués
+  if (ownQueue.length === 0) return { synced: 0, failed: 0 };
+
+  // 3. Traitement en lots triés topologiquement
   for await (const batch of generateSyncBatches(ownQueue)) {
-    if (!navigator.onLine) break; // Arrêt immédiat si connexion perdue en cours de sync
+    // Arrêt immédiat si connexion perdue entre deux lots
+    if (!navigator.onLine) {
+      console.info("[SyncRésil] Connexion perdue — suspension du cycle de synchronisation.");
+      break;
+    }
 
     for (const item of batch) {
-      if (!navigator.onLine) break;
-
-      // 4. Skip des items définitivement bloqués (trop de retries ou erreur fatale)
-      if (shouldSkipFailedItem(item)) {
-        console.warn(
-          `[SyncRésil] Item sauté après ${item.retryCount} tentatives : ${item.entity}/${item.action} [${item.id}]`,
-        );
-        await logSyncEvent({
-          entity: item.entity,
-          action: item.action,
-          status: "skipped",
-          retryCount: item.retryCount,
-          errorMessage: item.errorMessage,
-          businessId: item.payload["business_id"] as string | undefined,
-        });
-        skipped++;
-        continue; // NE PAS stopper la file — continuer les items suivants
+      // Arrêt immédiat si connexion perdue en cours de lot
+      if (!navigator.onLine) {
+        console.info("[SyncRésil] Connexion perdue — suspension du cycle de synchronisation.");
+        break;
       }
 
       try {
+        // Tentative de synchronisation de l'item
         await processFn(item, idMapping);
+
+        // Succès : retirer l'item de la file (et seulement là)
         await removeSyncQueueItem(item.id);
         synced++;
 
-        await logSyncEvent({
+        // Journaliser le succès (non-bloquant)
+        logSyncEvent({
           entity: item.entity,
           action: item.action,
           status: "success",
           retryCount: item.retryCount,
           businessId: item.payload["business_id"] as string | undefined,
-        });
+        }).catch(() => {});
+
       } catch (err: unknown) {
         const errMsg = err instanceof Error ? err.message : String(err);
+        const newRetryCount = (item.retryCount ?? 0) + 1;
+
         console.error(
-          `[SyncRésil] Échec [${item.entity}/${item.action}] id=${item.id} :`,
+          `[SyncRésil] Échec [${item.entity}/${item.action}] retryCount=${newRetryCount} :`,
           errMsg,
         );
 
-        const newRetryCount = (item.retryCount ?? 0) + 1;
-        const isTransient = isTransientError(err);
-
+        // Mettre à jour le compteur de retries dans la file (l'item reste pour le prochain cycle)
         await updateSyncQueueItem({
           ...item,
           retryCount: newRetryCount,
@@ -430,56 +351,31 @@ export async function runResilientSync(
           errorMessage: errMsg,
         });
 
-        await logSyncEvent({
+        // Journaliser l'échec (non-bloquant)
+        logSyncEvent({
           entity: item.entity,
           action: item.action,
           status: "failed",
           retryCount: newRetryCount,
           errorMessage: errMsg,
           businessId: item.payload["business_id"] as string | undefined,
-        });
+        }).catch(() => {});
 
-        if (!isTransient) {
-          // Erreur non-réseau : on continue les items INDÉPENDANTS
-          // (ne pas arrêter toute la file pour une erreur isolée non transitoire)
-          failed++;
-          continue;
+        failed++;
+
+        // Si erreur réseau : suspension immédiate du cycle entier
+        // (les items dépendants des suivants échoueraient de toute façon)
+        if (isNetworkError(err)) {
+          console.info("[SyncRésil] Erreur réseau détectée — suspension du cycle.");
+          return { synced, failed };
         }
 
-        // Erreur réseau transitoire : backoff exponentiel avant de continuer
-        const backoff = computeBackoffDelay(newRetryCount);
-        console.info(`[SyncRésil] Backoff ${backoff}ms avant retry (tentative ${newRetryCount})…`);
-        await delay(backoff);
-
-        // Vérifier à nouveau la connexion après le délai
-        if (!navigator.onLine) {
-          console.info("[SyncRésil] Connexion perdue pendant backoff — suspension de la sync.");
-          break;
-        }
-
-        // Un seul retry immédiat après backoff pour les erreurs réseau légères
-        try {
-          await processFn(item, idMapping);
-          await removeSyncQueueItem(item.id);
-          synced++;
-
-          await logSyncEvent({
-            entity: item.entity,
-            action: item.action,
-            status: "success",
-            retryCount: newRetryCount,
-            businessId: item.payload["business_id"] as string | undefined,
-          });
-        } catch (retryErr: unknown) {
-          failed++;
-          console.warn(
-            `[SyncRésil] Retry échoué pour ${item.id} — reporté au prochain cycle.`,
-            retryErr,
-          );
-        }
+        // Si erreur non-réseau (ex: validation Supabase) :
+        // On continue avec les items suivants qui sont indépendants.
+        // L'item en échec sera retenté au prochain cycle de synchronisation (toutes les 15s).
       }
     }
   }
 
-  return { synced, skipped, failed };
+  return { synced, failed };
 }
