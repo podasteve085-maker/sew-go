@@ -24,8 +24,80 @@ import {
   removeSyncQueueItem,
   updateSyncQueueItem,
   setLocalItem,
+  getLocalItem,
   type SyncQueueItem,
 } from "./offline-storage";
+
+// ---------------------------------------------------------------------------
+// PERSISTANCE DU MAPPING DES IDENTIFIANTS TEMPORAIRES (idMapping cross-cycles)
+// ---------------------------------------------------------------------------
+
+/**
+ * Clé de stockage dans IndexedDB pour les mappings tempId → realId.
+ * Persiste entre les cycles de synchronisation (toutes les 15s).
+ *
+ * PROBLÈME RÉSOLU : Si un client est créé offline (temp_xxx → uuid-supabase) dans le
+ * cycle N, et qu'un paiement référençant cet ordre arrive dans le cycle N+1,
+ * l'idMapping local (en mémoire) est vide → FK violation → item bloqué.
+ *
+ * SOLUTION : On persiste chaque nouveau mapping dans IndexedDB immédiatement après
+ * un sync réussi, et on le recharge au début de chaque cycle.
+ */
+const ID_MAPPING_STORE_KEY = "couturpro_id_mappings";
+
+interface PersistedIdMappings {
+  id: string;
+  entries: Array<{ tempId: string; realId: string; savedAt: string }>;
+}
+
+/**
+ * Charge les mappings persistés depuis IndexedDB et les fusionne dans la Map en mémoire.
+ * Appelé au début de chaque runResilientSync pour récupérer les mappings des cycles précédents.
+ */
+export async function loadPersistedIdMappings(idMapping: Map<string, string>): Promise<void> {
+  try {
+    const stored = await getLocalItem<PersistedIdMappings>("workshop_data", ID_MAPPING_STORE_KEY);
+    if (stored?.entries) {
+      for (const entry of stored.entries) {
+        // On ne charge que si pas déjà présent en mémoire (ne pas écraser les mappings du cycle courant)
+        if (!idMapping.has(entry.tempId)) {
+          idMapping.set(entry.tempId, entry.realId);
+        }
+      }
+    }
+  } catch {
+    // Ne jamais bloquer la synchronisation à cause du journal de mapping
+  }
+}
+
+/**
+ * Persiste un mapping tempId → realId dans IndexedDB.
+ * Appelé immédiatement après chaque sync d'item réussi qui produit un nouveau mapping.
+ * Conservation maximale : 500 entrées (rotation automatique).
+ */
+export async function persistIdMapping(tempId: string, realId: string): Promise<void> {
+  try {
+    const stored = await getLocalItem<PersistedIdMappings>("workshop_data", ID_MAPPING_STORE_KEY);
+    const entries = stored?.entries ?? [];
+
+    // Dédupliquer : remplacer si même tempId
+    const idx = entries.findIndex((e) => e.tempId === tempId);
+    const newEntry = { tempId, realId, savedAt: new Date().toISOString() };
+    if (idx >= 0) {
+      entries[idx] = newEntry;
+    } else {
+      entries.push(newEntry);
+    }
+
+    // Rotation : conserver uniquement les 500 dernières entrées
+    await setLocalItem("workshop_data", {
+      id: ID_MAPPING_STORE_KEY,
+      entries: entries.slice(-500),
+    });
+  } catch {
+    // Ne jamais bloquer la synchronisation à cause du journal de mapping
+  }
+}
 
 // ---------------------------------------------------------------------------
 // CONSTANTES DE CONFIGURATION
@@ -74,24 +146,40 @@ function delay(ms: number): Promise<void> {
 }
 
 /**
- * Détermine si une erreur est réseau (connexion perdue, timeout, surcharge serveur).
- * Ces erreurs suspendent le cycle car les items suivants qui en dépendent échoueraient aussi.
+ * Détermine si une erreur est une VRAIE erreur réseau (connexion physiquement perdue).
+ *
+ * IMPORTANT : Cette fonction est délibérément stricte pour ne PAS stopper le cycle de sync
+ * sur des erreurs Supabase logiques (violation FK, contrainte unique, permission RLS) qui
+ * contiendraient des mots comme "network", "timeout", "abort" dans leur message.
+ *
+ * Seules les erreurs correspondant à une coupure réseau réelle (navigator.onLine = false
+ * ou messages d'échec DNS/TCP/SSL) suspendent le cycle.
+ *
+ * Les erreurs Supabase passent en "failed" et l'item est retenté au prochain cycle (15s).
+ * Les autres items indépendants continuent de se synchroniser normalement.
  */
 function isNetworkError(err: unknown): boolean {
+  // Vérification immédiate du statut réseau du navigateur
   if (typeof navigator !== "undefined" && !navigator.onLine) return true;
+
   const msg =
     err instanceof Error
       ? err.message.toLowerCase()
       : typeof err === "string"
       ? err.toLowerCase()
       : "";
+
+  // Patterns strictement liés à une coupure réseau physique
+  // NOTE : "network" seul est exclu car Supabase l'utilise aussi pour des erreurs logiques
+  // NOTE : "timeout" seul est exclu car il peut venir de timeouts Supabase côté serveur
+  // NOTE : "abort" seul est exclu car il peut venir d'AbortController applicatif
   return (
-    msg.includes("failed to fetch") ||
-    msg.includes("network") ||
-    msg.includes("timeout") ||
-    msg.includes("abort") ||
-    msg.includes("load failed") ||
-    msg.includes("offline")
+    msg.includes("failed to fetch") ||          // Navigateur : DNS ou TCP echoué
+    msg.includes("networkerror") ||             // Firefox : vrai NetworkError
+    msg.includes("network request failed") ||   // React Native / fetch polyfill
+    msg.includes("load failed") ||              // Safari iOS : echec réseau
+    msg.includes("the internet connection appears to be offline") || // iOS natif
+    msg.includes("net::err_")                   // Chrome : erreurs réseau bas niveau
   );
 }
 
@@ -279,18 +367,24 @@ export async function getSyncLog(): Promise<SyncLogEntry[]> {
  *
  * @param processFn Fonction de traitement d'un item unitaire (processSyncItem de sync-engine.ts)
  * @param idMapping Table de correspondance des identifiants temporaires → identifiants Supabase
+ * @param preloadedQueue File déjà lue par l'appelant (évite une double-lecture d'IndexedDB)
  * @returns Statistiques du cycle : items synchronisés, en échec
  */
 export async function runResilientSync(
   processFn: (item: SyncQueueItem, idMapping: Map<string, string>) => Promise<void>,
   idMapping: Map<string, string>,
+  preloadedQueue?: SyncQueueItem[],
 ): Promise<{ synced: number; failed: number }> {
   const currentBusinessId = getCurrentBusinessIdFast();
   let synced = 0;
   let failed = 0;
 
-  // 1. Lire la file complète depuis IndexedDB (déjà triée par createdAt ASC via l'index IDB)
-  const rawQueue = await getPendingSyncQueue();
+  // 0. Charger les mappings persistés depuis les cycles précédents
+  //    (résout les FK temporaires pour les paiements/mesures créés dans un cycle antérieur)
+  await loadPersistedIdMappings(idMapping);
+
+  // 1. Lire la file complète depuis IndexedDB (ou utiliser la file pré-lue pour éviter la double-lecture)
+  const rawQueue = preloadedQueue ?? await getPendingSyncQueue();
   if (rawQueue.length === 0) return { synced: 0, failed: 0 };
 
   // 2. Filtrer : seulement les items de l'atelier courant (isolation stricte multi-ateliers)
@@ -318,12 +412,30 @@ export async function runResilientSync(
       }
 
       try {
+        // Snapshot de la taille du idMapping AVANT le traitement (pour détecter les nouveaux mappings)
+        const mappingSizeBefore = idMapping.size;
+
         // Tentative de synchronisation de l'item
         await processFn(item, idMapping);
 
         // Succès : retirer l'item de la file (et seulement là)
         await removeSyncQueueItem(item.id);
         synced++;
+
+        // Si processFn a ajouté de nouveaux mappings (ex: temp_xxx → uuid-supabase),
+        // les persister dans IndexedDB pour qu'ils soient disponibles dans les cycles suivants.
+        // Cela résout le cas : client créé en cycle N, paiement pour cet ordre en cycle N+1.
+        if (idMapping.size > mappingSizeBefore) {
+          // Identifier et persister uniquement les nouveaux mappings (pas tous)
+          let mappingIdx = 0;
+          for (const [tempId, realId] of idMapping) {
+            if (mappingIdx >= mappingSizeBefore) {
+              // Ce mapping est nouveau (au-delà de l'index avant la synchro)
+              persistIdMapping(tempId, realId).catch(() => {});
+            }
+            mappingIdx++;
+          }
+        }
 
         // Journaliser le succès (non-bloquant)
         logSyncEvent({
