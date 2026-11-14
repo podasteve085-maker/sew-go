@@ -26,6 +26,7 @@ import {
   deleteLocalItem,
   type SyncQueueItem,
 } from "./offline-storage";
+import { runResilientSync } from "./sync-resilience";
 
 type SyncListener = () => void;
 const listeners = new Set<SyncListener>();
@@ -70,10 +71,9 @@ async function runPendingSync(): Promise<number> {
   notifyListeners();
 
   const idMapping = new Map<string, string>();
-  let syncedCount = 0;
 
   try {
-    // 0. Synchronisation automatique des mots de passe mis a jour hors-ligne
+    // 0. Synchronisation automatique des mots de passe mis à jour hors-ligne
     try {
       const { syncPendingOfflinePasswords } = await import("@/lib/offline-auth");
       await syncPendingOfflinePasswords();
@@ -81,61 +81,42 @@ async function runPendingSync(): Promise<number> {
       console.warn("[Sync Engine] Erreur synchro mot de passe hors-ligne :", e);
     }
 
-    // Acquire the in-tab guard before the first await so two callers cannot
-    // both read and replay the same queue at once.
+    // 1. Vérification rapide : file vide ?
     const queue = await getPendingSyncQueue();
     if (queue.length === 0) return 0;
 
-    for (const item of queue) {
-      try {
-        await processSyncItem(item, idMapping);
-        await removeSyncQueueItem(item.id);
-        syncedCount++;
-      } catch (err: unknown) {
-        console.error(`[Sync Engine] Échec sur l'action ${item.id} (${item.entity}) :`, err);
-        // En cas d'erreur réseau transitoire, on stoppe la file pour ne pas désynchroniser les dépendances
-        if (!navigator.onLine) break;
+    // 2. Orchestration résiliente : tri topologique, déduplication, batch, isolation
+    //    multi-ateliers, backoff exponentiel, skip des items bloqués, journal de bord.
+    const { synced, skipped, failed } = await runResilientSync(
+      (item, mapping) => processSyncItem(item, mapping),
+      idMapping,
+    );
 
-        const currentRetries = (item.retryCount || 0) + 1;
-        const errMsg = err instanceof Error ? err.message : String(err);
-
-        await updateSyncQueueItem({
-          ...item,
-          retryCount: currentRetries,
-          status: "failed",
-          errorMessage: errMsg,
-        });
-
-        // Conserver toute mutation échouée permet une reprise ultérieure sans perte de données.
-        // Arrêter la file maintient l'ordre des dépendances jusqu'à résolution de cette action.
-        if (
-          currentRetries >= 3 ||
-          errMsg.includes("foreign key") ||
-          errMsg.includes("Paiement sans business_id") ||
-          errMsg.includes("not found")
-        ) {
-          console.warn(`[Sync Engine] Action conservée pour reprise : ${item.id} (${item.entity}) :`, errMsg);
-        }
-      }
-    }
-
-    if (syncedCount > 0) {
+    if (synced > 0) {
       toast.success(
-        syncedCount === 1
+        synced === 1
           ? "1 modification hors-ligne synchronisée !"
-          : `${syncedCount} modifications hors-ligne synchronisées !`,
-        { description: "Vos données atelier sont à jour sur le serveur." },
+          : `${synced} modifications hors-ligne synchronisées !`,
+        {
+          description:
+            skipped > 0 || failed > 0
+              ? `${synced} réussie(s)${skipped > 0 ? `, ${skipped} ignorée(s)` : ""}${failed > 0 ? `, ${failed} en attente` : ""}.`
+              : "Vos données atelier sont à jour sur le serveur.",
+        },
       );
+    } else if (skipped > 0 || failed > 0) {
+      console.info(`[Sync Engine] Cycle terminé — synchronisé : ${synced}, ignorés : ${skipped}, en attente : ${failed}.`);
     }
+
     if (queryInvalidator) {
       queryInvalidator();
     }
+
+    return synced;
   } finally {
     isSyncing = false;
     notifyListeners();
   }
-
-  return syncedCount;
 }
 
 /**
