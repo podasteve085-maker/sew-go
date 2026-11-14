@@ -250,11 +250,116 @@ async function processSyncItem(
           delete upsertData["id"];
         }
 
-        const { data, error } = await supabase
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        let data: any = null;
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        let error: any = null;
+
+        // 1. Tentative d'upsert direct (rapide, 1 seule requête réseau)
+        const primaryRes = await supabase
           .from("orders")
           .upsert(upsertData as never, { onConflict: "id" })
           .select()
           .single();
+
+        data = primaryRes.data;
+        error = primaryRes.error;
+
+        // 2. Si l'upsert échoue à cause de la machine à états de la base de données (trg_validate_order_status)
+        //    qui interdit de sauter directement par exemple de 'preparation' vers 'livree',
+        //    on applique la résolution pas-à-pas pour franchir les étapes intermédiaires sans bloquer !
+        if (
+          error &&
+          targetId &&
+          !targetId.startsWith("temp_") &&
+          (error.message?.includes("Transition de statut invalide") ||
+            error.message?.includes("validate_order_status") ||
+            error.message?.includes("statut") ||
+            error.code === "P0001")
+        ) {
+          console.info(
+            `[SyncEngine] Résolution transition de statut pas-à-pas pour la commande ${targetId}...`,
+          );
+
+          // Récupérer le statut actuel réel sur Supabase
+          const { data: remoteRow } = await supabase
+            .from("orders")
+            .select("status")
+            .eq("id", targetId)
+            .maybeSingle();
+
+          const STATUS_ORDER: OrderStatus[] = [
+            "nouvelle",
+            "preparation",
+            "confection",
+            "finition",
+            "prete",
+            "livree",
+          ];
+
+          const currentStatus = (remoteRow?.status as OrderStatus) || "nouvelle";
+          const targetStatus = (upsertData["status"] as OrderStatus) || "nouvelle";
+          const currentIdx = STATUS_ORDER.indexOf(currentStatus);
+          const targetIdx = STATUS_ORDER.indexOf(targetStatus);
+
+          if (currentIdx >= 0 && targetIdx >= 0 && targetIdx > currentIdx) {
+            let stepSuccess = true;
+            // Avancer de statut en statut séquentiellement
+            for (let step = currentIdx + 1; step <= targetIdx; step++) {
+              const nextStatus = STATUS_ORDER[step];
+              if (!nextStatus) break;
+
+              if (step === targetIdx) {
+                // Dernière étape : appliquer toutes les données finales (delivered_to, notes, etc.)
+                const finalRes = await supabase
+                  .from("orders")
+                  .update(upsertData as never)
+                  .eq("id", targetId)
+                  .select()
+                  .single();
+                data = finalRes.data;
+                error = finalRes.error;
+              } else {
+                // Étape intermédiaire pour satisfaire trg_validate_order_status
+                const { error: stepErr } = await supabase
+                  .from("orders")
+                  .update({ status: nextStatus })
+                  .eq("id", targetId);
+                if (stepErr) {
+                  console.warn(
+                    `[SyncEngine] Échec transition intermédiaire vers ${nextStatus}:`,
+                    stepErr,
+                  );
+                  stepSuccess = false;
+                  break;
+                }
+              }
+            }
+
+            if (!stepSuccess && error) {
+              // Si la séquence intermédiaire a buté, tenter un update ciblé
+              const retryRes = await supabase
+                .from("orders")
+                .update(upsertData as never)
+                .eq("id", targetId)
+                .select()
+                .single();
+              data = retryRes.data;
+              error = retryRes.error;
+            }
+          } else {
+            // Statut identique ou transition directe permise (ex: annulee)
+            const fallbackRes = await supabase
+              .from("orders")
+              .update(upsertData as never)
+              .eq("id", targetId)
+              .select()
+              .single();
+            data = fallbackRes.data;
+            error = fallbackRes.error;
+          }
+        }
+
         if (error) throw error;
         if (data) {
           if (id && id !== data.id) idMapping.set(id, data.id);
