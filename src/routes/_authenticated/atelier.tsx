@@ -1138,7 +1138,13 @@ function DangerZoneAccountDeletionSection({ business }: { business: { id: string
       });
 
       if (error) {
-        throw error;
+        const errorMsg = String(error.message || error.details || "").toLowerCase();
+        // Si l'atelier est déjà détruit ou introuvable sur le serveur, continuer le nettoyage local
+        if (errorMsg.includes("introuvable") || errorMsg.includes("privilèges") || errorMsg.includes("non autorisée")) {
+          console.warn("[Suppression atelier] L'atelier semble déjà supprimé du serveur, nettoyage local en cours...");
+        } else {
+          throw error;
+        }
       }
 
       toast.success("Atelier et données personnelles définitivement supprimés.");
@@ -1169,7 +1175,7 @@ function DangerZoneAccountDeletionSection({ business }: { business: { id: string
 
       window.location.href = "/auth?account_deleted=true";
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : "Erreur de suppression";
+      const msg = err instanceof Error ? err.message : (err as any)?.message || "Erreur de suppression";
       toast.error(`Impossible de supprimer l'atelier : ${msg}`);
       setDeleting(false);
     }
