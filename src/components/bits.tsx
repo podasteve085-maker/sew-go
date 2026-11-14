@@ -236,6 +236,10 @@ export function OrderCard({ order }: { order: OrderRow }) {
   const due = balance(order);
   const client = order.clients;
   const clientPhone = cleanPhone(client?.whatsapp || client?.phone);
+  const clientDisplayName =
+    client && (client.first_name || client.last_name)
+      ? fullName(client)
+      : (order.delivered_to || fullName(client));
 
   return (
     <div className="card-soft list-card-fast flex flex-col justify-between p-3 sm:p-4 transition-all hover:border-primary/40 hover:shadow-xs">
@@ -255,7 +259,7 @@ export function OrderCard({ order }: { order: OrderRow }) {
               </p>
             </div>
             <p className="mt-0.5 truncate text-xs font-medium text-muted-foreground">
-              {fullName(client)}
+              {clientDisplayName}
             </p>
           </div>
           <div className="flex shrink-0 flex-col items-end gap-1">

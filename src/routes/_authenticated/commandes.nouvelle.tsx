@@ -206,9 +206,23 @@ function NewOrder() {
       }
 
       const rawQty = Number(values["quantity"] || 1);
+      const selectedClient = (clients.data ?? []).find((c) => c.id === selectedClientId);
+      const clientFullName = selectedClient ? fullName(selectedClient) : null;
+
       const order = await saveOrderOffline({
         business_id: business.id,
         client_id: selectedClientId,
+        delivered_to: clientFullName,
+        clients: selectedClient ? {
+          id: selectedClient.id,
+          first_name: selectedClient.first_name,
+          last_name: selectedClient.last_name,
+          phone: selectedClient.phone,
+          whatsapp: selectedClient.whatsapp,
+          city: selectedClient.city,
+          notes: selectedClient.notes,
+          gender: selectedClient.gender,
+        } : undefined,
         garment_type: values["garment_type"] ?? "",
         fabric: values["fabric"] || null,
         quantity: isNaN(rawQty) || rawQty < 1 ? 1 : Math.round(rawQty),

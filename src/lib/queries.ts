@@ -271,6 +271,61 @@ async function enrichOrdersWithPayments(ordersList: OrderRow[]): Promise<OrderRo
   }
 }
 
+/**
+ * Enrichit les commandes locales avec les informations de leur client respectif
+ * (Essentiel en mode hors-ligne pour afficher immédiatement le nom du client dans les cartes)
+ */
+export async function enrichOrdersWithClients(ordersList: OrderRow[]): Promise<OrderRow[]> {
+  if (!ordersList || ordersList.length === 0) return ordersList;
+  try {
+    const missing = ordersList.filter((o) => !o.clients && o.client_id);
+    if (missing.length === 0) return ordersList;
+
+    const allClients = await getAllLocalItems<ClientRow>("clients");
+    const clientMap = new Map(allClients.map((c) => [c.id, c]));
+
+    return ordersList.map((ord) => {
+      if (ord.clients) return ord;
+      if (!ord.client_id) return ord;
+      const c = clientMap.get(ord.client_id);
+      if (c) {
+        return {
+          ...ord,
+          clients: {
+            id: c.id,
+            first_name: c.first_name,
+            last_name: c.last_name,
+            phone: c.phone,
+            whatsapp: c.whatsapp,
+            city: c.city,
+            notes: c.notes,
+            gender: c.gender,
+          },
+        };
+      }
+      if (ord.delivered_to) {
+        const parts = ord.delivered_to.trim().split(/\s+/);
+        return {
+          ...ord,
+          clients: {
+            id: ord.client_id,
+            first_name: parts[0] || "",
+            last_name: parts.slice(1).join(" ") || "",
+            phone: null,
+            whatsapp: null,
+            city: null,
+            notes: null,
+            gender: null,
+          },
+        };
+      }
+      return ord;
+    });
+  } catch {
+    return ordersList;
+  }
+}
+
 export async function fetchOrders(opts?: { clientId?: string }): Promise<OrderRow[]> {
   const businessId = await currentBusinessId();
 
@@ -321,13 +376,14 @@ export async function fetchOrders(opts?: { clientId?: string }): Promise<OrderRo
         const enriched = await enrichOrdersWithPayments(
           combined.filter((o) => !pendingOrderDeletes.has(o.id)),
         );
+        const fullyEnriched = await enrichOrdersWithClients(enriched);
         // Ne pas écraser tout le store quand on filtre par clientId
         if (!opts?.clientId) {
-          setLocalItems("orders", enriched).catch(() => {});
+          setLocalItems("orders", fullyEnriched).catch(() => {});
         } else {
-          enriched.forEach((order) => setLocalItem("orders", order).catch(() => {}));
+          fullyEnriched.forEach((order) => setLocalItem("orders", order).catch(() => {}));
         }
-        return enriched;
+        return fullyEnriched;
       }
     } catch {
       // Fallback IndexedDB
@@ -342,7 +398,8 @@ export async function fetchOrders(opts?: { clientId?: string }): Promise<OrderRo
     filtered = filtered.filter((o) => o.client_id === opts.clientId);
   }
   const enriched = await enrichOrdersWithPayments(filtered);
-  return enriched.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+  const fullyEnriched = await enrichOrdersWithClients(enriched);
+  return fullyEnriched.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
 }
 
 export async function fetchOrder(id: string): Promise<OrderRow | null> {
@@ -375,8 +432,9 @@ export async function fetchOrder(id: string): Promise<OrderRow | null> {
           // overlay is optional — IndexedDB failure must never block online path
         }
         const [enriched] = await enrichOrdersWithPayments([merged]);
-        setLocalItem("orders", enriched || merged).catch(() => {});
-        return enriched || merged;
+        const [fullyEnriched] = await enrichOrdersWithClients([enriched || merged]);
+        setLocalItem("orders", fullyEnriched || merged).catch(() => {});
+        return fullyEnriched || merged;
       }
     } catch {
       // Supabase failed — fall through to IndexedDB offline fallback
@@ -389,7 +447,8 @@ export async function fetchOrder(id: string): Promise<OrderRow | null> {
     const local = await getLocalItem<OrderRow>("orders", id);
     if (!local) return null;
     const [enriched] = await enrichOrdersWithPayments([local]);
-    return enriched || local;
+    const [fullyEnriched] = await enrichOrdersWithClients([enriched || local]);
+    return fullyEnriched || local;
   } catch {
     return null;
   }
@@ -1844,10 +1903,43 @@ export async function saveOrderOffline(
     existingOrder?.business_id ||
     (await currentBusinessId());
 
+  // Résolution robuste du client et de son nom pour affichage immédiat hors-ligne et persistance Supabase
+  let clientObj = (oData["clients"] as OrderRow["clients"]) || existingOrder?.clients;
+  const targetClientId = (oData["client_id"] as string) ?? existingOrder?.client_id ?? "";
+
+  if (!clientObj && targetClientId) {
+    try {
+      const c = await getLocalItem<ClientRow>("clients", targetClientId);
+      if (c) {
+        clientObj = {
+          id: c.id,
+          first_name: c.first_name,
+          last_name: c.last_name,
+          phone: c.phone,
+          whatsapp: c.whatsapp,
+          city: c.city,
+          notes: c.notes,
+          gender: c.gender,
+        };
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  const clientFullName = clientObj
+    ? `${clientObj.first_name || ""} ${clientObj.last_name || ""}`.trim()
+    : null;
+
+  const deliveredToVal =
+    oData["delivered_to"] !== undefined
+      ? (oData["delivered_to"] as string | null)
+      : (existingOrder?.delivered_to || clientFullName || null);
+
   const localOrder: OrderRow = {
     id: orderId,
     business_id: businessId,
-    client_id: (oData["client_id"] as string) ?? existingOrder?.client_id ?? "",
+    client_id: targetClientId,
     reference: (oData["reference"] as string) ?? existingOrder?.reference ?? `CMD-${Date.now().toString().slice(-4)}`,
     garment_type: (oData["garment_type"] as string) ?? existingOrder?.garment_type ?? "",
     fabric: oData["fabric"] !== undefined ? (oData["fabric"] as string | null) : (existingOrder?.fabric ?? null),
@@ -1863,10 +1955,10 @@ export async function saveOrderOffline(
     status: (oData["status"] as OrderStatus) ?? existingOrder?.status ?? "nouvelle",
     notes: oData["notes"] !== undefined ? (oData["notes"] as string | null) : (existingOrder?.notes ?? null),
     delivered_at: oData["delivered_at"] !== undefined ? (oData["delivered_at"] as string | null) : (existingOrder?.delivered_at ?? null),
-    delivered_to: oData["delivered_to"] !== undefined ? (oData["delivered_to"] as string | null) : (existingOrder?.delivered_to ?? null),
+    delivered_to: deliveredToVal,
     delivery_note: oData["delivery_note"] !== undefined ? (oData["delivery_note"] as string | null) : (existingOrder?.delivery_note ?? null),
     created_at: existingOrder?.created_at || new Date().toISOString(),
-    clients: existingOrder?.clients,
+    clients: clientObj,
     payments: existingOrder?.payments,
   };
 

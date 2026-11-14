@@ -214,8 +214,27 @@ async function processSyncItem(
         const targetId = idMapping.get(id) || id;
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const upsertData: Record<string, any> = { ...payload };
+        const cachedClients = upsertData["clients"];
         delete upsertData["clients"];
         delete upsertData["payments"];
+
+        // 1. Remapper client_id si le client a été créé hors-ligne avec un tempId !
+        if (upsertData["client_id"] && idMapping.has(upsertData["client_id"])) {
+          upsertData["client_id"] = idMapping.get(upsertData["client_id"]);
+        }
+
+        // 2. S'assurer que delivered_to contient le nom du client (visible directement sur Supabase)
+        if (!upsertData["delivered_to"] && upsertData["client_id"]) {
+          try {
+            const client = await getLocalItem<any>("clients", upsertData["client_id"]);
+            if (client) {
+              const cName = `${client.first_name || ""} ${client.last_name || ""}`.trim();
+              if (cName) {
+                upsertData["delivered_to"] = cName;
+              }
+            }
+          } catch {}
+        }
 
         if (targetId && !targetId.startsWith("temp_")) {
           upsertData["id"] = targetId;
@@ -231,7 +250,32 @@ async function processSyncItem(
         if (error) throw error;
         if (data) {
           if (id && id !== data.id) idMapping.set(id, data.id);
-          await setLocalItem("orders", data);
+          // Préserver l'objet client pour l'affichage immédiat dans les cartes hors-ligne
+          let resolvedClient = cachedClients;
+          if (!resolvedClient && data.client_id) {
+            try {
+              const c = await getLocalItem<any>("clients", data.client_id);
+              if (c) {
+                resolvedClient = {
+                  id: c.id,
+                  first_name: c.first_name,
+                  last_name: c.last_name,
+                  phone: c.phone,
+                  whatsapp: c.whatsapp,
+                  city: c.city,
+                  notes: c.notes,
+                  gender: c.gender,
+                };
+              }
+            } catch {}
+          }
+          const mergedOrder = {
+            ...payload,
+            ...data,
+            clients: resolvedClient,
+            delivered_to: data.delivered_to || upsertData["delivered_to"],
+          };
+          await setLocalItem("orders", mergedOrder);
           if (id && id.startsWith("temp_")) {
             await deleteLocalItem("orders", id);
           }
@@ -309,6 +353,11 @@ async function processSyncItem(
         const insertData: Record<string, any> = { ...payload };
         if (typeof insertData["id"] === "string" && insertData["id"].startsWith("temp_")) {
           delete insertData["id"];
+        }
+
+        // Remapper l'order_id si la commande liée a été créée hors-ligne avec un tempId
+        if (insertData["order_id"] && idMapping.has(insertData["order_id"])) {
+          insertData["order_id"] = idMapping.get(insertData["order_id"]);
         }
 
         // 1. S'assurer que business_id est toujours présent

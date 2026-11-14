@@ -88,7 +88,8 @@ function OrdersPage() {
       (o) =>
         o.reference.toLowerCase().includes(q) ||
         o.garment_type.toLowerCase().includes(q) ||
-        fullName(o.clients).toLowerCase().includes(q),
+        fullName(o.clients).toLowerCase().includes(q) ||
+        (o.delivered_to && o.delivered_to.toLowerCase().includes(q)),
     );
   }, [orders.data, filter, deferredTerm]);
 
